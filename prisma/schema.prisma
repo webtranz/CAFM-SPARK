@@ -659,6 +659,32 @@ model AuditLog {
   createdAt DateTime @default(now())
 }
 
+model BulkUploadJob {
+  id            String    @id @default(cuid())
+  module        String
+  fileName      String
+  fileSize      Int
+  totalRows     Int
+  processedRows Int       @default(0)
+  createdRows   Int       @default(0)
+  failedRows    Int       @default(0)
+  status        String    @default("QUEUED")
+  message       String?
+  failed        String?
+  entries       String?
+  result        String?
+  actorId       String?
+  actorName     String
+  role          String
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([module, createdAt])
+}
+
 model HousingProperty {
   id         String         @id @default(cuid())
   code       String         @unique

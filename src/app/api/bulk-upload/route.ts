@@ -15,6 +15,33 @@ type ImportResult = {
   displayName?: string;
 };
 
+type ImportEntry = ImportResult & { row: number; status: "SUCCESS" | "FAILED"; module: string; message?: string };
+type ImportFailure = { row: number; message: string };
+type BulkUploadUser = { id?: string; name?: string; email?: string; role?: string } | null;
+
+const BACKGROUND_ROW_THRESHOLD = 5000;
+const BULK_UPLOAD_CHUNK_SIZE = 500;
+
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const jobId = searchParams.get("jobId");
+    const { error } = await requireAnyPermission(["assets.manage", "work.manage", "requests.manage", "users.manage"]);
+    if (error) return error;
+
+    const job = jobId
+      ? await prisma.bulkUploadJob.findUnique({ where: { id: jobId } })
+      : await prisma.bulkUploadJob.findFirst({
+        where: { status: { in: ["QUEUED", "PROCESSING"] } },
+        orderBy: { createdAt: "desc" },
+      });
+
+    return NextResponse.json({ job: job ? serializeBulkUploadJob(job) : null });
+  } catch (error) {
+    return apiError(error, "Bulk upload progress could not be loaded");
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
@@ -28,33 +55,42 @@ export async function POST(request: Request) {
     }
 
     const rows = parseCsv(await file.text());
-    const failed: Array<{ row: number; message: string }> = [];
-    const entries: Array<ImportResult & { row: number; status: "SUCCESS" | "FAILED"; module: string; message?: string }> = [];
-    let created = 0;
 
-    for (const [index, row] of rows.entries()) {
-      const rowNumber = index + 2;
-      try {
-        const imported = await importRow(module, row);
-        entries.push({ row: rowNumber, status: "SUCCESS", module, ...imported });
-        created += 1;
-      } catch {
-        const message = "Import failed for this row.";
-        failed.push({ row: rowNumber, message });
-        entries.push({
-          row: rowNumber,
-          status: "FAILED",
+    if (rows.length > BACKGROUND_ROW_THRESHOLD) {
+      const job = await prisma.bulkUploadJob.create({
+        data: {
           module,
-          action: "SKIPPED",
-          recordType: module || "unknown",
-          recordKey: rowIdentifier(module, row),
-          displayName: rowDisplayName(row),
-          message,
-        });
-      }
+          fileName: file.name,
+          fileSize: file.size,
+          totalRows: rows.length,
+          status: "QUEUED",
+          message: "Bulk upload has been queued for background processing.",
+          actorId: user?.id || null,
+          actorName: user?.name || user?.email || "System",
+          role: user?.role || "System",
+        },
+      });
+
+      void processBulkUploadJob(job.id, module, rows, { name: file.name, size: file.size }, user);
+
+      return NextResponse.json({
+        jobId: job.id,
+        status: "QUEUED",
+        module,
+        fileName: file.name,
+        fileSize: file.size,
+        totalRows: rows.length,
+        processedRows: 0,
+        createdRows: 0,
+        failedRows: 0,
+        completion: 0,
+        startedAt: job.createdAt,
+        message: "Bulk upload has been queued for background processing.",
+      }, { status: 202 });
     }
 
-    const result = csvResponse(created, failed);
+    const { created, failed, entries, result } = await processRows(module, rows);
+
     await auditAction({
       user,
       action: "BULK_UPLOAD",
@@ -75,6 +111,151 @@ export async function POST(request: Request) {
   } catch (error) {
     return apiError(error, "Bulk upload failed");
   }
+}
+
+async function processRows(
+  module: string,
+  rows: Row[],
+  onProgress?: (progress: { processedRows: number; createdRows: number; failedRows: number; failed: ImportFailure[]; entries: ImportEntry[] }) => Promise<void>,
+) {
+  const failed: ImportFailure[] = [];
+  const entries: ImportEntry[] = [];
+  let created = 0;
+
+  for (const [index, row] of rows.entries()) {
+    const rowNumber = index + 2;
+    try {
+      const imported = await importRow(module, row);
+      entries.push({ row: rowNumber, status: "SUCCESS", module, ...imported });
+      created += 1;
+    } catch {
+      const message = "Import failed for this row.";
+      failed.push({ row: rowNumber, message });
+      entries.push({
+        row: rowNumber,
+        status: "FAILED",
+        module,
+        action: "SKIPPED",
+        recordType: module || "unknown",
+        recordKey: rowIdentifier(module, row),
+        displayName: rowDisplayName(row),
+        message,
+      });
+    }
+
+    const processedRows = index + 1;
+    if (onProgress && (processedRows % BULK_UPLOAD_CHUNK_SIZE === 0 || processedRows === rows.length)) {
+      await onProgress({ processedRows, createdRows: created, failedRows: failed.length, failed, entries });
+    }
+  }
+
+  return { created, failed, entries, result: csvResponse(created, failed) };
+}
+
+async function processBulkUploadJob(jobId: string, module: string, rows: Row[], file: { name: string; size: number }, user: BulkUploadUser) {
+  try {
+    await prisma.bulkUploadJob.update({
+      where: { id: jobId },
+      data: {
+        status: "PROCESSING",
+        startedAt: new Date(),
+        message: `Processing ${rows.length} rows in chunks of ${BULK_UPLOAD_CHUNK_SIZE}.`,
+      },
+    });
+
+    const { created, failed, entries, result } = await processRows(module, rows, async ({ processedRows, createdRows, failedRows }) => {
+      await prisma.bulkUploadJob.update({
+        where: { id: jobId },
+        data: {
+          processedRows,
+          createdRows,
+          failedRows,
+          message: `Processed ${processedRows} of ${rows.length} rows.`,
+        },
+      });
+    });
+
+    const completedStatus = failed.length ? "COMPLETED_WITH_ERRORS" : "COMPLETED";
+    await prisma.bulkUploadJob.update({
+      where: { id: jobId },
+      data: {
+        status: completedStatus,
+        processedRows: rows.length,
+        createdRows: created,
+        failedRows: failed.length,
+        failed: JSON.stringify(failed),
+        entries: JSON.stringify(entries),
+        result: JSON.stringify(result),
+        completedAt: new Date(),
+        message: result.message,
+      },
+    });
+
+    await auditAction({
+      user,
+      action: "BULK_UPLOAD",
+      entity: "bulk_upload",
+      entityId: module || "unknown",
+      details: {
+        module,
+        fileName: file.name,
+        fileSize: file.size,
+        totalRows: rows.length,
+        created,
+        failed,
+        entries,
+        result,
+        jobId,
+        background: true,
+        chunkSize: BULK_UPLOAD_CHUNK_SIZE,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Background bulk upload failed.";
+    await prisma.bulkUploadJob.update({
+      where: { id: jobId },
+      data: {
+        status: "FAILED",
+        completedAt: new Date(),
+        message,
+      },
+    }).catch(() => undefined);
+  }
+}
+
+function serializeBulkUploadJob(job: {
+  id: string;
+  module: string;
+  fileName: string;
+  fileSize: number;
+  totalRows: number;
+  processedRows: number;
+  createdRows: number;
+  failedRows: number;
+  status: string;
+  message: string | null;
+  startedAt: Date | null;
+  completedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  const completion = job.totalRows > 0 ? Math.min(100, Math.round((job.processedRows / job.totalRows) * 100)) : 0;
+  return {
+    id: job.id,
+    module: job.module,
+    fileName: job.fileName,
+    fileSize: job.fileSize,
+    totalRows: job.totalRows,
+    processedRows: job.processedRows,
+    createdRows: job.createdRows,
+    failedRows: job.failedRows,
+    status: job.status,
+    message: job.message,
+    completion,
+    startedAt: job.startedAt ?? job.createdAt,
+    completedAt: job.completedAt,
+    updatedAt: job.updatedAt,
+  };
 }
 
 function bulkUploadPermissions(module: string) {

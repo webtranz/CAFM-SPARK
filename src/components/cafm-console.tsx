@@ -110,14 +110,18 @@ type AuditEntry = {
 };
 
 type BulkUploadProgressState = {
+  jobId?: string;
   module: string;
   fileName: string;
   fileSize: number;
   totalRows: number;
   processedRows: number;
+  createdRows?: number;
+  failedRows?: number;
   completion: number;
-  status: "UPLOADING" | "PROCESSING" | "FINALIZING";
+  status: "UPLOADING" | "QUEUED" | "PROCESSING" | "FINALIZING" | "COMPLETED" | "COMPLETED_WITH_ERRORS" | "FAILED";
   startedAt: string;
+  updatedAt?: string;
   message: string;
 };
 
@@ -590,6 +594,52 @@ export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: st
     checkHealth();
   }, []);
 
+  useEffect(() => {
+    const jobId = bulkUploadProgress?.jobId;
+    if (!jobId) return;
+
+    const terminalStatuses = new Set(["COMPLETED", "COMPLETED_WITH_ERRORS", "FAILED"]);
+    let cancelled = false;
+    const pollJob = async () => {
+      try {
+        const response = await fetch(`/api/bulk-upload?jobId=${encodeURIComponent(jobId)}`, { cache: "no-store" });
+        const result = await response.json();
+        const job = result.job;
+        if (!response.ok || !job || cancelled) return;
+        if (terminalStatuses.has(job.status)) {
+          setBulkUploadProgress(null);
+          setToast(cleanMessage(job.message ?? (job.status === "FAILED" ? "Bulk upload failed." : "Bulk upload complete.")));
+          await refreshData();
+          return;
+        }
+        setBulkUploadProgress({
+          jobId: job.id,
+          module: job.module,
+          fileName: job.fileName,
+          fileSize: job.fileSize,
+          totalRows: job.totalRows,
+          processedRows: job.processedRows,
+          createdRows: job.createdRows,
+          failedRows: job.failedRows,
+          completion: job.completion,
+          status: job.status,
+          startedAt: job.startedAt,
+          updatedAt: job.updatedAt,
+          message: job.message ?? "Bulk upload is processing in the background.",
+        });
+      } catch {
+        // Keep the current progress visible; the next poll may recover.
+      }
+    };
+
+    void pollJob();
+    const interval = window.setInterval(pollJob, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [bulkUploadProgress?.jobId]);
+
   const permissionCodes = useMemo(() => {
     return new Set(records.rolePermissions.filter((item) => item.role === user.role).map((item) => item.permission.code));
   }, [records.rolePermissions, user.role]);
@@ -710,6 +760,24 @@ export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: st
       });
       setBulkUploadProgress((current) => current ? { ...current, processedRows: Math.max(0, Math.floor(totalRows * 0.7)), completion: 70, status: "PROCESSING", message: "Server is validating rows and creating records." } : current);
       const result = await response.json();
+      if (response.status === 202 && result.jobId) {
+        setBulkUploadProgress({
+          jobId: result.jobId,
+          module: result.module ?? module,
+          fileName: result.fileName ?? fileName,
+          fileSize: result.fileSize ?? fileSize,
+          totalRows: result.totalRows ?? totalRows,
+          processedRows: result.processedRows ?? 0,
+          createdRows: result.createdRows ?? 0,
+          failedRows: result.failedRows ?? 0,
+          completion: result.completion ?? 0,
+          status: result.status ?? "QUEUED",
+          startedAt: result.startedAt ?? startedAt,
+          message: result.message ?? "Bulk upload is processing in the background.",
+        });
+        setToast(cleanMessage(result.message ?? "Bulk upload is processing in the background."));
+        return;
+      }
       setBulkUploadProgress((current) => current ? { ...current, processedRows: totalRows, completion: 95, status: "FINALIZING", message: "Finalizing upload and refreshing audit logs." } : current);
       setToast(cleanMessage(result.message ?? (response.ok ? "Bulk upload complete." : "Bulk upload failed.")));
       await refreshData();
@@ -8643,6 +8711,12 @@ function BulkUploadProgress({ progress }: { progress: BulkUploadProgressState | 
             <ProgressStat label="Completion" value={progress.completion} suffix="%" tone="leaf" />
             <ProgressStat label="Remaining" value={Math.max(progress.totalRows - progress.processedRows, 0)} />
           </div>
+          {(progress.createdRows !== undefined || progress.failedRows !== undefined) && (
+            <div className="grid gap-3 md:grid-cols-2">
+              <ProgressStat label="Rows Created" value={progress.createdRows ?? 0} tone="leaf" />
+              <ProgressStat label="Rows Failed" value={progress.failedRows ?? 0} tone="coral" />
+            </div>
+          )}
 
           <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -8677,6 +8751,7 @@ function BulkUploadProgress({ progress }: { progress: BulkUploadProgressState | 
               <PreviewField label="File" value={progress.fileName} />
               <PreviewField label="File Size" value={formatBytes(progress.fileSize)} />
               <PreviewField label="Started At" value={formatDateCell(progress.startedAt)} />
+              {progress.updatedAt && <PreviewField label="Last Updated" value={formatDateCell(progress.updatedAt)} />}
               <PreviewField label="Status" value={friendlyAuditLabel(progress.status)} />
               <PreviewField label="Completion" value={`${progress.completion}%`} />
             </div>
