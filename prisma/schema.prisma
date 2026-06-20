@@ -515,17 +515,20 @@ model JobPlan {
 }
 
 model PreventiveMaintenance {
-  id          String   @id @default(cuid())
-  code        String   @unique(map: "ppm_plans_code_unique")
-  name        String
-  assetTag    String
-  frequency   String
-  nextDue     DateTime
-  durationHrs Decimal  @db.Decimal(6, 2)
-  checklist   String
-  active      Boolean  @default(true)
+  id             String   @id @default(cuid())
+  code           String   @unique(map: "ppm_plans_code_unique")
+  name           String
+  assetTag       String
+  locationCode   String   @default("")
+  departmentCode String   @default("")
+  priority       Priority @default(MEDIUM)
+  frequency      String
+  nextDue        DateTime
+  durationHrs    Decimal  @db.Decimal(6, 2)
+  checklist      String
+  active         Boolean  @default(true)
 
-  @@unique([assetTag, frequency, name], map: "ppm_plans_asset_frequency_name_unique")
+  @@unique([assetTag, locationCode, frequency, name], map: "ppm_plans_asset_location_frequency_name_unique")
 }
 
 model InventoryItem {

@@ -980,7 +980,7 @@ export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: st
               submitCategory={(formData) => postRecord("/api/asset-categories", formData, "Asset category")}
             />
           )}
-          {canViewActive && active === "ppm" && <Ppm ppms={records.ppms} assets={records.assets} workOrders={records.workOrders} saving={saving} isAdmin={isAdmin} submitPpm={(formData) => postRecord("/api/ppm", formData, "PPM")} updatePpm={(body) => patchRecord("/api/ppm", body, "PPM updated.")} deletePpm={(id) => deleteRecord(`/api/ppm?id=${encodeURIComponent(id)}`, "PPM deleted.")} />}
+          {canViewActive && active === "ppm" && <Ppm ppms={records.ppms} assets={records.assets} locations={records.locations} workOrders={records.workOrders} saving={saving} isAdmin={isAdmin} submitPpm={(formData) => postRecord("/api/ppm", formData, "PPM")} updatePpm={(body) => patchRecord("/api/ppm", body, "PPM updated.")} deletePpm={(id) => deleteRecord(`/api/ppm?id=${encodeURIComponent(id)}`, "PPM deleted.")} />}
           {canViewActive && active === "inventory" && <Inventory inventory={records.inventory} saving={saving} isAdmin={isAdmin} submitInventory={(formData) => postRecord("/api/inventory", formData, "Inventory item")} deleteInventory={(id) => deleteRecord(`/api/inventory?id=${encodeURIComponent(id)}`, "Inventory item deleted.")} />}
           {canViewActive && active === "hse" && <Hse inspections={records.inspections} saving={saving} isAdmin={isAdmin} submitInspection={(formData) => postRecord("/api/inspections", formData, "Inspection")} deleteInspection={(id) => deleteRecord(`/api/inspections?id=${encodeURIComponent(id)}`, "Inspection deleted.")} />}
           {canViewActive && active === "compliance" && (
@@ -4354,6 +4354,7 @@ function WorkExecutionForm({ work, inventory, onSubmit, saving }: { work: any; i
 function Ppm({
   ppms,
   assets,
+  locations,
   workOrders,
   submitPpm,
   updatePpm,
@@ -4363,6 +4364,7 @@ function Ppm({
 }: {
   ppms: any[];
   assets: any[];
+  locations: any[];
   workOrders: any[];
   submitPpm: (formData: FormData) => void;
   updatePpm: (body: Record<string, unknown>) => Promise<void> | void;
@@ -4377,7 +4379,8 @@ function Ppm({
   const [selectedPpmIds, setSelectedPpmIds] = useState<Set<string>>(new Set());
   const filtered = ppms.filter((ppm) => {
     const asset = assets.find((item) => item.tag === ppm.assetTag);
-    const haystack = `${ppm.code} ${ppm.name} ${ppm.assetTag} ${ppm.frequency} ${ppm.checklist} ${asset?.assetGroup || ""}`.toLowerCase();
+    const location = locations.find((item) => item.code === ppm.locationCode);
+    const haystack = `${ppm.code} ${ppm.name} ${ppm.assetTag} ${ppm.locationCode} ${ppm.departmentCode} ${ppm.frequency} ${ppm.checklist} ${asset?.assetGroup || ""} ${location?.description || ""}`.toLowerCase();
     const queryMatch = !search || haystack.includes(search.toLowerCase());
     const statusMatch = statusFilter === "All" || (statusFilter === "Active" ? ppm.active : !ppm.active);
     return queryMatch && statusMatch;
@@ -4454,7 +4457,7 @@ function Ppm({
               </div>
             )}
             <div className="cafm-scroll-x overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
-              <table className="cafm-data-table min-w-[1140px] border-collapse bg-white text-sm">
+              <table className="cafm-data-table min-w-[1280px] border-collapse bg-white text-sm">
                 <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                   <tr>
                     {isAdmin && (
@@ -4469,12 +4472,13 @@ function Ppm({
                         />
                       </th>
                     )}
-                    <th className="px-3 py-3">#</th><th className="px-3 py-3">Title</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Frequency</th><th className="px-3 py-3">Next Due</th><th className="px-3 py-3">Category</th><th className="px-3 py-3">Asset</th><th className="px-3 py-3">Actions</th>
+                    <th className="px-3 py-3">#</th><th className="px-3 py-3">Title</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Frequency</th><th className="px-3 py-3">Next Due</th><th className="px-3 py-3">Priority</th><th className="px-3 py-3">Department</th><th className="px-3 py-3">Asset</th><th className="px-3 py-3">Location</th><th className="px-3 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((ppm, index) => {
                   const asset = assets.find((item) => item.tag === ppm.assetTag);
+                  const location = locations.find((item) => item.code === ppm.locationCode);
                   return (
                     <tr key={ppm.id} onClick={() => setPreviewPpm(ppm)} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50">
                       {isAdmin && (
@@ -4492,8 +4496,10 @@ function Ppm({
                       <td className="px-3 py-3"><span className={`rounded-full border px-2 py-1 text-xs font-black ${ppm.active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>{ppm.active ? "Planned" : "Paused"}</span></td>
                       <td className="px-3 py-3">{ppm.frequency}</td>
                       <td className="px-3 py-3">{formatDateCell(ppm.nextDue)}</td>
-                      <td className="px-3 py-3">{asset?.assetGroup || asset?.category || "-"}</td>
-                      <td className="px-3 py-3 text-lagoon">{ppm.assetTag}</td>
+                      <td className="px-3 py-3"><RequestPriorityBadge priority={ppm.priority || "MEDIUM"} /></td>
+                      <td className="px-3 py-3">{ppm.departmentCode || asset?.departmentCode || "-"}</td>
+                      <td className="px-3 py-3 text-lagoon">{ppm.assetTag || "-"}</td>
+                      <td className="px-3 py-3"><p className="font-bold">{ppm.locationCode || asset?.locationCode || "-"}</p><p className="text-xs text-slate-500">{location?.description || asset?.locationDesc || ""}</p></td>
                       <td className="px-3 py-3">
                         <div className="flex gap-2">
                           <button type="button" onClick={(event) => { event.stopPropagation(); setPreviewPpm(ppm); }} className="rounded-lg bg-lagoon px-3 py-2 text-xs font-black text-white">Preview</button>
@@ -4517,7 +4523,7 @@ function Ppm({
                   {items.map((ppm) => (
                     <button key={ppm.id} type="button" onClick={() => setPreviewPpm(ppm)} className="rounded-lg bg-white p-2 text-left text-sm hover:bg-lagoon/10">
                       <p className="font-bold">{ppm.name}</p>
-                      <p className="text-slate-500">{ppm.assetTag} / {ppm.frequency}</p>
+                      <p className="text-slate-500">{ppm.assetTag || ppm.locationCode} / {ppm.frequency}</p>
                     </button>
                   ))}
                 </div>
@@ -4531,6 +4537,7 @@ function Ppm({
         <PmPreviewModal
           ppm={previewPpm}
           asset={assets.find((asset) => asset.tag === previewPpm.assetTag)}
+          location={locations.find((location) => location.code === previewPpm.locationCode)}
           workOrders={workOrders.filter((work) => work.asset?.tag === previewPpm.assetTag || work.assetTag === previewPpm.assetTag)}
           saving={saving}
           onClose={() => setPreviewPpm(null)}
@@ -4576,6 +4583,8 @@ function PpmCreateForm({ assets, onSubmit, saving }: { assets: any[]; onSubmit: 
             </option>
           ))}
         </select>
+        <input name="locationCode" value={selectedAsset?.locationCode || ""} readOnly placeholder="Linked location" className={`${TICKET_PLAN_FIELD_CLASS} bg-slate-50 text-slate-500`} />
+        <input name="departmentCode" value={selectedAsset?.departmentCode || ""} readOnly placeholder="Department" className={`${TICKET_PLAN_FIELD_CLASS} bg-slate-50 text-slate-500`} />
         {selectedAsset && (
           <div className="grid gap-1 rounded-lg bg-slate-50 p-3 text-xs font-bold text-slate-600">
             <span>Location: {selectedLocation || "-"}</span>
@@ -4592,6 +4601,13 @@ function PpmCreateForm({ assets, onSubmit, saving }: { assets: any[]; onSubmit: 
           <option>Semi Annual</option>
           <option>Annual</option>
         </select>
+        <input name="nextDue" type="date" className={TICKET_PLAN_FIELD_CLASS} />
+        <select name="priority" className={TICKET_PLAN_FIELD_CLASS}>
+          <option value="MEDIUM">Medium priority</option>
+          <option value="LOW">Low priority</option>
+          <option value="HIGH">High priority</option>
+          <option value="CRITICAL">Critical priority</option>
+        </select>
         <input name="durationHrs" type="number" min={0} step="0.5" placeholder="Duration hours" className={TICKET_PLAN_FIELD_CLASS} />
         <textarea name="checklist" placeholder="Checklist / preventive maintenance procedure" className={`${TICKET_PLAN_TEXTAREA_CLASS} min-h-28`} />
         <button disabled={saving} className="mt-2 flex h-11 items-center justify-center gap-2 rounded-lg bg-ink px-4 font-black text-white disabled:cursor-not-allowed disabled:bg-slate-400">
@@ -4606,6 +4622,7 @@ function PpmCreateForm({ assets, onSubmit, saving }: { assets: any[]; onSubmit: 
 function PmPreviewModal({
   ppm,
   asset,
+  location,
   workOrders,
   saving,
   onClose,
@@ -4613,6 +4630,7 @@ function PmPreviewModal({
 }: {
   ppm: any;
   asset?: any;
+  location?: any;
   workOrders: any[];
   saving: boolean;
   onClose: () => void;
@@ -4622,7 +4640,7 @@ function PmPreviewModal({
   const [tab, setTab] = useState<"comments" | "history">("history");
   const [quickForm, setQuickForm] = useState<"" | "procedure" | "part">("");
   const [quickValue, setQuickValue] = useState("");
-  const priority = ppm.durationHrs >= 8 ? "CRITICAL" : ppm.durationHrs >= 4 ? "HIGH" : "MEDIUM";
+  const priority = ppm.priority || (ppm.durationHrs >= 8 ? "CRITICAL" : ppm.durationHrs >= 4 ? "HIGH" : "MEDIUM");
   const historyData = workOrders.slice(0, 8).map((work) => ({
     name: String(formatDateCell(work.createdAt)).slice(0, 10),
     created: 1,
@@ -4664,8 +4682,10 @@ function PmPreviewModal({
           <PreviewField label="Work Type" value="Preventive" />
           <PreviewField label="Schedule" value={ppm.frequency} />
           <PreviewField label="Asset" value={ppm.assetTag} />
+          <PreviewField label="Location Code" value={ppm.locationCode || asset?.locationCode} />
+          <PreviewField label="Department" value={ppm.departmentCode || asset?.departmentCode} />
           <PreviewField label="Category" value={asset?.assetGroup || asset?.category} />
-          <PreviewField label="Location" value={[asset?.buildingCode, asset?.floor, asset?.room].filter(Boolean).join(" / ")} />
+          <PreviewField label="Location" value={location?.description || asset?.locationDesc || [asset?.buildingCode, asset?.floor, asset?.room].filter(Boolean).join(" / ")} />
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-4">
           <div className="flex items-center justify-between gap-3">
@@ -6300,6 +6320,7 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
               <option value="inventory">Inventory</option>
               <option value="requests">Service Requests</option>
               <option value="workOrders">Work Orders</option>
+              <option value="ppm">PPM Schedule</option>
               <option value="jobPlans">Job Plans</option>
               <option value="locations">Locations</option>
               <option value="inspections">Inspections</option>
@@ -6336,6 +6357,7 @@ function Templates() {
     ["inventory", "Inventory", "sku,name,category,unit,onHand,reorderPoint,unitCost,vendor,location"],
     ["requests", "Requests", "ticketNo,title,category,departmentCode,serviceCode,assignedTeamCode,requester,channel,priority,status,location,attachmentUrls,rejectionReason,slaHours,description"],
     ["workOrders", "Work Orders", "woNo,title,type,assetType,departmentCode,serviceCode,assignedTeamCode,jobPlanCode,priority,status,assetTag,plannedStart,dueAt,finishedAt,resolutionAt,dateTimeCreated,estimatedHours,actualHours,cost,jobPlan,safetyNotes,workNotes,materialRequest,photoUrls,assetsUsed,inventoryUsed,supervisorDecision,sourceYear,sourceWorkOrder,sourceServiceRequest,sourceEquipmentLocation,sourceLocation,matchSource"],
+    ["ppm", "PPM Schedule", "code,name,assetTag,locationCode,frequency,nextDue,durationHrs,departmentCode,priority,checklist,active"],
     ["jobPlans", "Job Plans", "code,name,assetType,departmentCode,serviceCode,estimatedHours,priority,steps,safetyNotes"],
     ["locations", "Locations", "Location,Description,Class,Parent Location,Out of Service,Residential"],
     ["inspections", "Inspections", "code,title,area,inspector,risk,score,status,dueAt,findings"],

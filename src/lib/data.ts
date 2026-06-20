@@ -131,7 +131,8 @@ export async function getOperatingData(user: OperatingUser = null) {
     ]);
 
     const visibleAssetTags = new Set(assets.map((asset) => asset.tag));
-    const scopedPpms = kind === "admin" ? ppms : ppms.filter((ppm) => visibleAssetTags.has(ppm.assetTag));
+    const visibleLocationCodes = new Set(locations.map((location) => location.code));
+    const scopedPpms = kind === "admin" ? ppms : ppms.filter((ppm) => visibleAssetTags.has(ppm.assetTag) || visibleLocationCodes.has(ppm.locationCode));
 
     const housing =
       kind === "admin" || kind === "readonly"

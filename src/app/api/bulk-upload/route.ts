@@ -78,6 +78,7 @@ export async function POST(request: Request) {
 }
 
 function bulkUploadPermissions(module: string) {
+  if (module === "ppm") return ["ppm.manage", "assets.manage"];
   if (module === "workOrders") return ["work.manage", "assets.manage"];
   if (module === "requests") return ["requests.manage"];
   if (["teams", "services", "departments", "employees"].includes(module)) return ["users.manage", "requests.manage"];
@@ -101,6 +102,7 @@ async function importRow(module: string, row: Row) {
   if (module === "inspections") return importInspection(row);
   if (module === "locations") return importLocation(row);
   if (module === "jobPlans") return importJobPlan(row);
+  if (module === "ppm") return importPpm(row);
   throw new Error(`Unsupported module: ${module}`);
 }
 
@@ -583,6 +585,44 @@ async function importJobPlan(row: Row) {
   return importResult("job_plan", "UPSERT", jobPlan, code, jobPlan.name);
 }
 
+async function importPpm(row: Row) {
+  const baseCode = required(row, "code", "PPM CODE", "ppmCode");
+  const rawAssetTag = value(row, "assetTag", "asset", "assetCode", "EQUIPMENTNO", "OBJECT (ASSET/LOCATION)");
+  const rawLocationCode = value(row, "locationCode", "location", "Location", "LOCATION", "OBJECTS LOCATIONS");
+  const assetTag = rawAssetTag && !rawAssetTag.startsWith("L-") ? rawAssetTag : "";
+  const inputLocationCode = rawLocationCode || (rawAssetTag.startsWith("L-") ? rawAssetTag : "");
+  const asset = assetTag ? await prisma.asset.findUnique({ where: { tag: assetTag } }) : null;
+  const locationCode = inputLocationCode || asset?.locationCode || "";
+  const location = locationCode ? await prisma.location.findUnique({ where: { code: locationCode } }) : null;
+
+  if (assetTag && !asset) throw new Error(`Asset not found for PPM: ${assetTag}`);
+  if (locationCode && !location && !asset?.locationCode) throw new Error(`Location not found for PPM: ${locationCode}`);
+  if (!assetTag && !locationCode) throw new Error("assetTag or locationCode is required");
+
+  const targetKey = assetTag || locationCode;
+  const code = value(row, "uniqueCode") || uniquePpmCode(baseCode, targetKey);
+  const nextDue = optionalDate(value(row, "nextDue", "DUE DATE", "dueAt")) || addDays(new Date(), 7);
+  const activeValue = value(row, "active");
+  const data = {
+    name: value(row, "name", "PPM DESCRIPTION", "description") || baseCode,
+    assetTag: assetTag || "",
+    locationCode,
+    departmentCode: value(row, "departmentCode", "DEPARTMENT", "DEPARTMENT ") || asset?.departmentCode || "",
+    priority: priority(value(row, "priority", "OBJECT CRITICALITY")),
+    frequency: value(row, "frequency", "FREQUENCY") || "Monthly",
+    nextDue,
+    durationHrs: number(value(row, "durationHrs", "duration", "PPA_DURATION"), 2),
+    checklist: value(row, "checklist", "ACTIVITY CHECKLIST", "steps") || "Checklist to be defined.",
+    active: activeValue ? yesNo(activeValue, true) : true,
+  };
+  const ppm = await prisma.preventiveMaintenance.upsert({
+    where: { code },
+    update: data,
+    create: { code, ...data },
+  });
+  return importResult("preventive_maintenance", "UPSERT", ppm, code, data.name);
+}
+
 function importResult(recordType: string, action: string, record: { id?: string } | null | undefined, recordKey?: string, displayName?: string): ImportResult {
   return {
     action,
@@ -594,7 +634,7 @@ function importResult(recordType: string, action: string, record: { id?: string 
 }
 
 function rowIdentifier(module: string, row: Row) {
-  return value(row, "tag", "Asset Code", "Housing Asset Code", "EQUIPMENTNO", "ASSET NUMBER", "sku", "ticketNo", "woNo", "code", "Location", "companyId", "email") || module || "unknown";
+  return value(row, "tag", "Asset Code", "Housing Asset Code", "EQUIPMENTNO", "ASSET NUMBER", "sku", "ticketNo", "woNo", "code", "Location", "locationCode", "assetTag", "companyId", "email") || module || "unknown";
 }
 
 function rowDisplayName(row: Row) {
@@ -700,6 +740,12 @@ function value(row: Row, ...keys: string[]) {
     if (found !== undefined && found !== null && String(found).trim() !== "") return String(found).trim();
   }
   return "";
+}
+
+function uniquePpmCode(baseCode: string, targetKey: string) {
+  const normalizedTarget = targetKey.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const normalizedBase = baseCode.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return `${normalizedBase || "PPM"}-${normalizedTarget || "TARGET"}`.slice(0, 120);
 }
 
 function number(value: string | undefined, fallback: number) {
