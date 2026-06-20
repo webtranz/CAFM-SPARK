@@ -109,6 +109,18 @@ type AuditEntry = {
   [key: string]: any;
 };
 
+type BulkUploadProgressState = {
+  module: string;
+  fileName: string;
+  fileSize: number;
+  totalRows: number;
+  processedRows: number;
+  completion: number;
+  status: "UPLOADING" | "PROCESSING" | "FINALIZING";
+  startedAt: string;
+  message: string;
+};
+
 type ActionPermissions = {
   manageRequests: boolean;
   approveRequests: boolean;
@@ -269,6 +281,7 @@ const moduleGroups: ModuleGroup[] = [
     icon: Activity,
     items: [
       { id: "audit", label: "Audit Logs", icon: Activity },
+      { id: "audit", label: "Bulk Upload Progress", icon: Upload, view: "bulk-upload-progress" },
       { id: "reports", label: "Reports Preview", icon: ClipboardCheck },
     ],
   },
@@ -571,6 +584,7 @@ export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: st
   const [saving, setSaving] = useState(false);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [bulkUploadProgress, setBulkUploadProgress] = useState<BulkUploadProgressState | null>(null);
 
   useEffect(() => {
     checkHealth();
@@ -661,14 +675,51 @@ export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: st
 
   async function bulkUpload(formData: FormData) {
     setSaving(true);
-    const response = await fetch("/api/bulk-upload", {
-      method: "POST",
-      body: formData,
+    const module = String(formData.get("module") || "bulk upload");
+    const file = formData.get("file");
+    const startedAt = new Date().toISOString();
+    let totalRows = 0;
+    let fileName = "CSV upload";
+    let fileSize = 0;
+
+    if (file instanceof File) {
+      fileName = file.name;
+      fileSize = file.size;
+      totalRows = countCsvDataRows(await file.text());
+    }
+
+    if (canOpenModule("audit")) {
+      navigate("audit", "Activity Logs-Bulk Upload Progress", "bulk-upload-progress");
+    }
+    setBulkUploadProgress({
+      module,
+      fileName,
+      fileSize,
+      totalRows,
+      processedRows: 0,
+      completion: 10,
+      status: "UPLOADING",
+      startedAt,
+      message: "Uploading CSV file to the server.",
     });
-    const result = await response.json();
-    setToast(cleanMessage(result.message ?? (response.ok ? "Bulk upload complete." : "Bulk upload failed.")));
-    await refreshData();
-    setSaving(false);
+
+    try {
+      const response = await fetch("/api/bulk-upload", {
+        method: "POST",
+        body: formData,
+      });
+      setBulkUploadProgress((current) => current ? { ...current, processedRows: Math.max(0, Math.floor(totalRows * 0.7)), completion: 70, status: "PROCESSING", message: "Server is validating rows and creating records." } : current);
+      const result = await response.json();
+      setBulkUploadProgress((current) => current ? { ...current, processedRows: totalRows, completion: 95, status: "FINALIZING", message: "Finalizing upload and refreshing audit logs." } : current);
+      setToast(cleanMessage(result.message ?? (response.ok ? "Bulk upload complete." : "Bulk upload failed.")));
+      await refreshData();
+      setBulkUploadProgress(null);
+    } catch (error) {
+      setToast(cleanMessage(error instanceof Error ? error.message : "Bulk upload failed."));
+      setBulkUploadProgress(null);
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function patchRecord(path: string, body: Record<string, unknown>, successLabel: string) {
@@ -1076,7 +1127,7 @@ export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: st
             />
           )}
           {canViewActive && active === "reports" && <Reports />}
-          {canViewActive && active === "audit" && <AuditLogs logs={records.auditLogs ?? []} />}
+          {canViewActive && active === "audit" && (activeView === "bulk-upload-progress" ? <BulkUploadProgress progress={bulkUploadProgress} /> : <AuditLogs logs={records.auditLogs ?? []} />)}
           {canViewActive && active === "resource" && (
             <ResourceManagement
               employees={records.employees}
@@ -8554,6 +8605,76 @@ function Reports() {
   );
 }
 
+function BulkUploadProgress({ progress }: { progress: BulkUploadProgressState | null }) {
+  return (
+    <Panel title="Bulk Upload Progress" icon={Upload}>
+      {!progress ? (
+        <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+          <p className="font-black text-ink">No bulk upload is currently in progress</p>
+          <p className="mt-1 text-sm font-bold text-slate-500">This page only shows live upload progress. Completed upload details are available under Activity Logs &gt; Audit Logs.</p>
+        </div>
+      ) : (
+        <div className="grid gap-5">
+          <div className="grid gap-3 md:grid-cols-4">
+            <ProgressStat label="Estimated Rows" value={progress.totalRows} />
+            <ProgressStat label="Rows Processed" value={progress.processedRows} />
+            <ProgressStat label="Completion" value={progress.completion} suffix="%" tone="leaf" />
+            <ProgressStat label="Remaining" value={Math.max(progress.totalRows - progress.processedRows, 0)} />
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-black uppercase text-slate-400">Current Upload</p>
+                <h3 className="mt-1 text-xl font-black text-ink">{friendlyAuditLabel(progress.module)}</h3>
+                <p className="mt-1 text-sm font-bold text-slate-600">{progress.fileName} - started {formatDateCell(progress.startedAt)}</p>
+              </div>
+              <span className="rounded-full bg-lagoon/10 px-3 py-1 text-xs font-black text-lagoon">
+                {friendlyAuditLabel(progress.status)}
+              </span>
+            </div>
+
+            <div className="mt-5">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-black text-slate-700">Completion</p>
+                <p className="text-2xl font-black text-ink">{progress.completion}%</p>
+              </div>
+              <div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-100">
+                <div className="h-full rounded-full bg-leaf transition-all" style={{ width: `${progress.completion}%` }} />
+              </div>
+              <p className="mt-2 text-sm font-bold text-slate-600">
+                {progress.message}
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h4 className="font-black text-ink">Live Upload Details</h4>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              <PreviewField label="Module" value={friendlyAuditLabel(progress.module)} />
+              <PreviewField label="File" value={progress.fileName} />
+              <PreviewField label="File Size" value={formatBytes(progress.fileSize)} />
+              <PreviewField label="Started At" value={formatDateCell(progress.startedAt)} />
+              <PreviewField label="Status" value={friendlyAuditLabel(progress.status)} />
+              <PreviewField label="Completion" value={`${progress.completion}%`} />
+            </div>
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function ProgressStat({ label, value, suffix = "", tone = "slate" }: { label: string; value: number; suffix?: string; tone?: "slate" | "leaf" | "coral" }) {
+  const color = tone === "leaf" ? "text-leaf" : tone === "coral" ? "text-coral" : "text-ink";
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-sm font-black uppercase text-slate-400">{label}</p>
+      <p className={`mt-2 text-3xl font-black ${color}`}>{value}{suffix}</p>
+    </div>
+  );
+}
+
 function AuditLogs({ logs }: { logs: any[] }) {
   const [selectedLog, setSelectedLog] = useState<any | null>(null);
 
@@ -8767,6 +8888,18 @@ function formatAuditValue(value: any): string {
   if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? "" : "s"}`;
   if (typeof value === "object") return value.name || value.email || value.id || JSON.stringify(value);
   return String(value);
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "-";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function countCsvDataRows(value: string): number {
+  const rows = value.split(/\r?\n/).filter((row) => row.trim().length > 0);
+  return Math.max(rows.length - 1, 0);
 }
 
 function downloadAuditEntries(log: any, entries: AuditEntry[]) {
