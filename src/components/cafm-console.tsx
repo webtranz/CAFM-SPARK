@@ -120,6 +120,17 @@ type ActionPermissions = {
 type ModuleItem = { id: string; label: string; icon: LucideIcon; view?: string };
 type ModuleGroup = { label: string; icon: LucideIcon; items: ModuleItem[]; flat?: boolean };
 
+function BrandLogoMark({ size = "md" }: { size?: "sm" | "md" }) {
+  const boxClass = size === "sm" ? "h-9 w-9 rounded-lg" : "h-12 w-12 rounded-xl";
+  const imageSize = size === "sm" ? 36 : 48;
+
+  return (
+    <div className={`grid ${boxClass} place-items-center overflow-hidden border border-amber-200 bg-white p-1 shadow-sm`}>
+      <Image src="/tafga.png" alt="Tamimi Global CAFM logo" width={imageSize} height={imageSize} className="h-full w-full object-contain" priority />
+    </div>
+  );
+}
+
 const moduleGroups: ModuleGroup[] = [
   {
     label: "Dashboard",
@@ -740,10 +751,9 @@ export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: st
     <main className="cafm-shell h-screen overflow-hidden bg-slate-50 text-ink">
       <header className="fixed left-0 right-0 top-0 z-40 flex h-16 items-center justify-between border-b border-slate-100 bg-white px-4 lg:hidden">
         <div className="flex items-center gap-2">
-          <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-lg border border-amber-200 bg-white p-1 shadow-sm">
-            <Image src="/tafga.png" alt="Tamimi Global CAFM logo" width={36} height={36} className="h-full w-full object-contain" priority />
-          </div>
+          <BrandLogoMark size="sm" />
           <div className="leading-tight">
+            <span className="mb-1 hidden w-fit border border-coral px-2 py-0.5 text-[9px] font-medium uppercase leading-none tracking-normal text-coral sm:block">Production System</span>
             <span className="block text-sm font-bold text-slate-900">Tamimi Global</span>
             <span className="block text-[10px] text-slate-500">CAFM system</span>
           </div>
@@ -763,14 +773,17 @@ export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: st
       <section className="h-screen min-w-0 overflow-hidden lg:pl-72">
         <aside className={`${mobileMenuOpen ? "fixed flex flex-col" : "hidden"} inset-y-0 left-0 z-50 w-72 overflow-y-auto border-r border-slate-100 bg-white scrollbar-thin lg:fixed lg:flex lg:w-72 lg:flex-col`}>
           <div className="border-b border-slate-100 p-6">
+            <div className="mb-3 ml-[60px] w-[122px] border border-coral py-1 text-center text-[10px] font-medium uppercase leading-none tracking-normal text-coral">Production System</div>
             <div className="flex items-center gap-3">
-              <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-xl border border-amber-200 bg-white p-1 shadow-sm">
-                <Image src="/tafga.png" alt="Tamimi Global CAFM logo" width={48} height={48} className="h-full w-full object-contain" priority />
-              </div>
+              <BrandLogoMark />
               <div>
                 <h1 className="text-lg font-bold leading-tight text-slate-900">Tamimi Global</h1>
                 <p className="text-xs text-slate-500">CAFM system</p>
               </div>
+            </div>
+            <div className="mt-3 pl-[60px] font-['Arial_Narrow','Aptos_Narrow','Arial',sans-serif] font-bold leading-tight tracking-normal text-slate-950">
+              <p className="text-[9px] uppercase">FADHILI BACHELOR CAMP AND GSRC</p>
+              <p className="text-[8px]">Contract # 6601019711</p>
             </div>
           </div>
 
