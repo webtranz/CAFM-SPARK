@@ -5918,7 +5918,11 @@ function DocumentManagement({
         size: formatFileSize(document.fileSize),
       };
     });
-  const manualRows = [
+  const uploadedCount = (category: string) => documentUploads.filter((document) => document.category === category).length;
+  const manualCount = uploadedCount("OM_MANUAL") + assets.filter((asset) => asset.assetDescription || asset.name || asset.tag).length;
+  const warrantyCount = uploadedCount("WARRANTY_GUARANTEE") + assets.length + complianceCertificates.length;
+  const contractCount = uploadedCount("SUPPORT_CONTRACT_SLA") + services.length + workOrders.filter((work) => work.serviceCode || work.assignedTeamCode).length;
+  const buildManualRows = () => [
     ...uploadedRows("OM_MANUAL", "O&M Manual"),
     ...assets
     .map((asset) => ({
@@ -5936,7 +5940,7 @@ function DocumentManagement({
     }))
     .filter((row) => row.title || row.reference),
   ];
-  const warrantyRows = [
+  const buildWarrantyRows = () => [
     ...uploadedRows("WARRANTY_GUARANTEE", "Warranty / Guarantee"),
     ...assets.map((asset) => ({
       id: `asset-${asset.id}`,
@@ -5965,7 +5969,7 @@ function DocumentManagement({
       size: "-",
     })),
   ];
-  const contractRows = [
+  const buildContractRows = () => [
     ...uploadedRows("SUPPORT_CONTRACT_SLA", "Support Contract / SLA"),
     ...services.map((service) => ({
       id: `service-${service.id}`,
@@ -5997,9 +6001,9 @@ function DocumentManagement({
       })),
   ];
   const tabs = [
-    ["documents-om-manuals", "Operation & Maintenance Manuals", "OM_MANUAL", manualRows.length],
-    ["documents-warranties", "Equipment Warranties and Guarantees", "WARRANTY_GUARANTEE", warrantyRows.length],
-    ["documents-contracts-slas", "Support Contracts and SLAs", "SUPPORT_CONTRACT_SLA", contractRows.length],
+    ["documents-om-manuals", "Operation & Maintenance Manuals", "OM_MANUAL", manualCount],
+    ["documents-warranties", "Equipment Warranties and Guarantees", "WARRANTY_GUARANTEE", warrantyCount],
+    ["documents-contracts-slas", "Support Contracts and SLAs", "SUPPORT_CONTRACT_SLA", contractCount],
   ] as const;
   const activeCategory = tabs.find(([id]) => id === tab)?.[2] ?? "OM_MANUAL";
 
@@ -6025,8 +6029,8 @@ function DocumentManagement({
         {canUploadDocuments && <DocumentUploadForm assets={assets} category={activeCategory} refreshData={refreshData} />}
         <div className="mt-5">
           {tab === "documents-om-manuals" && (
-            <DocumentRowsTable
-              rows={manualRows}
+            <ScrollableRowsTable
+              rows={buildManualRows()}
               columns={[
                 ["documentType", "Document Type"],
                 ["reference", "Asset Code"],
@@ -6046,8 +6050,8 @@ function DocumentManagement({
             />
           )}
           {tab === "documents-warranties" && (
-            <DocumentRowsTable
-              rows={warrantyRows}
+            <ScrollableRowsTable
+              rows={buildWarrantyRows()}
               columns={[
                 ["documentType", "Document Type"],
                 ["reference", "Reference"],
@@ -6067,8 +6071,8 @@ function DocumentManagement({
             />
           )}
           {tab === "documents-contracts-slas" && (
-            <DocumentRowsTable
-              rows={contractRows}
+            <ScrollableRowsTable
+              rows={buildContractRows()}
               columns={[
                 ["documentType", "Document Type"],
                 ["reference", "Reference"],
@@ -6093,7 +6097,7 @@ function DocumentManagement({
   );
 }
 
-function DocumentRowsTable({
+function ScrollableRowsTable({
   rows,
   columns,
   actions,
@@ -6429,7 +6433,7 @@ function TeamsServices({
         {showAll && (
           <Panel title="Asset Categories" icon={Boxes}>
             <ReportButtons type="asset-categories" label="Categories report" />
-            <DataTable rows={categories} columns={[["code", "Code"], ["name", "Category"], ["type", "Type"], ["defaultLifeYrs", "Life yrs"], ["statutory", "Statutory"]]} actions={isAdmin ? (row) => <DeleteRowButton saving={saving} onDelete={() => deleteCategory(row.id)} /> : undefined} bulkSelectable={isAdmin} bulkLabel="categories" onBulkDelete={async (rows) => { await Promise.all(rows.map((row) => deleteCategory(row.id))); }} />
+            <ScrollableRowsTable rows={categories} columns={[["code", "Code"], ["name", "Category"], ["type", "Type"], ["defaultLifeYrs", "Life yrs"], ["statutory", "Statutory"]]} actions={isAdmin ? (row) => <DeleteRowButton saving={saving} onDelete={() => deleteCategory(row.id)} /> : undefined} bulkSelectable={isAdmin} bulkLabel="categories" onBulkDelete={async (rows) => { await Promise.all(rows.map((row) => deleteCategory(row.id))); }} />
           </Panel>
         )}
       </div>
@@ -6527,17 +6531,17 @@ function AssetHierarchySetup({
       <div className="space-y-5">
         {showSites && (
           <Panel title="Sites" icon={MapPinned}>
-            <DataTable rows={siteRows} columns={[["name", "Site"], ["city", "City"], ["country", "Country"], ["type", "Type"], ["areaSqm", "Area sqm"], ["buildingCount", "Buildings"]]} />
+            <ScrollableRowsTable rows={siteRows} columns={[["name", "Site"], ["city", "City"], ["country", "Country"], ["type", "Type"], ["areaSqm", "Area sqm"], ["buildingCount", "Buildings"]]} />
           </Panel>
         )}
         {showBuildings && (
           <Panel title="Buildings" icon={Building2}>
-            <DataTable rows={buildingRows} columns={[["code", "Code"], ["name", "Building"], ["siteName", "Site"], ["floors", "Floors"], ["areaSqm", "Area sqm"]]} />
+            <ScrollableRowsTable rows={buildingRows} columns={[["code", "Code"], ["name", "Building"], ["siteName", "Site"], ["floors", "Floors"], ["areaSqm", "Area sqm"]]} />
           </Panel>
         )}
         {showSpaces && (
           <Panel title="Spaces" icon={Boxes}>
-            <DataTable rows={spaceRows} columns={[["name", "Space"], ["buildingCode", "Building"], ["floor", "Floor"], ["type", "Type"], ["capacity", "Capacity"], ["areaSqm", "Area sqm"], ["occupancy", "Occupancy"]]} />
+            <ScrollableRowsTable rows={spaceRows} columns={[["name", "Space"], ["buildingCode", "Building"], ["floor", "Floor"], ["type", "Type"], ["capacity", "Capacity"], ["areaSqm", "Area sqm"], ["occupancy", "Occupancy"]]} />
           </Panel>
         )}
         {showDepartments && (
@@ -6547,7 +6551,7 @@ function AssetHierarchySetup({
         )}
         {showCategories && (
           <Panel title="Asset Categories" icon={PackagePlus}>
-            <DataTable rows={categories} columns={[["code", "Code"], ["name", "Category"], ["type", "Type"], ["defaultLifeYrs", "Life yrs"], ["statutory", "Statutory"], ["description", "Description"]]} />
+            <ScrollableRowsTable rows={categories} columns={[["code", "Code"], ["name", "Category"], ["type", "Type"], ["defaultLifeYrs", "Life yrs"], ["statutory", "Statutory"], ["description", "Description"]]} />
           </Panel>
         )}
       </div>
