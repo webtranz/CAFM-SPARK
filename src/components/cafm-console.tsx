@@ -63,6 +63,7 @@ type ConsoleData = {
   services: any[];
   categories: any[];
   ppms: any[];
+  ppmsTotal?: number;
   users: any[];
   permissions: any[];
   departments: any[];
@@ -70,6 +71,7 @@ type ConsoleData = {
   rolePermissions: any[];
   locations: any[];
   jobPlans: any[];
+  jobPlansTotal?: number;
   roles: any[];
   auditLogs: any[];
   complianceCertificates: any[];
@@ -1081,7 +1083,7 @@ export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: st
               saving={saving}
             />
           )}
-          {canViewActive && active === "jobPlans" && <JobPlans jobPlans={records.jobPlans} services={records.services} departments={records.departments} saving={saving} isAdmin={isAdmin} submitJobPlan={(formData) => postRecord("/api/job-plans", formData, "Job plan")} deleteJobPlan={(id) => deleteRecord(`/api/job-plans?id=${encodeURIComponent(id)}`, "Job plan deleted.")} />}
+          {canViewActive && active === "jobPlans" && <JobPlans jobPlans={records.jobPlans} jobPlansTotal={records.jobPlansTotal} services={records.services} departments={records.departments} saving={saving} isAdmin={isAdmin} submitJobPlan={(formData) => postRecord("/api/job-plans", formData, "Job plan")} deleteJobPlan={(id) => deleteRecord(`/api/job-plans?id=${encodeURIComponent(id)}`, "Job plan deleted.")} />}
           {canViewActive && active === "locations" && <Locations locations={records.locations} saving={saving} isAdmin={isAdmin} submitLocation={(formData) => postRecord("/api/locations", formData, "Location")} deleteLocation={(id) => deleteRecord(`/api/locations/${id}`, "Location deleted.")} />}
           {canViewActive && active === "assetSetup" && (
             <AssetHierarchySetup
@@ -1099,7 +1101,7 @@ export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: st
               submitCategory={(formData) => postRecord("/api/asset-categories", formData, "Asset category")}
             />
           )}
-          {canViewActive && active === "ppm" && <Ppm ppms={records.ppms} assets={records.assets} locations={records.locations} workOrders={records.workOrders} saving={saving} isAdmin={isAdmin} submitPpm={(formData) => postRecord("/api/ppm", formData, "PPM")} updatePpm={(body) => patchRecord("/api/ppm", body, "PPM updated.")} deletePpm={(id) => deleteRecord(`/api/ppm?id=${encodeURIComponent(id)}`, "PPM deleted.")} />}
+          {canViewActive && active === "ppm" && <Ppm ppms={records.ppms} ppmsTotal={records.ppmsTotal} assets={records.assets} locations={records.locations} workOrders={records.workOrders} saving={saving} isAdmin={isAdmin} submitPpm={(formData) => postRecord("/api/ppm", formData, "PPM")} updatePpm={(body) => patchRecord("/api/ppm", body, "PPM updated.")} deletePpm={(id) => deleteRecord(`/api/ppm?id=${encodeURIComponent(id)}`, "PPM deleted.")} />}
           {canViewActive && active === "inventory" && <Inventory inventory={records.inventory} saving={saving} isAdmin={isAdmin} submitInventory={(formData) => postRecord("/api/inventory", formData, "Inventory item")} deleteInventory={(id) => deleteRecord(`/api/inventory?id=${encodeURIComponent(id)}`, "Inventory item deleted.")} />}
           {canViewActive && active === "hse" && <Hse inspections={records.inspections} saving={saving} isAdmin={isAdmin} submitInspection={(formData) => postRecord("/api/inspections", formData, "Inspection")} deleteInspection={(id) => deleteRecord(`/api/inspections?id=${encodeURIComponent(id)}`, "Inspection deleted.")} />}
           {canViewActive && active === "compliance" && (
@@ -4472,6 +4474,7 @@ function WorkExecutionForm({ work, inventory, onSubmit, saving }: { work: any; i
 
 function Ppm({
   ppms,
+  ppmsTotal,
   assets,
   locations,
   workOrders,
@@ -4482,6 +4485,7 @@ function Ppm({
   saving,
 }: {
   ppms: any[];
+  ppmsTotal?: number;
   assets: any[];
   locations: any[];
   workOrders: any[];
@@ -4496,26 +4500,74 @@ function Ppm({
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [selectedPpmIds, setSelectedPpmIds] = useState<Set<string>>(new Set());
-  const filtered = ppms.filter((ppm) => {
-    const asset = assets.find((item) => item.tag === ppm.assetTag);
-    const location = locations.find((item) => item.code === ppm.locationCode);
-    const haystack = `${ppm.code} ${ppm.name} ${ppm.assetTag} ${ppm.locationCode} ${ppm.departmentCode} ${ppm.frequency} ${ppm.checklist} ${asset?.assetGroup || ""} ${location?.description || ""}`.toLowerCase();
-    const queryMatch = !search || haystack.includes(search.toLowerCase());
-    const statusMatch = statusFilter === "All" || (statusFilter === "Active" ? ppm.active : !ppm.active);
-    return queryMatch && statusMatch;
-  });
-  const grouped = filtered.reduce((acc: Record<string, any[]>, ppm) => {
+  const [page, setPage] = useState(1);
+  const [ppmRowsSource, setPpmRowsSource] = useState<any[]>(ppms);
+  const [ppmTotal, setPpmTotal] = useState(ppmsTotal ?? ppms.length);
+  const [ppmLoading, setPpmLoading] = useState(false);
+  const ppmScrollRef = useRef<HTMLDivElement | null>(null);
+  const grouped = ppmRowsSource.reduce((acc: Record<string, any[]>, ppm) => {
     const key = ppm.nextDue ? new Date(ppm.nextDue).toISOString().slice(0, 10) : "Unscheduled";
     acc[key] = [...(acc[key] ?? []), ppm];
     return acc;
   }, {});
-  const selectedVisiblePpms = filtered.filter((ppm) => selectedPpmIds.has(ppm.id));
-  const allVisiblePpmsSelected = isAdmin && Boolean(filtered.length) && selectedVisiblePpms.length === filtered.length;
+  const hasMorePpms = ppmRowsSource.length < ppmTotal;
+  const selectedVisiblePpms = ppmRowsSource.filter((ppm) => selectedPpmIds.has(ppm.id));
+  const allVisiblePpmsSelected = isAdmin && Boolean(ppmRowsSource.length) && selectedVisiblePpms.length === ppmRowsSource.length;
   const someVisiblePpmsSelected = isAdmin && selectedVisiblePpms.length > 0 && !allVisiblePpmsSelected;
 
   useEffect(() => {
-    setSelectedPpmIds((current) => new Set(Array.from(current).filter((id) => ppms.some((ppm) => ppm.id === id))));
-  }, [ppms]);
+    setPage(1);
+    ppmScrollRef.current?.scrollTo({ top: 0 });
+  }, [search, statusFilter]);
+
+  useEffect(() => {
+    setPpmRowsSource(ppms);
+    setPpmTotal((current) => Math.max(current, ppmsTotal ?? ppms.length));
+  }, [ppms, ppmsTotal]);
+
+  useEffect(() => {
+    setSelectedPpmIds((current) => new Set(Array.from(current).filter((id) => ppmRowsSource.some((ppm) => ppm.id === id))));
+  }, [ppmRowsSource]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setPpmLoading(true);
+      try {
+        const params = new URLSearchParams({
+          page: String(page),
+          pageSize: String(PAGE_SIZE),
+          query: search,
+          status: statusFilter,
+        });
+        const response = await fetch(`/api/ppm?${params.toString()}`, { cache: "no-store", signal: controller.signal });
+        if (response.ok) {
+          const result = await response.json();
+          setPpmRowsSource((current) => page === 1 ? result.ppms ?? [] : [...current, ...(result.ppms ?? [])]);
+          setPpmTotal(Number(result.total ?? result.ppms?.length ?? 0));
+        }
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.error(error);
+        }
+      } finally {
+        if (!controller.signal.aborted) setPpmLoading(false);
+      }
+    }, 250);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [page, search, statusFilter]);
+
+  function handlePpmScroll(event: UIEvent<HTMLDivElement>) {
+    const element = event.currentTarget;
+    const nearBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 180;
+    if (nearBottom && hasMorePpms && !ppmLoading) {
+      setPpmLoading(true);
+      setPage((current) => current + 1);
+    }
+  }
 
   function togglePpmSelection(id: string, checked: boolean) {
     setSelectedPpmIds((current) => {
@@ -4529,7 +4581,7 @@ function Ppm({
   function toggleVisiblePpms(checked: boolean) {
     setSelectedPpmIds((current) => {
       const next = new Set(current);
-      filtered.forEach((ppm) => {
+      ppmRowsSource.forEach((ppm) => {
         if (checked) next.add(ppm.id);
         else next.delete(ppm.id);
       });
@@ -4575,7 +4627,11 @@ function Ppm({
                 </div>
               </div>
             )}
-            <div className="cafm-scroll-x overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm font-black text-slate-600">
+              <span>Showing {ppmRowsSource.length.toLocaleString()} of {ppmTotal.toLocaleString()} PPM plans</span>
+              {ppmLoading && <span className="text-lagoon">Loading PPM plans...</span>}
+            </div>
+            <div ref={ppmScrollRef} onScroll={handlePpmScroll} className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
               <table className="cafm-data-table min-w-[1280px] border-collapse bg-white text-sm">
                 <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                   <tr>
@@ -4595,7 +4651,7 @@ function Ppm({
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((ppm, index) => {
+                {ppmRowsSource.map((ppm, index) => {
                   const asset = assets.find((item) => item.tag === ppm.assetTag);
                   const location = locations.find((item) => item.code === ppm.locationCode);
                   return (
@@ -4631,6 +4687,9 @@ function Ppm({
                 })}
               </tbody>
             </table>
+            </div>
+            <div className="mt-3 text-center text-sm font-black text-slate-500">
+              {hasMorePpms ? "Scroll down to load more PPM plans" : "All matching PPM plans loaded"}
             </div>
           </>
         ) : (
@@ -6368,7 +6427,92 @@ function Locations({ locations, submitLocation, deleteLocation, isAdmin, saving 
   );
 }
 
-function JobPlans({ jobPlans, services, departments, submitJobPlan, deleteJobPlan, isAdmin, saving }: { jobPlans: any[]; services: any[]; departments: any[]; submitJobPlan: (formData: FormData) => void; deleteJobPlan: (id: string) => void; isAdmin: boolean; saving: boolean }) {
+function JobPlans({ jobPlans, jobPlansTotal, services, departments, submitJobPlan, deleteJobPlan, isAdmin, saving }: { jobPlans: any[]; jobPlansTotal?: number; services: any[]; departments: any[]; submitJobPlan: (formData: FormData) => void; deleteJobPlan: (id: string) => void; isAdmin: boolean; saving: boolean }) {
+  const [page, setPage] = useState(1);
+  const [jobPlanRowsSource, setJobPlanRowsSource] = useState<any[]>(jobPlans);
+  const [jobPlanTotal, setJobPlanTotal] = useState(jobPlansTotal ?? jobPlans.length);
+  const [jobPlanLoading, setJobPlanLoading] = useState(false);
+  const [selectedJobPlanIds, setSelectedJobPlanIds] = useState<Set<string>>(new Set());
+  const jobPlanScrollRef = useRef<HTMLDivElement | null>(null);
+  const hasMoreJobPlans = jobPlanRowsSource.length < jobPlanTotal;
+  const selectedVisibleJobPlans = jobPlanRowsSource.filter((jobPlan) => selectedJobPlanIds.has(jobPlan.id));
+  const allVisibleJobPlansSelected = isAdmin && Boolean(jobPlanRowsSource.length) && selectedVisibleJobPlans.length === jobPlanRowsSource.length;
+  const someVisibleJobPlansSelected = isAdmin && selectedVisibleJobPlans.length > 0 && !allVisibleJobPlansSelected;
+
+  useEffect(() => {
+    setJobPlanRowsSource(jobPlans);
+    setJobPlanTotal((current) => Math.max(current, jobPlansTotal ?? jobPlans.length));
+  }, [jobPlans, jobPlansTotal]);
+
+  useEffect(() => {
+    setSelectedJobPlanIds((current) => new Set(Array.from(current).filter((id) => jobPlanRowsSource.some((jobPlan) => jobPlan.id === id))));
+  }, [jobPlanRowsSource]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setJobPlanLoading(true);
+      try {
+        const params = new URLSearchParams({
+          page: String(page),
+          pageSize: String(PAGE_SIZE),
+        });
+        const response = await fetch(`/api/job-plans?${params.toString()}`, { cache: "no-store", signal: controller.signal });
+        if (response.ok) {
+          const result = await response.json();
+          setJobPlanRowsSource((current) => page === 1 ? result.jobPlans ?? [] : [...current, ...(result.jobPlans ?? [])]);
+          setJobPlanTotal(Number(result.total ?? result.jobPlans?.length ?? 0));
+        }
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.error(error);
+        }
+      } finally {
+        if (!controller.signal.aborted) setJobPlanLoading(false);
+      }
+    }, 250);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [page]);
+
+  function handleJobPlanScroll(event: UIEvent<HTMLDivElement>) {
+    const element = event.currentTarget;
+    const nearBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 180;
+    if (nearBottom && hasMoreJobPlans && !jobPlanLoading) {
+      setJobPlanLoading(true);
+      setPage((current) => current + 1);
+    }
+  }
+
+  function toggleJobPlanSelection(id: string, checked: boolean) {
+    setSelectedJobPlanIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleVisibleJobPlans(checked: boolean) {
+    setSelectedJobPlanIds((current) => {
+      const next = new Set(current);
+      jobPlanRowsSource.forEach((jobPlan) => {
+        if (checked) next.add(jobPlan.id);
+        else next.delete(jobPlan.id);
+      });
+      return next;
+    });
+  }
+
+  async function bulkDeleteSelectedJobPlans() {
+    const ids = Array.from(selectedJobPlanIds);
+    if (!ids.length) return;
+    await Promise.all(ids.map((id) => deleteJobPlan(id)));
+    setSelectedJobPlanIds(new Set());
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -6380,7 +6524,69 @@ function JobPlans({ jobPlans, services, departments, submitJobPlan, deleteJobPla
     <section className="grid gap-5 xl:grid-cols-[1fr_420px]">
       <Panel title="Job Plans" icon={ClipboardCheck}>
         <ReportButtons type="job-plans" label="Job plans report" />
-        <DataTable rows={jobPlans} columns={[["code", "Code"], ["name", "Name"], ["assetType", "Asset Type"], ["departmentCode", "Dept"], ["serviceCode", "Service"], ["estimatedHours", "Hours"], ["priority", "Priority"], ["active", "Active"]]} actions={isAdmin ? (row) => <DeleteRowButton saving={saving} onDelete={() => deleteJobPlan(row.id)} /> : undefined} bulkSelectable={isAdmin} bulkLabel="job plans" onBulkDelete={async (rows) => { await Promise.all(rows.map((row) => deleteJobPlan(row.id))); }} />
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm font-black text-slate-600">
+          <span>Showing {jobPlanRowsSource.length.toLocaleString()} of {jobPlanTotal.toLocaleString()} job plans{isAdmin ? ` / Selected ${selectedJobPlanIds.size.toLocaleString()}` : ""}</span>
+          {jobPlanLoading && <span className="text-lagoon">Loading job plans...</span>}
+        </div>
+        {isAdmin && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm font-black text-slate-600">
+            <span>Selected {selectedJobPlanIds.size.toLocaleString()} job plans</span>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => toggleVisibleJobPlans(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
+              <button type="button" disabled={!selectedJobPlanIds.size} onClick={bulkDeleteSelectedJobPlans} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete All</button>
+              <button type="button" disabled={!selectedJobPlanIds.size} onClick={() => setSelectedJobPlanIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
+            </div>
+          </div>
+        )}
+        <div ref={jobPlanScrollRef} onScroll={handleJobPlanScroll} className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
+          <table className="cafm-data-table min-w-[1180px] border-collapse bg-white text-sm">
+            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+              <tr>
+                {isAdmin && (
+                  <th className="px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={allVisibleJobPlansSelected}
+                      ref={(input) => {
+                        if (input) input.indeterminate = someVisibleJobPlansSelected;
+                      }}
+                      onChange={(event) => toggleVisibleJobPlans(event.target.checked)}
+                    />
+                  </th>
+                )}
+                {["#", "Code", "Name", "Asset Type", "Dept", "Service", "Hours", "Priority", "Active", ...(isAdmin ? ["Actions"] : [])].map((label) => <th key={label} className="px-3 py-3">{label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {jobPlanRowsSource.map((jobPlan, index) => (
+                <tr key={jobPlan.id} className="border-t border-slate-100">
+                  {isAdmin && (
+                    <td className="px-3 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedJobPlanIds.has(jobPlan.id)}
+                        onChange={(event) => toggleJobPlanSelection(jobPlan.id, event.target.checked)}
+                      />
+                    </td>
+                  )}
+                  <td className="px-3 py-3 font-black text-slate-500">{index + 1}</td>
+                  <td className="px-3 py-3 font-black text-lagoon">{displayValue(jobPlan.code)}</td>
+                  <td className="px-3 py-3">{displayValue(jobPlan.name)}</td>
+                  <td className="px-3 py-3">{displayValue(jobPlan.assetType)}</td>
+                  <td className="px-3 py-3">{displayValue(jobPlan.departmentCode)}</td>
+                  <td className="px-3 py-3">{displayValue(jobPlan.serviceCode)}</td>
+                  <td className="px-3 py-3">{displayValue(jobPlan.estimatedHours)}</td>
+                  <td className="px-3 py-3"><RequestPriorityBadge priority={jobPlan.priority || "MEDIUM"} /></td>
+                  <td className="px-3 py-3">{displayValue(jobPlan.active)}</td>
+                  {isAdmin && <td className="px-3 py-3"><DeleteRowButton saving={saving} onDelete={() => deleteJobPlan(jobPlan.id)} /></td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-3 text-center text-sm font-black text-slate-500">
+          {hasMoreJobPlans ? "Scroll down to load more job plans" : "All job plans loaded"}
+        </div>
       </Panel>
       <form onSubmit={handleSubmit} className="min-w-0 rounded-lg border border-white/80 bg-white p-5 shadow-lift">
         <h3 className="text-xl font-black">Add Job Plan</h3>

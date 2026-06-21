@@ -26,8 +26,39 @@ const schema = z.object({
   active: boolValue.optional(),
 });
 
-export async function GET() {
-  return NextResponse.json(await prisma.preventiveMaintenance.findMany({ orderBy: { nextDue: "asc" } }));
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const query = url.searchParams.get("query")?.trim() || "";
+  const status = url.searchParams.get("status")?.trim() || "All";
+  const pageInput = Number(url.searchParams.get("page") || 1);
+  const pageSizeInput = Number(url.searchParams.get("pageSize") || 100);
+  const page = Number.isFinite(pageInput) ? Math.max(1, Math.floor(pageInput)) : 1;
+  const pageSize = Number.isFinite(pageSizeInput) ? Math.min(200, Math.max(25, Math.floor(pageSizeInput))) : 100;
+  const where: any = {
+    ...(status === "Active" ? { active: true } : {}),
+    ...(status === "Paused" ? { active: false } : {}),
+  };
+  if (query) {
+    where.OR = [
+      { code: { contains: query, mode: "insensitive" } },
+      { name: { contains: query, mode: "insensitive" } },
+      { assetTag: { contains: query, mode: "insensitive" } },
+      { locationCode: { contains: query, mode: "insensitive" } },
+      { departmentCode: { contains: query, mode: "insensitive" } },
+      { frequency: { contains: query, mode: "insensitive" } },
+      { checklist: { contains: query, mode: "insensitive" } },
+    ];
+  }
+  const [total, ppms] = await Promise.all([
+    prisma.preventiveMaintenance.count({ where }),
+    prisma.preventiveMaintenance.findMany({
+      where,
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      orderBy: { nextDue: "asc" },
+    }),
+  ]);
+  return NextResponse.json({ ppms, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
 }
 
 export async function DELETE(request: Request) {

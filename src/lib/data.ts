@@ -59,7 +59,7 @@ export async function getOperatingData(user: OperatingUser = null) {
     const visibleJobPlanWhere = kind === "admin" || kind === "readonly" ? {} : kind === "supervisor" || kind === "technician" ? { departmentCode: { in: departmentsForUser } } : {};
     const visibleUsersWhere = kind === "admin" ? {} : { OR: [{ department: { in: departmentsForUser } }, { id: user?.id || "" }] };
 
-    const [sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms, users, permissions, departments, employees, rolePermissions, locations, jobPlans, roles, auditLogs, complianceCertificates, documentUploads, shifts, rotations, roster, housingProperties, housingBlocks, housingRooms, housingBeds, housingResidents, housingBookings, housingInspections, housingAssets, housingInventory, housingApprovals, housingNotifications, housingNotificationSettings, housingHistory] = await Promise.all([
+    const [sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, shifts, rotations, roster, housingProperties, housingBlocks, housingRooms, housingBeds, housingResidents, housingBookings, housingInspections, housingAssets, housingInventory, housingApprovals, housingNotifications, housingNotificationSettings, housingHistory] = await Promise.all([
       prisma.site.findMany({ include: { buildings: true }, orderBy: { name: "asc" } }),
       prisma.building.findMany({ include: { site: true }, orderBy: { code: "asc" } }),
       prisma.space.findMany({ include: { building: { include: { site: true } } }, orderBy: [{ building: { code: "asc" } }, { floor: "asc" }, { name: "asc" }], take: 500 }),
@@ -97,14 +97,16 @@ export async function getOperatingData(user: OperatingUser = null) {
       prisma.team.findMany({ include: { services: true }, orderBy: { name: "asc" } }),
       prisma.serviceCatalog.findMany({ include: { team: true }, orderBy: { name: "asc" } }),
       prisma.assetCategory.findMany({ orderBy: { name: "asc" } }),
-      prisma.preventiveMaintenance.findMany({ orderBy: { nextDue: "asc" } }),
+      prisma.preventiveMaintenance.findMany({ orderBy: { nextDue: "asc" }, take: 100 }),
+      prisma.preventiveMaintenance.count(),
       prisma.user.findMany({ where: visibleUsersWhere, include: { team: true }, orderBy: { name: "asc" } }),
       prisma.permission.findMany({ orderBy: [{ module: "asc" }, { name: "asc" }] }),
       prisma.department.findMany({ orderBy: { code: "asc" } }),
       prisma.employee.findMany({ where: kind === "admin" ? {} : { departmentCode: { in: departmentsForUser } }, orderBy: { name: "asc" } }),
       prisma.rolePermission.findMany({ include: { permission: true }, orderBy: { role: "asc" } }),
       prisma.location.findMany({ orderBy: [{ code: "asc" }], take: 5000 }),
-      prisma.jobPlan.findMany({ where: visibleJobPlanWhere, orderBy: { code: "asc" } }),
+      prisma.jobPlan.findMany({ where: visibleJobPlanWhere, orderBy: { code: "asc" }, take: 100 }),
+      prisma.jobPlan.count({ where: visibleJobPlanWhere }),
       prisma.role.findMany({ orderBy: { name: "asc" } }),
       prisma.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: 500 }),
       prisma.complianceCertificate.findMany({ orderBy: [{ expiryDate: "asc" }, { certificateNo: "asc" }] }),
@@ -153,7 +155,7 @@ export async function getOperatingData(user: OperatingUser = null) {
             history: housingHistory,
           };
 
-    return { sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms: scopedPpms, users, permissions, departments, employees, rolePermissions, locations, jobPlans, roles, auditLogs, complianceCertificates, documentUploads, shiftRotation: { shifts, rotations, roster }, housing, live: true };
+    return { sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms: scopedPpms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, shiftRotation: { shifts, rotations, roster }, housing, live: true };
   } catch {
     return { ...fallbackData, live: false };
   }

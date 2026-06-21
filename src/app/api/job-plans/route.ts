@@ -17,8 +17,21 @@ const schema = z.object({
   safetyNotes: z.string().optional(),
 });
 
-export async function GET() {
-  return NextResponse.json(await prisma.jobPlan.findMany({ orderBy: { code: "asc" } }));
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const pageInput = Number(url.searchParams.get("page") || 1);
+  const pageSizeInput = Number(url.searchParams.get("pageSize") || 100);
+  const page = Number.isFinite(pageInput) ? Math.max(1, Math.floor(pageInput)) : 1;
+  const pageSize = Number.isFinite(pageSizeInput) ? Math.min(200, Math.max(25, Math.floor(pageSizeInput))) : 100;
+  const [total, jobPlans] = await Promise.all([
+    prisma.jobPlan.count(),
+    prisma.jobPlan.findMany({
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      orderBy: { code: "asc" },
+    }),
+  ]);
+  return NextResponse.json({ jobPlans, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
 }
 
 export async function DELETE(request: Request) {
