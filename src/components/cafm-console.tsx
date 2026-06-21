@@ -355,7 +355,7 @@ const modulePermissions: Record<string, string> = {
   inventory: "assets.manage",
   hse: "reports.view",
   iot: "reports.view",
-  documents: "reports.view",
+  documents: "",
   incidents: "requests.view",
   resource: "requests.manage",
   audit: "reports.view",
@@ -7054,8 +7054,15 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
             CSV File
             <input name="file" type="file" accept=".csv,text/csv" className="rounded-lg border border-slate-200 bg-white p-3" />
           </label>
+          {module === "omManuals" && (
+            <label className="grid gap-1 text-sm font-bold text-slate-600">
+              Manual PDF Files
+              <input name="manualFiles" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.csv,.xlsx,.docx,.pptx" multiple className="rounded-lg border border-slate-200 bg-white p-3" />
+              <span className="text-xs font-bold text-slate-500">Select all files from the O&M manual upload folder. The system matches them by file name and stores them online.</span>
+            </label>
+          )}
           <button disabled={saving} className="h-11 rounded-lg bg-ink font-black text-white disabled:bg-slate-400">
-            {saving ? "Uploading..." : "Upload CSV"}
+            {saving ? "Uploading..." : module === "omManuals" ? "Upload CSV and Manuals" : "Upload CSV"}
           </button>
         </form>
       </Panel>

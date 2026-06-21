@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { copyFile, mkdir, readFile, stat } from "fs/promises";
+import { copyFile, mkdir, readFile, stat, writeFile } from "fs/promises";
 import path from "path";
 import { NextResponse } from "next/server";
 import { addDays, addHours, addYears } from "date-fns";
@@ -22,6 +22,8 @@ type ImportResult = {
 type ImportEntry = ImportResult & { row: number; status: "SUCCESS" | "FAILED"; module: string; message?: string };
 type ImportFailure = { row: number; message: string };
 type BulkUploadUser = { id?: string; name?: string; email?: string; role?: string } | null;
+type UploadedDocumentFile = { file: File; name: string; size: number };
+type ImportContext = { documentFiles?: Map<string, UploadedDocumentFile> };
 
 const BACKGROUND_ROW_THRESHOLD = 5000;
 const BULK_UPLOAD_CHUNK_SIZE = 500;
@@ -72,6 +74,7 @@ export async function POST(request: Request) {
     }
 
     const rows = parseCsv(await file.text());
+    const context = buildImportContext(module, formData);
 
     if (rows.length > BACKGROUND_ROW_THRESHOLD) {
       const job = await prisma.bulkUploadJob.create({
@@ -88,7 +91,7 @@ export async function POST(request: Request) {
         },
       });
 
-      void processBulkUploadJob(job.id, module, rows, { name: file.name, size: file.size }, user);
+      void processBulkUploadJob(job.id, module, rows, { name: file.name, size: file.size }, user, context);
 
       return NextResponse.json({
         jobId: job.id,
@@ -106,7 +109,7 @@ export async function POST(request: Request) {
       }, { status: 202 });
     }
 
-    const { created, failed, entries, result } = await processRows(module, rows);
+    const { created, failed, entries, result } = await processRows(module, rows, context);
 
     await auditAction({
       user,
@@ -133,6 +136,7 @@ export async function POST(request: Request) {
 async function processRows(
   module: string,
   rows: Row[],
+  context: ImportContext = {},
   onProgress?: (progress: { processedRows: number; createdRows: number; failedRows: number; failed: ImportFailure[]; entries: ImportEntry[] }) => Promise<void>,
 ) {
   const failed: ImportFailure[] = [];
@@ -142,7 +146,7 @@ async function processRows(
   for (const [index, row] of rows.entries()) {
     const rowNumber = index + 2;
     try {
-      const imported = await importRow(module, row);
+      const imported = await importRow(module, row, context);
       entries.push({ row: rowNumber, status: "SUCCESS", module, ...imported });
       created += 1;
     } catch (error) {
@@ -169,7 +173,7 @@ async function processRows(
   return { created, failed, entries, result: csvResponse(created, failed) };
 }
 
-async function processBulkUploadJob(jobId: string, module: string, rows: Row[], file: { name: string; size: number }, user: BulkUploadUser) {
+async function processBulkUploadJob(jobId: string, module: string, rows: Row[], file: { name: string; size: number }, user: BulkUploadUser, context: ImportContext = {}) {
   try {
     await prisma.bulkUploadJob.update({
       where: { id: jobId },
@@ -180,7 +184,7 @@ async function processBulkUploadJob(jobId: string, module: string, rows: Row[], 
       },
     });
 
-    const { created, failed, entries, result } = await processRows(module, rows, async ({ processedRows, createdRows, failedRows }) => {
+    const { created, failed, entries, result } = await processRows(module, rows, context, async ({ processedRows, createdRows, failedRows }) => {
       await prisma.bulkUploadJob.update({
         where: { id: jobId },
         data: {
@@ -284,7 +288,18 @@ function bulkUploadPermissions(module: string) {
   return ["assets.manage"];
 }
 
-async function importRow(module: string, row: Row) {
+function buildImportContext(module: string, formData: FormData): ImportContext {
+  if (module !== "omManuals") return {};
+  const documentFiles = new Map<string, UploadedDocumentFile>();
+  formData.getAll("manualFiles").forEach((item) => {
+    if (item instanceof File && item.size > 0) {
+      documentFiles.set(item.name.trim().toLowerCase(), { file: item, name: item.name, size: item.size });
+    }
+  });
+  return { documentFiles };
+}
+
+async function importRow(module: string, row: Row, context: ImportContext = {}) {
   if (module === "sites") return importSite(row);
   if (module === "buildings") return importBuilding(row);
   if (module === "spaces") return importSpace(row);
@@ -302,7 +317,7 @@ async function importRow(module: string, row: Row) {
   if (module === "locations") return importLocation(row);
   if (module === "jobPlans") return importJobPlan(row);
   if (module === "ppm") return importPpm(row);
-  if (module === "omManuals") return importDocumentIndex(row);
+  if (module === "omManuals") return importDocumentIndex(row, context);
   throw new Error(`Unsupported module: ${module}`);
 }
 
@@ -823,20 +838,25 @@ async function importPpm(row: Row) {
   return importResult("preventive_maintenance", "UPSERT", ppm, code, data.name);
 }
 
-async function importDocumentIndex(row: Row) {
+async function importDocumentIndex(row: Row, context: ImportContext = {}) {
   const category = value(row, "category") || "OM_MANUAL";
   const folder = documentCategories[category];
   if (!folder) throw new Error(`Invalid document category: ${category}`);
 
   const assetTag = required(row, "assetTag", "EQUIPMENTNO", "Asset Number");
-  const sourcePath = required(row, "sourcePath", "filePath", "path");
-  const resolvedSource = path.resolve(sourcePath);
-  if (!allowedManualRoots.some((root) => resolvedSource === root || resolvedSource.startsWith(`${root}${path.sep}`))) {
-    throw new Error("Document source path is outside the allowed manual folders");
-  }
+  const originalName = value(row, "fileName") || path.basename(value(row, "sourcePath", "filePath", "path"));
+  const uploadedFile = originalName ? context.documentFiles?.get(originalName.trim().toLowerCase()) : undefined;
 
   const asset = await prisma.asset.findUnique({ where: { tag: assetTag } });
   if (!asset) throw new Error(`Asset not found for document upload: ${assetTag}`);
+
+  if (uploadedFile) return importUploadedDocument(row, assetTag, category, folder, uploadedFile, originalName);
+
+  const sourcePath = required(row, "sourcePath", "filePath", "path");
+  const resolvedSource = path.resolve(sourcePath);
+  if (!allowedManualRoots.some((root) => resolvedSource === root || resolvedSource.startsWith(`${root}${path.sep}`))) {
+    throw new Error(`${originalName || "Document"} was not uploaded with the CSV and the server cannot read this local source path. Attach manual files in the O&M upload form.`);
+  }
 
   const ext = path.extname(resolvedSource).toLowerCase();
   if (!allowedDocumentExtensions.has(ext)) throw new Error(`Unsupported document type: ${ext || "unknown"}`);
@@ -862,7 +882,6 @@ async function importDocumentIndex(row: Row) {
 
   const uploadDir = path.join(privateUploadRoot, "document-management", folder, "_manual-library");
   await mkdir(uploadDir, { recursive: true });
-  const originalName = value(row, "fileName") || path.basename(resolvedSource);
   const storedName = `${checksum}-${safeSegment(path.basename(originalName, ext)) || "document"}${ext}`;
   const storedPath = path.join(uploadDir, storedName);
   if (!copiedDocumentCache.has(storedPath)) {
@@ -870,6 +889,59 @@ async function importDocumentIndex(row: Row) {
       await stat(storedPath);
     } catch {
       await copyFile(resolvedSource, storedPath);
+    }
+    copiedDocumentCache.add(storedPath);
+  }
+
+  const record = await prisma.documentUpload.create({
+    data: {
+      category,
+      assetTag,
+      fileName: originalName,
+      fileUrl: privateFileUrl(`document-management/${folder}/_manual-library/${storedName}`),
+      fileSize: sourceInfo.size,
+      mimeType: mimeTypeFromExtension(ext),
+      checksum,
+      uploadedBy: "Bulk Upload",
+    },
+  });
+  return importResult("document_upload", "CREATE", record, assetTag, originalName);
+}
+
+async function importUploadedDocument(_row: Row, assetTag: string, category: string, folder: string, uploadedFile: UploadedDocumentFile, originalName: string) {
+  const ext = path.extname(originalName).toLowerCase();
+  if (!allowedDocumentExtensions.has(ext)) throw new Error(`Unsupported document type: ${ext || "unknown"}`);
+  if (uploadedFile.size > MAX_DOCUMENT_FILE_SIZE) throw new Error(`${originalName} exceeds the 60 MB document size limit`);
+
+  const cacheKey = `uploaded:${uploadedFile.name}:${uploadedFile.size}`;
+  let sourceInfo = documentSourceCache.get(cacheKey);
+  let buffer: Buffer | null = null;
+  if (!sourceInfo) {
+    buffer = Buffer.from(await uploadedFile.file.arrayBuffer());
+    sourceInfo = {
+      checksum: createHash("sha256").update(buffer).digest("hex"),
+      ext,
+      size: uploadedFile.size,
+    };
+    documentSourceCache.set(cacheKey, sourceInfo);
+  }
+
+  const checksum = sourceInfo.checksum;
+  const existing = await prisma.documentUpload.findUnique({
+    where: { category_assetTag_checksum: { category, assetTag, checksum } },
+  });
+  if (existing) return importResult("document_upload", "EXISTS", existing, assetTag, existing.fileName);
+
+  const uploadDir = path.join(privateUploadRoot, "document-management", folder, "_manual-library");
+  await mkdir(uploadDir, { recursive: true });
+  const storedName = `${checksum}-${safeSegment(path.basename(originalName, ext)) || "document"}${ext}`;
+  const storedPath = path.join(uploadDir, storedName);
+  if (!copiedDocumentCache.has(storedPath)) {
+    try {
+      await stat(storedPath);
+    } catch {
+      if (!buffer) buffer = Buffer.from(await uploadedFile.file.arrayBuffer());
+      await writeFile(storedPath, buffer, { mode: 0o644 });
     }
     copiedDocumentCache.add(storedPath);
   }
