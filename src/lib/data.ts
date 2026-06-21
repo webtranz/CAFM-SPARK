@@ -23,6 +23,9 @@ function departmentValues(user: OperatingUser) {
   return [user?.department, user?.department?.trim()].filter(Boolean) as string[];
 }
 
+const INITIAL_LOAD_LIMIT = 100;
+const INITIAL_REFERENCE_LIMIT = 200;
+
 export async function getOperatingData(user: OperatingUser = null) {
   if (!process.env.DATABASE_URL) {
     return { ...fallbackData, live: false };
@@ -62,11 +65,11 @@ export async function getOperatingData(user: OperatingUser = null) {
     const [sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, shifts, rotations, roster, housingProperties, housingBlocks, housingRooms, housingBeds, housingResidents, housingBookings, housingInspections, housingAssets, housingInventory, housingApprovals, housingNotifications, housingNotificationSettings, housingHistory] = await Promise.all([
       prisma.site.findMany({ include: { buildings: true }, orderBy: { name: "asc" } }),
       prisma.building.findMany({ include: { site: true }, orderBy: { code: "asc" } }),
-      prisma.space.findMany({ include: { building: { include: { site: true } } }, orderBy: [{ building: { code: "asc" } }, { floor: "asc" }, { name: "asc" }], take: 500 }),
+      prisma.space.findMany({ include: { building: { include: { site: true } } }, orderBy: [{ building: { code: "asc" } }, { floor: "asc" }, { name: "asc" }], take: INITIAL_REFERENCE_LIMIT }),
       prisma.asset.findMany({
         where: visibleAssetWhere,
         orderBy: [{ tag: "asc" }],
-        take: 100,
+        take: INITIAL_LOAD_LIMIT,
         include: {
           site: { select: { name: true } },
           building: { select: { name: true, code: true } },
@@ -77,12 +80,13 @@ export async function getOperatingData(user: OperatingUser = null) {
       prisma.serviceRequest.findMany({
         where: visibleRequestWhere,
         orderBy: { createdAt: "desc" },
+        take: INITIAL_LOAD_LIMIT,
         include: { workOrder: { select: { id: true, woNo: true, status: true } } },
       }),
       prisma.workOrder.findMany({
         where: visibleWorkWhere,
         orderBy: { dueAt: "asc" },
-        take: 100,
+        take: INITIAL_LOAD_LIMIT,
         include: {
           assignedTo: { select: { name: true, email: true } },
           asset: { select: { tag: true, name: true, assetDescription: true, buildingCode: true, floor: true, room: true } },
@@ -91,45 +95,46 @@ export async function getOperatingData(user: OperatingUser = null) {
         },
       }),
       prisma.workOrder.count({ where: visibleWorkWhere }),
-      prisma.inventoryItem.findMany({ orderBy: { sku: "asc" } }),
-      prisma.inspection.findMany({ orderBy: { dueAt: "asc" } }),
-      prisma.iotAlert.findMany({ orderBy: { detectedAt: "desc" } }),
+      prisma.inventoryItem.findMany({ orderBy: { sku: "asc" }, take: INITIAL_LOAD_LIMIT }),
+      prisma.inspection.findMany({ orderBy: { dueAt: "asc" }, take: INITIAL_LOAD_LIMIT }),
+      prisma.iotAlert.findMany({ orderBy: { detectedAt: "desc" }, take: INITIAL_LOAD_LIMIT }),
       prisma.team.findMany({ include: { services: true }, orderBy: { name: "asc" } }),
       prisma.serviceCatalog.findMany({ include: { team: true }, orderBy: { name: "asc" } }),
       prisma.assetCategory.findMany({ orderBy: { name: "asc" } }),
-      prisma.preventiveMaintenance.findMany({ orderBy: { nextDue: "asc" }, take: 100 }),
+      prisma.preventiveMaintenance.findMany({ orderBy: { nextDue: "asc" }, take: INITIAL_LOAD_LIMIT }),
       prisma.preventiveMaintenance.count(),
-      prisma.user.findMany({ where: visibleUsersWhere, include: { team: true }, orderBy: { name: "asc" } }),
+      prisma.user.findMany({ where: visibleUsersWhere, include: { team: true }, orderBy: { name: "asc" }, take: INITIAL_LOAD_LIMIT }),
       prisma.permission.findMany({ orderBy: [{ module: "asc" }, { name: "asc" }] }),
       prisma.department.findMany({ orderBy: { code: "asc" } }),
-      prisma.employee.findMany({ where: kind === "admin" ? {} : { departmentCode: { in: departmentsForUser } }, orderBy: { name: "asc" } }),
+      prisma.employee.findMany({ where: kind === "admin" ? {} : { departmentCode: { in: departmentsForUser } }, orderBy: { name: "asc" }, take: INITIAL_LOAD_LIMIT }),
       prisma.rolePermission.findMany({ include: { permission: true }, orderBy: { role: "asc" } }),
-      prisma.location.findMany({ orderBy: [{ code: "asc" }], take: 5000 }),
-      prisma.jobPlan.findMany({ where: visibleJobPlanWhere, orderBy: { code: "asc" }, take: 100 }),
+      prisma.location.findMany({ orderBy: [{ code: "asc" }], take: INITIAL_REFERENCE_LIMIT }),
+      prisma.jobPlan.findMany({ where: visibleJobPlanWhere, orderBy: { code: "asc" }, take: INITIAL_LOAD_LIMIT }),
       prisma.jobPlan.count({ where: visibleJobPlanWhere }),
       prisma.role.findMany({ orderBy: { name: "asc" } }),
-      prisma.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: 500 }),
-      prisma.complianceCertificate.findMany({ orderBy: [{ expiryDate: "asc" }, { certificateNo: "asc" }] }),
-      prisma.documentUpload.findMany({ orderBy: { createdAt: "desc" } }),
+      prisma.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: INITIAL_LOAD_LIMIT }),
+      prisma.complianceCertificate.findMany({ orderBy: [{ expiryDate: "asc" }, { certificateNo: "asc" }], take: INITIAL_LOAD_LIMIT }),
+      prisma.documentUpload.findMany({ orderBy: { createdAt: "desc" }, take: INITIAL_LOAD_LIMIT }),
       prisma.shiftMaster.findMany({ orderBy: { name: "asc" } }),
       prisma.rotationSetup.findMany({ orderBy: { name: "asc" } }),
-      prisma.rosterEntry.findMany({ include: { employee: true, team: true, shift: true }, orderBy: [{ date: "asc" }, { createdAt: "asc" }] }),
-      prisma.housingProperty.findMany({ orderBy: { name: "asc" } }),
-      prisma.housingBlock.findMany({ include: { property: true }, orderBy: { code: "asc" } }),
-      prisma.housingRoom.findMany({ include: { property: true, block: true, beds: true }, orderBy: [{ roomNumber: "asc" }] }),
-      prisma.housingBed.findMany({ include: { room: true }, orderBy: { code: "asc" } }),
-      prisma.housingResident.findMany({ orderBy: { name: "asc" } }),
+      prisma.rosterEntry.findMany({ include: { employee: true, team: true, shift: true }, orderBy: [{ date: "asc" }, { createdAt: "asc" }], take: INITIAL_LOAD_LIMIT }),
+      prisma.housingProperty.findMany({ orderBy: { name: "asc" }, take: INITIAL_REFERENCE_LIMIT }),
+      prisma.housingBlock.findMany({ include: { property: true }, orderBy: { code: "asc" }, take: INITIAL_REFERENCE_LIMIT }),
+      prisma.housingRoom.findMany({ include: { property: true, block: true, beds: true }, orderBy: [{ roomNumber: "asc" }], take: INITIAL_REFERENCE_LIMIT }),
+      prisma.housingBed.findMany({ include: { room: true }, orderBy: { code: "asc" }, take: INITIAL_REFERENCE_LIMIT }),
+      prisma.housingResident.findMany({ orderBy: { name: "asc" }, take: INITIAL_REFERENCE_LIMIT }),
       prisma.housingBooking.findMany({
         include: { room: { include: { property: true, block: true } }, bed: true, resident: true, approvals: true },
         orderBy: { createdAt: "desc" },
+        take: INITIAL_LOAD_LIMIT,
       }),
-      prisma.housingInspection.findMany({ include: { room: { include: { property: true, block: true } } }, orderBy: { dueAt: "asc" } }),
-      prisma.housingAsset.findMany({ include: { room: { include: { property: true, block: true } } }, orderBy: { tag: "asc" } }),
-      prisma.housingInventory.findMany({ include: { room: { include: { property: true, block: true } } }, orderBy: { sku: "asc" } }),
-      prisma.housingApproval.findMany({ orderBy: { createdAt: "desc" } }),
-      prisma.housingNotification.findMany({ orderBy: { createdAt: "desc" }, take: 100 }),
+      prisma.housingInspection.findMany({ include: { room: { include: { property: true, block: true } } }, orderBy: { dueAt: "asc" }, take: INITIAL_LOAD_LIMIT }),
+      prisma.housingAsset.findMany({ include: { room: { include: { property: true, block: true } } }, orderBy: { tag: "asc" }, take: INITIAL_LOAD_LIMIT }),
+      prisma.housingInventory.findMany({ include: { room: { include: { property: true, block: true } } }, orderBy: { sku: "asc" }, take: INITIAL_LOAD_LIMIT }),
+      prisma.housingApproval.findMany({ orderBy: { createdAt: "desc" }, take: INITIAL_LOAD_LIMIT }),
+      prisma.housingNotification.findMany({ orderBy: { createdAt: "desc" }, take: INITIAL_LOAD_LIMIT }),
       prisma.housingNotificationSetting.findMany({ orderBy: { label: "asc" } }),
-      prisma.housingHistory.findMany({ orderBy: { createdAt: "desc" }, take: 300 }),
+      prisma.housingHistory.findMany({ orderBy: { createdAt: "desc" }, take: INITIAL_LOAD_LIMIT }),
     ]);
 
     const visibleAssetTags = new Set(assets.map((asset) => asset.tag));

@@ -45,7 +45,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { assetHealth, chartData, moduleStats } from "@/lib/demo-data";
+import { moduleStats } from "@/lib/demo-data";
 
 type ConsoleData = {
   live: boolean;
@@ -294,6 +294,7 @@ const moduleGroups: ModuleGroup[] = [
 ];
 
 const healthColors = ["#35a852", "#0f8b8d", "#ffd166", "#f45d48"];
+const dashboardColors = ["#0f8b8d", "#f45d48", "#06d6a0", "#ffd166", "#0b1f3a", "#7c3aed", "#2563eb", "#db2777", "#64748b", "#16a34a"];
 const PAGE_SIZE = 100;
 const HOUSING_FIELD_CLASS = "h-11 rounded-lg border border-slate-200 bg-white px-3 outline-none focus:border-lagoon";
 const FACILITY_FIELD_CLASS = "h-11 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 outline-none focus:border-lagoon";
@@ -996,38 +997,42 @@ export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: st
         </aside>
 
         <section className="cafm-content min-h-0 min-w-0 space-y-5 overflow-auto px-3 pb-6 pt-20 scrollbar-thin sm:px-5 lg:h-screen lg:p-6">
-          <header className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 text-slate-900 shadow-sm sm:p-5">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-              <div className="min-w-0">
-                <p className="text-sm font-bold uppercase text-emerald-700">Complete CAFM Suite</p>
-                <h2 className="mt-1 text-2xl font-bold text-slate-900 sm:text-3xl">One-stop facility operations system</h2>
-                <p className="mt-2 max-w-3xl text-sm text-slate-500">
-                  {dashboardSubtitle(user.role, user.department)}
-                </p>
+          {active !== "command" && (
+            <header className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 text-slate-900 shadow-sm sm:p-5">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-bold uppercase text-emerald-700">Complete CAFM Suite</p>
+                  <h2 className="mt-1 text-2xl font-bold text-slate-900 sm:text-3xl">One-stop facility operations system</h2>
+                  <p className="mt-2 max-w-3xl text-sm text-slate-500">
+                    {dashboardSubtitle(user.role, user.department)}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => navigate("work", "Tickets-Work Orders")} className="flex h-11 items-center gap-2 rounded-lg bg-emerald-600 px-4 font-medium text-white shadow-sm transition hover:bg-emerald-700">
+                    Work Orders
+                  </button>
+                  <button onClick={() => navigate("helpdesk", "Tickets-Service Requests")} className="flex h-11 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 font-medium text-slate-700 shadow-sm transition hover:bg-slate-100">
+                    <Smartphone size={18} />
+                    Dispatch
+                  </button>
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button onClick={() => navigate("work", "Tickets-Work Orders")} className="flex h-11 items-center gap-2 rounded-lg bg-emerald-600 px-4 font-medium text-white shadow-sm transition hover:bg-emerald-700">
-                  Work Orders
-                </button>
-                <button onClick={() => navigate("helpdesk", "Tickets-Service Requests")} className="flex h-11 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 font-medium text-slate-700 shadow-sm transition hover:bg-slate-100">
-                  <Smartphone size={18} />
-                  Dispatch
-                </button>
-              </div>
-            </div>
-          </header>
+            </header>
+          )}
 
           {toast && <div className="rounded-lg border border-emerald-100 bg-white p-3 font-medium text-emerald-700 shadow-sm">{toast}</div>}
 
-          <section className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {moduleStats.map((stat) => (
-              <div key={stat.label} className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                <p className="text-sm font-medium text-slate-500">{stat.label}</p>
-                <p className="mt-2 text-3xl font-bold text-slate-900">{stat.currency ? <CurrencyAmount value={stat.value} /> : stat.value}</p>
-                <p className={`mt-1 text-sm font-medium ${statToneClasses[stat.tone]}`}>{stat.delta}</p>
-              </div>
-            ))}
-          </section>
+          {active !== "command" && (
+            <section className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {moduleStats.map((stat) => (
+                <div key={stat.label} className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <p className="text-sm font-medium text-slate-500">{stat.label}</p>
+                  <p className="mt-2 text-3xl font-bold text-slate-900">{stat.currency ? <CurrencyAmount value={stat.value} /> : stat.value}</p>
+                  <p className={`mt-1 text-sm font-medium ${statToneClasses[stat.tone]}`}>{stat.delta}</p>
+                </div>
+              ))}
+            </section>
+          )}
 
           {!canViewActive && <AccessDenied moduleId={active} />}
           {canViewActive && active === "command" && <CommandCenter data={records} />}
@@ -1238,74 +1243,445 @@ export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: st
   );
 }
 
+type DashboardEvent = {
+  id: string;
+  module: string;
+  type: string;
+  status: string;
+  priority: string;
+  title: string;
+  occurredAt: Date;
+};
+
+function eventDate(record: any, keys: string[]) {
+  for (const key of keys) {
+    const value = record?.[key];
+    if (!value) continue;
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  return null;
+}
+
+function pushDashboardEvent(events: DashboardEvent[], module: string, type: string, record: any, dateKeys: string[], titleKeys: string[], status = "Tracked", priority = "Normal") {
+  const occurredAt = eventDate(record, dateKeys);
+  if (!occurredAt) return;
+  const title = titleKeys.map((key) => record?.[key]).find(Boolean) ?? `${module} activity`;
+  events.push({
+    id: String(record?.id ?? `${module}-${events.length}`),
+    module,
+    type,
+    status: String(record?.status ?? status),
+    priority: String(record?.priority ?? record?.risk ?? record?.severity ?? priority),
+    title: String(title),
+    occurredAt,
+  });
+}
+
+function buildDashboardEvents(data: ConsoleData) {
+  const events: DashboardEvent[] = [];
+  data.requests.forEach((record) => pushDashboardEvent(events, "Service Requests", "Request", record, ["createdAt", "updatedAt", "dueAt"], ["ticketNo", "title"], "New", "Normal"));
+  data.workOrders.forEach((record) => pushDashboardEvent(events, "Work Orders", "Work Order", record, ["createdAt", "updatedAt", "dueAt", "plannedStart"], ["woNo", "title"], "Open", "Normal"));
+  data.assets.forEach((record) => pushDashboardEvent(events, "Assets", "Asset", record, ["createdAt", "updatedAt", "installDate", "warrantyExpiry"], ["tag", "assetDescription", "name"], "Active", "Normal"));
+  data.inventory.forEach((record) => pushDashboardEvent(events, "Inventory", "Stock Item", record, ["createdAt", "updatedAt", "lastMovementAt", "expiryDate"], ["sku", "name"], "Tracked", "Normal"));
+  data.inspections.forEach((record) => pushDashboardEvent(events, "HSE", "Inspection", record, ["createdAt", "updatedAt", "dueAt"], ["code", "title"], "Scheduled", "Normal"));
+  data.alerts.forEach((record) => pushDashboardEvent(events, "IoT / BMS", "Alert", record, ["detectedAt", "createdAt", "updatedAt"], ["source", "message"], "New", "Normal"));
+  data.ppms.forEach((record) => pushDashboardEvent(events, "PPM Planner", "PPM", record, ["nextDue", "createdAt", "updatedAt"], ["code", "name"], record.active ? "Active" : "Paused", "Normal"));
+  data.jobPlans.forEach((record) => pushDashboardEvent(events, "Job Plans", "Job Plan", record, ["createdAt", "updatedAt"], ["code", "name"], record.active ? "Active" : "Inactive", "Normal"));
+  data.locations.forEach((record) => pushDashboardEvent(events, "Locations", "Location", record, ["createdAt", "updatedAt"], ["code", "description"], record.active ? "Active" : "Inactive", "Normal"));
+  data.complianceCertificates.forEach((record) => pushDashboardEvent(events, "Compliance", "Certificate", record, ["createdAt", "updatedAt", "expiryDate", "issueDate"], ["certificateNo", "title"], "Active", "Normal"));
+  data.documentUploads.forEach((record) => pushDashboardEvent(events, "Documents", "Document", record, ["createdAt", "updatedAt"], ["fileName", "category"], "Uploaded", "Normal"));
+  data.employees.forEach((record) => pushDashboardEvent(events, "Resource", "Employee", record, ["createdAt", "updatedAt"], ["companyId", "name"], record.active ? "Active" : "Inactive", "Normal"));
+  data.users.forEach((record) => pushDashboardEvent(events, "Users", "User", record, ["createdAt", "updatedAt"], ["email", "name"], record.active ? "Active" : "Inactive", "Normal"));
+  data.auditLogs.forEach((record) => pushDashboardEvent(events, "Activity Logs", "Audit", record, ["createdAt"], ["action", "entity"], "Logged", "Normal"));
+  data.housing.bookings.forEach((record) => pushDashboardEvent(events, "Housing Bookings", "Booking", record, ["createdAt", "updatedAt", "checkIn", "checkOut"], ["bookingNo", "residentName"], "Requested", "Normal"));
+  data.housing.inspections.forEach((record) => pushDashboardEvent(events, "Housing Inspections", "Inspection", record, ["createdAt", "updatedAt", "dueAt"], ["inspectionNo", "inspectionType"], "Scheduled", "Normal"));
+  data.housing.assets.forEach((record) => pushDashboardEvent(events, "Housing Assets", "Asset", record, ["createdAt", "updatedAt", "nextPmDue", "lastInspectionAt"], ["tag", "name"], "Active", "Normal"));
+  data.housing.inventory.forEach((record) => pushDashboardEvent(events, "Housing Inventory", "Inventory", record, ["createdAt", "updatedAt", "lastMovementAt", "expiryDate"], ["sku", "name"], "Tracked", "Normal"));
+  data.housing.approvals.forEach((record) => pushDashboardEvent(events, "Housing Approvals", "Approval", record, ["createdAt", "updatedAt"], ["approvalNo", "level"], "Pending", "Normal"));
+  data.housing.notifications.forEach((record) => pushDashboardEvent(events, "Housing Alerts", "Notification", record, ["createdAt", "sentAt", "updatedAt"], ["title", "alertType"], "Sent", "Normal"));
+  data.housing.history.forEach((record) => pushDashboardEvent(events, "Housing History", "History", record, ["createdAt"], ["action", "entity"], "Logged", "Normal"));
+  return events.sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
+}
+
+function formatDateTimeInput(date: Date) {
+  const offset = date.getTimezoneOffset();
+  const local = new Date(date.getTime() - offset * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function parseDateTimeInput(value: string, fallback: Date) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? fallback : date;
+}
+
+function countBy<T>(items: T[], getKey: (item: T) => string) {
+  const counts = new Map<string, number>();
+  items.forEach((item) => {
+    const key = getKey(item) || "Unassigned";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+  return Array.from(counts.entries()).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+}
+
+function hourlyActivity(events: DashboardEvent[]) {
+  const counts = new Map<string, number>();
+  events.forEach((event) => {
+    const key = `${String(event.occurredAt.getHours()).padStart(2, "0")}:00`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+  return Array.from({ length: 24 }, (_, hour) => {
+    const name = `${String(hour).padStart(2, "0")}:00`;
+    return { name, activity: counts.get(name) ?? 0 };
+  });
+}
+
+function percent(value: number, total: number) {
+  if (!total) return 0;
+  return Math.round((value / total) * 100);
+}
+
+function compactNumber(value: number) {
+  return Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
 function CommandCenter({ data }: { data: ConsoleData }) {
+  const [fromValue, setFromValue] = useState("");
+  const [toValue, setToValue] = useState("");
+  const [moduleFilter, setModuleFilter] = useState("All");
+  const allEvents = useMemo(() => buildDashboardEvents(data), [data]);
+  const moduleOptions = useMemo(() => ["All", ...Array.from(new Set(allEvents.map((event) => event.module))).sort()], [allEvents]);
+  const fromDate = fromValue ? parseDateTimeInput(fromValue, new Date(0)) : new Date(0);
+  const toDate = toValue ? parseDateTimeInput(toValue, new Date(8640000000000000)) : new Date(8640000000000000);
+
+  useEffect(() => {
+    const current = new Date();
+    setFromValue(formatDateTimeInput(new Date(current.getTime() - 24 * 60 * 60 * 1000)));
+    setToValue(formatDateTimeInput(current));
+  }, []);
+  const filteredEvents = allEvents.filter((event) => {
+    const timestamp = event.occurredAt.getTime();
+    return timestamp >= fromDate.getTime() && timestamp <= toDate.getTime() && (moduleFilter === "All" || event.module === moduleFilter);
+  });
+  const moduleBreakdown = countBy(filteredEvents, (event) => event.module);
+  const statusBreakdown = countBy(filteredEvents, (event) => event.status);
+  const priorityBreakdown = countBy(filteredEvents, (event) => event.priority);
+  const hourlyRows = hourlyActivity(filteredEvents);
+  const busiestModule = moduleBreakdown[0]?.name ?? "-";
+  const activeStatuses = statusBreakdown.length;
+  const workOrders = data.workOrders;
+  const requests = data.requests;
+  const housingBookings = data.housing.bookings;
+  const assets = data.assets;
+  const ppms = data.ppms;
+  const inventory = data.inventory;
+  const openWorkOrders = workOrders.filter((work) => !["CLOSED", "COMPLETED", "VERIFIED", "REJECTED", "CANCELLED"].includes(String(work.status || "").toUpperCase())).length;
+  const inProgressWorkOrders = workOrders.filter((work) => ["IN_PROGRESS", "ASSIGNED", "ACCEPTED"].includes(String(work.status || "").toUpperCase())).length;
+  const completedWorkOrders = workOrders.filter((work) => ["CLOSED", "COMPLETED", "VERIFIED"].includes(String(work.status || "").toUpperCase())).length;
+  const currentGuests = housingBookings.filter((booking) => ["CHECKED_IN", "APPROVED"].includes(String(booking.status || "").toUpperCase())).length;
+  const duePpms = ppms.filter((ppm) => ppm.nextDue && new Date(ppm.nextDue).getTime() <= toDate.getTime()).length;
+  const criticalAssets = assets.filter((asset) => ["CRITICAL", "HIGH"].includes(String(asset.criticality || "").toUpperCase())).length;
+  const inventoryOnHand = inventory.reduce((total, item) => total + Number(item.onHand || 0), 0);
+  const overallProgress = percent(completedWorkOrders + currentGuests + ppms.filter((ppm) => ppm.active).length, Math.max(1, workOrders.length + housingBookings.length + ppms.length));
+  const openWorkPercent = percent(openWorkOrders, Math.max(1, workOrders.length));
+  const inProgressPercent = percent(inProgressWorkOrders, Math.max(1, workOrders.length));
+  const ppmDuePercent = percent(duePpms, Math.max(1, ppms.length));
+  const assetActivePercent = percent(assets.filter((asset) => String(asset.status || "").toUpperCase() === "ACTIVE").length, Math.max(1, assets.length));
+  const hourlyChart = hourlyRows.map((row) => ({
+    ...row,
+    work: filteredEvents.filter((event) => event.module === "Work Orders" && `${String(event.occurredAt.getHours()).padStart(2, "0")}:00` === row.name).length,
+    bookings: filteredEvents.filter((event) => event.module.includes("Housing") && `${String(event.occurredAt.getHours()).padStart(2, "0")}:00` === row.name).length,
+    assets: filteredEvents.filter((event) => event.module.includes("Asset") && `${String(event.occurredAt.getHours()).padStart(2, "0")}:00` === row.name).length,
+    ppm: filteredEvents.filter((event) => event.module === "PPM Planner" && `${String(event.occurredAt.getHours()).padStart(2, "0")}:00` === row.name).length,
+  }));
+  const topCards = [
+    { label: "Work Orders", icon: Wrench, tone: "bg-lagoon text-white", value: openWorkOrders, detail: "Open", sideValue: completedWorkOrders, sideLabel: "Completed" },
+    { label: "Booking & Reservations", icon: CalendarCheck, tone: "bg-emerald-600 text-white", value: housingBookings.length, detail: "Total bookings", sideValue: currentGuests, sideLabel: "Current guests" },
+    { label: "Asset Inventory", icon: Building2, tone: "bg-coral text-white", value: assets.length, detail: "Total assets", sideValue: compactNumber(inventoryOnHand), sideLabel: "Inventory units" },
+    { label: "Planned Maintenance", icon: ClipboardCheck, tone: "bg-amber-500 text-white", value: duePpms, detail: "Due PM assets", sideValue: ppms.length, sideLabel: "Scheduled" },
+    { label: "Recent Progress", icon: Activity, tone: "bg-slate-700 text-white", value: `${overallProgress}%`, detail: "Overall progress", sideValue: activeStatuses, sideLabel: "Active statuses" },
+  ];
+  const progressData = [
+    { name: "Completed", value: completedWorkOrders },
+    { name: "In Progress", value: inProgressWorkOrders },
+    { name: "PPM Due", value: duePpms },
+    { name: "Requests", value: requests.length },
+  ];
+  const workOverview = [
+    { name: "Open", value: openWorkOrders },
+    { name: "In Progress", value: inProgressWorkOrders },
+    { name: "Completed", value: completedWorkOrders },
+    { name: "Pending PPM", value: duePpms },
+  ];
+  const bookingBars = [
+    { name: "Bookings", value: housingBookings.length },
+    { name: "Guests", value: currentGuests },
+    { name: "Requests", value: requests.length },
+    { name: "This Range", value: filteredEvents.filter((event) => event.module.includes("Housing") || event.module === "Service Requests").length },
+  ];
+  const assetStatusRows = countBy(assets, (asset) => String(asset.status || "Unknown")).slice(0, 5);
+  const latestRows = filteredEvents.slice(0, 12).map((event) => ({
+    id: event.id,
+    module: event.module,
+    item: event.title,
+    type: event.type,
+    status: event.status,
+    priority: event.priority,
+    occurredAt: formatDateCell(event.occurredAt.toISOString()),
+  }));
+
   return (
-    <section className="grid gap-5 xl:grid-cols-[1.4fr_0.8fr]">
-      <Panel title="Operational Throughput" icon={Gauge}>
-        <div className="h-80">
-          <ResponsiveContainer>
-            <AreaChart data={chartData}>
-              <defs>
-                <linearGradient id="ppm" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stopColor="#0f8b8d" stopOpacity={0.45} />
-                  <stop offset="100%" stopColor="#0f8b8d" stopOpacity={0.04} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#d9e6ee" />
-              <XAxis dataKey="name" />
-              <YAxis />
-              <Tooltip />
-              <Area type="monotone" dataKey="ppm" stroke="#0f8b8d" fill="url(#ppm)" strokeWidth={3} />
-              <Area type="monotone" dataKey="reactive" stroke="#f45d48" fill="#f45d4822" strokeWidth={3} />
-            </AreaChart>
-          </ResponsiveContainer>
+    <section className="grid gap-4">
+      <div className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm xl:flex-row xl:items-end xl:justify-between">
+        <div>
+          <p className="text-sm font-black uppercase text-emerald-700">Facility Management Summary</p>
+          <h3 className="mt-1 text-2xl font-black text-slate-900">Dashboard overview</h3>
+          <p className="mt-2 text-sm font-bold text-slate-500">Default range is the last 24 hours, with module-level filtering.</p>
         </div>
-      </Panel>
-      <Panel title="Asset Health" icon={Activity}>
-        <div className="h-80">
-          <ResponsiveContainer>
-            <PieChart>
-              <Pie data={assetHealth} dataKey="value" innerRadius={65} outerRadius={105} paddingAngle={5}>
-                {assetHealth.map((entry, index) => (
-                  <Cell key={entry.name} fill={healthColors[index]} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
+        <div className="grid gap-2 sm:grid-cols-3 xl:min-w-[660px]">
+          <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+            From
+            <input type="datetime-local" value={fromValue} onChange={(event) => setFromValue(event.target.value)} className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold normal-case text-slate-700 outline-none focus:border-lagoon" />
+          </label>
+          <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+            To
+            <input type="datetime-local" value={toValue} onChange={(event) => setToValue(event.target.value)} className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold normal-case text-slate-700 outline-none focus:border-lagoon" />
+          </label>
+          <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+            Module
+            <select value={moduleFilter} onChange={(event) => setModuleFilter(event.target.value)} className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold normal-case text-slate-700 outline-none focus:border-lagoon">
+              {moduleOptions.map((module) => <option key={module} value={module}>{module}</option>)}
+            </select>
+          </label>
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          {assetHealth.map((item, index) => (
-            <div key={item.name} className="rounded-lg bg-slate-50 p-2 text-sm font-bold">
-              <span className="mr-2 inline-block h-2 w-2 rounded-full" style={{ background: healthColors[index] }} />
-              {item.name}: {item.value}%
+      </div>
+
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        {topCards.map((card) => {
+          const Icon = card.icon;
+          return (
+            <div key={card.label} className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className={`grid h-12 w-12 shrink-0 place-items-center rounded-lg ${card.tone}`}>
+                  <Icon size={24} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-black text-slate-800">{card.label}</p>
+                  <div className="mt-2 flex items-baseline justify-between gap-3">
+                    <p className="text-3xl font-black text-slate-950">{card.value}</p>
+                    <p className="text-2xl font-black text-slate-800">{card.sideValue}</p>
+                  </div>
+                  <div className="mt-1 flex justify-between gap-3 text-xs font-bold text-slate-500">
+                    <span>{card.detail}</span>
+                    <span>{card.sideLabel}</span>
+                  </div>
+                </div>
+              </div>
             </div>
-          ))}
-        </div>
-      </Panel>
-      <Panel title="Priority Work Queue" icon={HardHat}>
-        <DataTable
-          rows={data.workOrders}
-          columns={[
-            ["woNo", "WO"],
-            ["title", "Job"],
-            ["priority", "Priority"],
-            ["status", "Status"],
-            ["dueAt", "Due"],
-          ]}
-        />
-      </Panel>
-      <Panel title="Portfolio Sites" icon={MapPinned}>
-        <DataTable
-          rows={data.sites}
-          columns={[
-            ["name", "Site"],
-            ["city", "City"],
-            ["type", "Type"],
-            ["areaSqm", "Area sqm"],
-          ]}
-        />
-      </Panel>
+          );
+        })}
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_260px]">
+        <Panel title="Facility Management Summary" icon={Gauge}>
+          <div className="mb-4 grid gap-3 sm:grid-cols-4">
+            {[
+              ["Completed Work Orders", completedWorkOrders],
+              ["Current Guests", currentGuests],
+              ["Inventory Units", compactNumber(inventoryOnHand)],
+              ["Completed From Range", filteredEvents.length],
+            ].map(([label, value]) => (
+              <div key={label} className="rounded-lg bg-slate-50 p-3 text-center">
+                <p className="text-2xl font-black text-slate-950">{value}</p>
+                <p className="mt-1 text-xs font-bold text-slate-500">{label}</p>
+              </div>
+            ))}
+          </div>
+          <div className="h-72">
+            <ResponsiveContainer>
+              <AreaChart data={hourlyChart}>
+                <defs>
+                  <linearGradient id="dashWork" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#0f8b8d" stopOpacity={0.42} /><stop offset="100%" stopColor="#0f8b8d" stopOpacity={0.04} /></linearGradient>
+                  <linearGradient id="dashBookings" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#06d6a0" stopOpacity={0.36} /><stop offset="100%" stopColor="#06d6a0" stopOpacity={0.04} /></linearGradient>
+                  <linearGradient id="dashAssets" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#f45d48" stopOpacity={0.34} /><stop offset="100%" stopColor="#f45d48" stopOpacity={0.04} /></linearGradient>
+                  <linearGradient id="dashPpm" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#ffd166" stopOpacity={0.42} /><stop offset="100%" stopColor="#ffd166" stopOpacity={0.04} /></linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#d9e6ee" />
+                <XAxis dataKey="name" />
+                <YAxis allowDecimals={false} />
+                <Tooltip />
+                <Area type="monotone" dataKey="work" stroke="#0f8b8d" fill="url(#dashWork)" strokeWidth={3} />
+                <Area type="monotone" dataKey="bookings" stroke="#06d6a0" fill="url(#dashBookings)" strokeWidth={3} />
+                <Area type="monotone" dataKey="assets" stroke="#f45d48" fill="url(#dashAssets)" strokeWidth={3} />
+                <Area type="monotone" dataKey="ppm" stroke="#d99b00" fill="url(#dashPpm)" strokeWidth={3} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </Panel>
+        <Panel title="Overall Progress" icon={Activity}>
+          <div className="grid h-full content-center gap-4">
+            <div className="text-center">
+              <p className="text-3xl font-black text-slate-950">{overallProgress}%</p>
+              <p className="text-xs font-black uppercase text-slate-500">Overall Progress</p>
+            </div>
+            <div className="h-52">
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie data={progressData.length ? progressData : [{ name: "No activity", value: 1 }]} dataKey="value" nameKey="name" innerRadius={62} outerRadius={92} paddingAngle={4}>
+                    {(progressData.length ? progressData : [{ name: "No activity", value: 1 }]).map((entry, index) => (
+                      <Cell key={entry.name} fill={progressData.length ? dashboardColors[index % dashboardColors.length] : "#cbd5e1"} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </Panel>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-3">
+        <Panel title="Work Orders Overview" icon={Wrench}>
+          <div className="grid gap-4 md:grid-cols-[170px_1fr]">
+            <div className="h-44">
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie data={workOverview} dataKey="value" nameKey="name" innerRadius={52} outerRadius={76} paddingAngle={4}>
+                    {workOverview.map((entry, index) => <Cell key={entry.name} fill={dashboardColors[index % dashboardColors.length]} />)}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="grid content-center gap-3">
+              {[
+                ["Open", openWorkOrders, openWorkPercent, "bg-lagoon"],
+                ["In Progress", inProgressWorkOrders, inProgressPercent, "bg-emerald-500"],
+                ["Completed", completedWorkOrders, percent(completedWorkOrders, Math.max(1, workOrders.length)), "bg-slate-700"],
+                ["Pending PPM", duePpms, ppmDuePercent, "bg-amber-500"],
+              ].map(([label, value, width, color]) => (
+                <div key={label} className="grid gap-1">
+                  <div className="flex justify-between text-sm font-black text-slate-700"><span>{value} {label}</span><span>{width}%</span></div>
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full ${color}`} style={{ width: `${width}%` }} /></div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="mt-4 h-28">
+            <ResponsiveContainer>
+              <BarChart data={workOverview}>
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Bar dataKey="value" fill="#0f8b8d" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Panel>
+
+        <Panel title="Bookings Overview" icon={CalendarCheck}>
+          <div className="grid gap-3">
+            {[
+              ["Total Bookings", housingBookings.length],
+              ["Current Guests", currentGuests],
+              ["This Range", filteredEvents.filter((event) => event.module.includes("Housing")).length],
+              ["Service Requests", requests.length],
+            ].map(([label, value]) => (
+              <div key={label} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+                <span className="text-sm font-bold text-slate-500">{label}</span>
+                <span className="text-xl font-black text-slate-950">{value}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 h-40">
+            <ResponsiveContainer>
+              <BarChart data={bookingBars}>
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <YAxis allowDecimals={false} />
+                <Tooltip />
+                <Bar dataKey="value" fill="#06d6a0" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Panel>
+
+        <Panel title="Asset Inventory Status" icon={Building2}>
+          <div className="grid gap-4 md:grid-cols-[1fr_150px]">
+            <div className="grid content-center gap-3">
+              <div><p className="text-3xl font-black text-slate-950">{assets.length}</p><p className="text-sm font-bold text-slate-500">Total Assets</p></div>
+              <div><p className="text-2xl font-black text-slate-950">{criticalAssets}</p><p className="text-sm font-bold text-slate-500">Critical / High</p></div>
+              <div><p className="text-2xl font-black text-slate-950">{duePpms}</p><p className="text-sm font-bold text-slate-500">Due This Week</p></div>
+            </div>
+            <div className="h-40">
+              <ResponsiveContainer>
+                <PieChart>
+                  <Pie data={assetStatusRows.length ? assetStatusRows : [{ name: "No assets", value: 1 }]} dataKey="value" nameKey="name" innerRadius={42} outerRadius={68} paddingAngle={3}>
+                    {(assetStatusRows.length ? assetStatusRows : [{ name: "No assets", value: 1 }]).map((entry, index) => <Cell key={entry.name} fill={assetStatusRows.length ? dashboardColors[index % dashboardColors.length] : "#cbd5e1"} />)}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-2">
+            {assetStatusRows.map((item, index) => (
+              <div key={item.name} className="flex items-center justify-between text-sm font-bold text-slate-600">
+                <span><span className="mr-2 inline-block h-2 w-2 rounded-full" style={{ background: dashboardColors[index % dashboardColors.length] }} />{item.name}</span>
+                <span>{percent(item.value, Math.max(1, assets.length))}%</span>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-[0.9fr_0.8fr_1.1fr_0.9fr]">
+        <Panel title="Module Share" icon={LayoutDashboard}>
+          <div className="h-52">
+            <ResponsiveContainer>
+              <PieChart>
+                <Pie data={moduleBreakdown.length ? moduleBreakdown : [{ name: "No activity", value: 1 }]} dataKey="value" nameKey="name" innerRadius={58} outerRadius={108} paddingAngle={4}>
+                  {(moduleBreakdown.length ? moduleBreakdown : [{ name: "No activity", value: 1 }]).map((entry, index) => (
+                    <Cell key={entry.name} fill={moduleBreakdown.length ? dashboardColors[index % dashboardColors.length] : "#cbd5e1"} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="grid gap-2">
+            {moduleBreakdown.slice(0, 6).map((item, index) => (
+              <div key={item.name} className="rounded-lg bg-slate-50 p-2 text-sm font-bold">
+                <span className="mr-2 inline-block h-2 w-2 rounded-full" style={{ background: dashboardColors[index % dashboardColors.length] }} />
+                {item.name}: {item.value}
+              </div>
+            ))}
+          </div>
+        </Panel>
+        <Panel title="Status Breakdown" icon={Activity}>
+          <div className="h-72">
+            <ResponsiveContainer>
+              <BarChart data={statusBreakdown.slice(0, 10)} layout="vertical" margin={{ left: 18, right: 12 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#d9e6ee" />
+                <XAxis type="number" allowDecimals={false} />
+                <YAxis type="category" dataKey="name" width={132} />
+                <Tooltip />
+                <Bar dataKey="value" fill="#06d6a0" radius={[0, 6, 6, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Panel>
+        <Panel title="Asset Inventory Status" icon={Building2}>
+          <DataTable
+            rows={assets.slice(0, 6).map((asset) => ({ id: asset.id, facility: asset.siteCode || asset.organization || "-", building: asset.buildingCode || "-", asset: asset.assetDescription || asset.name || asset.tag, priority: asset.criticality || "-", status: asset.status || "-" }))}
+            columns={[["facility", "Facility"], ["building", "Building"], ["asset", "Asset"], ["priority", "Priority"], ["status", "Status"]]}
+          />
+        </Panel>
+        <Panel title="Recent Work Orders" icon={HardHat}>
+          <DataTable
+            rows={latestRows.filter((row) => row.module === "Work Orders").slice(0, 6)}
+            columns={[["item", "Work Order"], ["status", "Status"], ["priority", "Priority"], ["occurredAt", "When"]]}
+          />
+        </Panel>
+      </section>
     </section>
   );
 }

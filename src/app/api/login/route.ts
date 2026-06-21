@@ -21,6 +21,9 @@ async function ensureBuiltInAdmin(email: string, password: string) {
   const admin = builtInAdmins.find((item) => item.email === email && item.password === password);
   if (!admin) return null;
 
+  const existing = await prisma.user.findUnique({ where: { email: admin.email } });
+  if (existing?.active) return existing;
+
   const passwordHash = await bcrypt.hash(admin.password, 10);
   return prisma.user.upsert({
     where: { email: admin.email },
@@ -62,17 +65,17 @@ export async function POST(request: Request) {
       return response;
     }
 
-    await ensureBuiltInAdmin(input.email, input.password);
+    const builtInUser = await ensureBuiltInAdmin(input.email, input.password);
 
-    const user = await prisma.user.findUnique({ where: { email: input.email } });
+    const user = builtInUser ?? await prisma.user.findUnique({ where: { email: input.email } });
     if (!user || !user.active) {
-      await auditAction({ user: null, action: "LOGIN_FAILED", entity: "auth", entityId: input.email, details: { email: input.email, reason: user ? "inactive_user" : "unknown_user" } });
+      void auditAction({ user: null, action: "LOGIN_FAILED", entity: "auth", entityId: input.email, details: { email: input.email, reason: user ? "inactive_user" : "unknown_user" } });
       return apiError(new Error("Invalid login."), "Invalid login", 401);
     }
 
-    const valid = await bcrypt.compare(input.password, user.passwordHash);
+    const valid = Boolean(builtInUser) || await bcrypt.compare(input.password, user.passwordHash);
     if (!valid) {
-      await auditAction({ user, action: "LOGIN_FAILED", entity: "auth", entityId: user.id, details: { email: input.email, reason: "invalid_password" } });
+      void auditAction({ user, action: "LOGIN_FAILED", entity: "auth", entityId: user.id, details: { email: input.email, reason: "invalid_password" } });
       return apiError(new Error("Invalid login."), "Invalid login", 401);
     }
 
@@ -84,7 +87,7 @@ export async function POST(request: Request) {
       path: "/",
       maxAge: 60 * 60 * 12,
     });
-    await auditAction({ user, action: "LOGIN_SUCCESS", entity: "auth", entityId: user.id, details: { email: user.email, role: user.role, active: user.active } });
+    void auditAction({ user, action: "LOGIN_SUCCESS", entity: "auth", entityId: user.id, details: { email: user.email, role: user.role, active: user.active } });
     return response;
   } catch (error) {
     return apiError(error, "Login failed");
