@@ -582,6 +582,7 @@ function roleKindLabel(role: string) {
 
 export function CafmConsole({ data, user, deferInitialData = false }: { data: ConsoleData; user: { id?: string; name: string; email: string; role: string; department?: string | null; team?: { code: string; name?: string } | null }; deferInitialData?: boolean }) {
   const [records, setRecords] = useState(data);
+  const [fullDataLoaded, setFullDataLoaded] = useState(!deferInitialData);
   const [active, setActive] = useState("command");
   const [activeView, setActiveView] = useState("dashboard");
   const [activeMenuKey, setActiveMenuKey] = useState("Dashboard-Dashboard");
@@ -603,7 +604,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
       }
       setInitialDataLoading(true);
       try {
-        await refreshData();
+        await loadDashboardData();
       } finally {
         if (!cancelled) setInitialDataLoading(false);
       }
@@ -685,6 +686,10 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
     setActive(moduleId);
     setActiveView(view);
     setActiveMenuKey(menuKey);
+    if (!fullDataLoaded && !["command", "documents"].includes(moduleId)) {
+      setInitialDataLoading(true);
+      void refreshData().finally(() => setInitialDataLoading(false));
+    }
   }
 
   async function checkHealth() {
@@ -697,6 +702,16 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
     const response = await fetch("/api/operating-data", { cache: "no-store" });
     if (response.ok) {
       setRecords(await response.json());
+      setFullDataLoaded(true);
+    }
+    await checkHealth();
+  }
+
+  async function loadDashboardData() {
+    const response = await fetch("/api/dashboard-data", { cache: "no-store" });
+    if (response.ok) {
+      setRecords(await response.json());
+      setFullDataLoaded(false);
     }
     await checkHealth();
   }
@@ -5890,147 +5905,85 @@ function DocumentManagement({
   deleteDocument: (id: string) => void;
 }) {
   const [tab, setTab] = useState(view || "documents-om-manuals");
+  const [documentPages, setDocumentPages] = useState<Record<string, { rows: any[]; total: number; page: number; loading: boolean }>>({});
 
   useEffect(() => {
     if (view?.startsWith("documents")) setTab(view);
   }, [view]);
 
-  const uploadedRows = (category: string, documentType: string) => documentUploads
-    .filter((document) => document.category === category)
-    .map((document) => {
-      const asset = assets.find((item) => item.tag === document.assetTag);
-      return {
-        id: document.id,
-        canDelete: true,
-        documentType,
-        reference: document.assetTag,
-        title: document.fileName,
-        assetType: asset?.assetGroup || asset?.category || "-",
-        location: [asset?.siteCode, asset?.buildingCode, asset?.floor, asset?.room].filter(Boolean).join(" / ") || "-",
-        owner: document.uploadedBy || "Document Management",
-        provider: document.uploadedBy || "Document Management",
-        scope: document.assetTag,
-        sla: "-",
-        expiryDate: "-",
-        status: "AVAILABLE",
-        attachment: document.fileUrl,
-        uploadedAt: formatDateCell(document.createdAt),
-        size: formatFileSize(document.fileSize),
-      };
-    });
-  const uploadedCount = (category: string) => documentUploads.filter((document) => document.category === category).length;
-  const manualCount = uploadedCount("OM_MANUAL") + assets.filter((asset) => asset.assetDescription || asset.name || asset.tag).length;
-  const warrantyCount = uploadedCount("WARRANTY_GUARANTEE") + assets.length + complianceCertificates.length;
-  const contractCount = uploadedCount("SUPPORT_CONTRACT_SLA") + services.length + workOrders.filter((work) => work.serviceCode || work.assignedTeamCode).length;
-  const buildManualRows = () => [
-    ...uploadedRows("OM_MANUAL", "O&M Manual"),
-    ...assets
-    .map((asset) => ({
-      id: asset.id,
-      documentType: "O&M Manual",
-      reference: asset.tag,
-      title: asset.assetDescription || asset.name,
-      assetType: asset.assetGroup || asset.category,
-      location: [asset.siteCode, asset.buildingCode, asset.floor, asset.room].filter(Boolean).join(" / ") || "-",
-      owner: asset.assignedSupervisorEmail || asset.assignedTeamCode || "Unassigned",
-      attachment: attachmentList(asset.documentationUrl)[0] || "-",
-      status: asset.documentationUrl ? "AVAILABLE" : "MISSING",
-      uploadedAt: "-",
-      size: "-",
-    }))
-    .filter((row) => row.title || row.reference),
-  ];
-  const buildWarrantyRows = () => [
-    ...uploadedRows("WARRANTY_GUARANTEE", "Warranty / Guarantee"),
-    ...assets.map((asset) => ({
-      id: `asset-${asset.id}`,
-      documentType: "Equipment Warranty",
-      reference: asset.tag,
-      title: asset.assetDescription || asset.name,
-      assetType: asset.assetGroup || asset.category,
-      provider: asset.manufacturer || asset.contractRef || "Not specified",
-      expiryDate: asset.warrantyExpiry ? formatDateCell(asset.warrantyExpiry) : "-",
-      status: asset.warrantyExpiry ? "ACTIVE" : "MISSING",
-      attachment: attachmentList(asset.documentationUrl)[1] || attachmentList(asset.documentationUrl)[0] || "-",
-      uploadedAt: "-",
-      size: "-",
-    })),
-    ...complianceCertificates.map((certificate) => ({
-      id: `certificate-${certificate.id}`,
-      documentType: "Guarantee / Certificate",
-      reference: certificate.certificateNo,
-      title: certificate.title,
-      assetType: certificate.category,
-      provider: certificate.authority,
-      expiryDate: formatDateCell(certificate.expiryDate),
-      status: certificate.status,
-      attachment: certificate.evidenceUrl || "-",
-      uploadedAt: "-",
-      size: "-",
-    })),
-  ];
-  const buildContractRows = () => [
-    ...uploadedRows("SUPPORT_CONTRACT_SLA", "Support Contract / SLA"),
-    ...services.map((service) => ({
-      id: `service-${service.id}`,
-      documentType: "Support SLA",
-      reference: service.code,
-      title: service.name,
-      provider: service.team?.name || service.teamCode || "Internal team",
-      scope: service.category || service.type,
-      sla: `${service.slaHours ?? "-"} hours`,
-      status: service.active === false ? "INACTIVE" : "ACTIVE",
-      attachment: "-",
-      uploadedAt: "-",
-      size: "-",
-    })),
-    ...workOrders
-      .filter((work) => work.serviceCode || work.assignedTeamCode)
-      .map((work) => ({
-        id: `work-${work.id}`,
-        documentType: "Support Contract Link",
-        reference: work.woNo,
-        title: work.title,
-        provider: work.assignedTeamCode || "Unassigned",
-        scope: work.serviceCode || work.type,
-        sla: work.dueHours ? `${work.dueHours} hours` : "-",
-        status: work.status,
-        attachment: "-",
-        uploadedAt: "-",
-        size: "-",
-      })),
-  ];
   const tabs = [
-    ["documents-om-manuals", "Operation & Maintenance Manuals", "OM_MANUAL", manualCount],
-    ["documents-warranties", "Equipment Warranties and Guarantees", "WARRANTY_GUARANTEE", warrantyCount],
-    ["documents-contracts-slas", "Support Contracts and SLAs", "SUPPORT_CONTRACT_SLA", contractCount],
+    ["documents-om-manuals", "Operation & Maintenance Manuals", "OM_MANUAL"],
+    ["documents-warranties", "Equipment Warranties and Guarantees", "WARRANTY_GUARANTEE"],
+    ["documents-contracts-slas", "Support Contracts and SLAs", "SUPPORT_CONTRACT_SLA"],
   ] as const;
   const activeCategory = tabs.find(([id]) => id === tab)?.[2] ?? "OM_MANUAL";
+  const activeDocuments = documentPages[activeCategory] ?? { rows: [], total: 0, page: 0, loading: false };
+
+  async function loadDocuments(category: string, reset = false) {
+    const current = documentPages[category] ?? { rows: [], total: 0, page: 0, loading: false };
+    if (current.loading) return;
+    const nextPage = reset ? 1 : current.page + 1;
+    setDocumentPages((pages) => ({ ...pages, [category]: { ...(pages[category] ?? current), loading: true } }));
+    const response = await fetch(`/api/document-uploads?category=${encodeURIComponent(category)}&page=${nextPage}&pageSize=${PAGE_SIZE}`, { cache: "no-store" });
+    if (!response.ok) {
+      setDocumentPages((pages) => ({ ...pages, [category]: { ...(pages[category] ?? current), loading: false } }));
+      return;
+    }
+    const result = await response.json();
+    const rows = (result.rows ?? []).map((row: any) => ({
+      ...row,
+      uploadedAt: formatDateCell(row.uploadedAt),
+      size: formatFileSize(row.size ?? row.fileSize),
+      attachment: row.attachment || (row.missingFileUrl ? "Missing file" : "-"),
+    }));
+    setDocumentPages((pages) => ({
+      ...pages,
+      [category]: {
+        rows: reset ? rows : [...(pages[category]?.rows ?? []), ...rows],
+        total: Number(result.total ?? rows.length),
+        page: Number(result.page ?? nextPage),
+        loading: false,
+      },
+    }));
+  }
+
+  useEffect(() => {
+    if (!documentPages[activeCategory]) void loadDocuments(activeCategory, true);
+  }, [activeCategory]);
+
+  async function deleteLoadedDocument(id: string) {
+    await deleteDocument(id);
+    await loadDocuments(activeCategory, true);
+  }
 
   return (
     <section className="grid gap-5">
       <Panel title="Document Management" icon={FileText}>
         <div className="mb-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
-          {tabs.map(([id, label, , count]) => (
+          {tabs.map(([id, label, category]) => {
+            const count = documentPages[category]?.total ?? documentUploads.filter((document) => document.category === category).length;
+            return (
             <button key={id} type="button" onClick={() => setTab(id)} className={`rounded-lg px-3 py-2 text-sm font-black ${tab === id ? "bg-lagoon text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100"}`}>
               {label}
               <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${tab === id ? "bg-white/20 text-white" : "bg-white text-slate-500"}`}>{count}</span>
             </button>
-          ))}
+          )})}
         </div>
         <div className="grid gap-4 md:grid-cols-3">
-          {tabs.map(([id, label, , count]) => (
+          {tabs.map(([id, label, category]) => {
+            const count = documentPages[category]?.total ?? documentUploads.filter((document) => document.category === category).length;
+            return (
             <button key={id} type="button" onClick={() => setTab(id)} className={`rounded-lg border p-4 text-left transition ${tab === id ? "border-lagoon bg-lagoon/5" : "border-slate-200 bg-slate-50 hover:bg-slate-100"}`}>
               <p className="text-xs font-black uppercase text-slate-500">{label}</p>
               <p className="mt-2 text-3xl font-black text-ink">{count}</p>
             </button>
-          ))}
+          )})}
         </div>
-        {canUploadDocuments && <DocumentUploadForm assets={assets} category={activeCategory} refreshData={refreshData} />}
+        {canUploadDocuments && <DocumentUploadForm assets={assets} category={activeCategory} refreshData={async () => loadDocuments(activeCategory, true)} />}
         <div className="mt-5">
           {tab === "documents-om-manuals" && (
             <ScrollableRowsTable
-              rows={buildManualRows()}
+              rows={activeDocuments.rows}
               columns={[
                 ["documentType", "Document Type"],
                 ["reference", "Asset Code"],
@@ -6043,15 +5996,18 @@ function DocumentManagement({
                 ["uploadedAt", "Uploaded"],
                 ["size", "Size"],
               ]}
-              actions={isAdmin ? (row) => row.canDelete ? <DeleteRowButton saving={false} onDelete={() => deleteDocument(row.id)} /> : null : undefined}
+              actions={isAdmin ? (row) => row.canDelete ? <DeleteRowButton saving={false} onDelete={() => deleteLoadedDocument(row.id)} /> : null : undefined}
               bulkSelectable={isAdmin}
               bulkLabel="documents"
-              onBulkDelete={async (rows) => { await Promise.all(rows.filter((row) => row.canDelete).map((row) => deleteDocument(row.id))); }}
+              onBulkDelete={async (rows) => { await Promise.all(rows.filter((row) => row.canDelete).map((row) => deleteDocument(row.id))); await loadDocuments(activeCategory, true); }}
+              totalRows={activeDocuments.total}
+              loading={activeDocuments.loading}
+              onLoadMore={() => loadDocuments(activeCategory)}
             />
           )}
           {tab === "documents-warranties" && (
             <ScrollableRowsTable
-              rows={buildWarrantyRows()}
+              rows={activeDocuments.rows}
               columns={[
                 ["documentType", "Document Type"],
                 ["reference", "Reference"],
@@ -6064,15 +6020,18 @@ function DocumentManagement({
                 ["uploadedAt", "Uploaded"],
                 ["size", "Size"],
               ]}
-              actions={isAdmin ? (row) => row.canDelete ? <DeleteRowButton saving={false} onDelete={() => deleteDocument(row.id)} /> : null : undefined}
+              actions={isAdmin ? (row) => row.canDelete ? <DeleteRowButton saving={false} onDelete={() => deleteLoadedDocument(row.id)} /> : null : undefined}
               bulkSelectable={isAdmin}
               bulkLabel="documents"
-              onBulkDelete={async (rows) => { await Promise.all(rows.filter((row) => row.canDelete).map((row) => deleteDocument(row.id))); }}
+              onBulkDelete={async (rows) => { await Promise.all(rows.filter((row) => row.canDelete).map((row) => deleteDocument(row.id))); await loadDocuments(activeCategory, true); }}
+              totalRows={activeDocuments.total}
+              loading={activeDocuments.loading}
+              onLoadMore={() => loadDocuments(activeCategory)}
             />
           )}
           {tab === "documents-contracts-slas" && (
             <ScrollableRowsTable
-              rows={buildContractRows()}
+              rows={activeDocuments.rows}
               columns={[
                 ["documentType", "Document Type"],
                 ["reference", "Reference"],
@@ -6085,10 +6044,13 @@ function DocumentManagement({
                 ["uploadedAt", "Uploaded"],
                 ["size", "Size"],
               ]}
-              actions={isAdmin ? (row) => row.canDelete ? <DeleteRowButton saving={false} onDelete={() => deleteDocument(row.id)} /> : null : undefined}
+              actions={isAdmin ? (row) => row.canDelete ? <DeleteRowButton saving={false} onDelete={() => deleteLoadedDocument(row.id)} /> : null : undefined}
               bulkSelectable={isAdmin}
               bulkLabel="documents"
-              onBulkDelete={async (rows) => { await Promise.all(rows.filter((row) => row.canDelete).map((row) => deleteDocument(row.id))); }}
+              onBulkDelete={async (rows) => { await Promise.all(rows.filter((row) => row.canDelete).map((row) => deleteDocument(row.id))); await loadDocuments(activeCategory, true); }}
+              totalRows={activeDocuments.total}
+              loading={activeDocuments.loading}
+              onLoadMore={() => loadDocuments(activeCategory)}
             />
           )}
         </div>
@@ -6295,10 +6257,10 @@ function DocumentUploadForm({ assets, category, refreshData }: { assets: any[]; 
     <form onSubmit={uploadDocuments} className="mt-5 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
       <label className="grid gap-1 text-sm font-bold text-slate-600">
         Asset Number
-        <select required value={assetTag} onChange={(event) => setAssetTag(event.target.value)} className={HOUSING_FIELD_CLASS}>
-          <option value="">Select asset number</option>
-          {assets.map((asset) => <option key={asset.id} value={asset.tag}>{asset.tag} - {asset.assetDescription || asset.name}</option>)}
-        </select>
+        <input required list="document-upload-assets" value={assetTag} onChange={(event) => setAssetTag(event.target.value)} placeholder="Enter asset number" className={HOUSING_FIELD_CLASS} />
+        <datalist id="document-upload-assets">
+          {assets.map((asset) => <option key={asset.id} value={asset.tag}>{asset.assetDescription || asset.name}</option>)}
+        </datalist>
       </label>
       <label className="grid gap-1 text-sm font-bold text-slate-600">
         File

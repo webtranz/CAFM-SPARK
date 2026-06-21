@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from "crypto";
-import { mkdir, writeFile } from "fs/promises";
+import { access, mkdir, writeFile } from "fs/promises";
 import path from "path";
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/api-auth";
+import { requireAdmin, requireUser } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
-import { privateFileUrl, privateUploadRoot } from "@/lib/private-files";
+import { privateFileUrl, privateUploadRoot, resolvePrivateUploadPath } from "@/lib/private-files";
 import { prisma } from "@/lib/prisma";
 
 const MAX_FILE_SIZE = 60 * 1024 * 1024;
@@ -17,6 +17,95 @@ const allowedExtensions = new Set([".pdf", ".png", ".jpg", ".jpeg", ".webp", ".g
 
 function safeSegment(value: string) {
   return value.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+}
+
+function privateUrlSegments(fileUrl: string) {
+  if (!fileUrl.startsWith("/api/files/")) return null;
+  return fileUrl
+    .slice("/api/files/".length)
+    .split("/")
+    .map((segment) => decodeURIComponent(segment))
+    .filter(Boolean);
+}
+
+async function fileExists(fileUrl: string) {
+  const segments = privateUrlSegments(fileUrl);
+  const filePath = segments ? resolvePrivateUploadPath(segments) : null;
+  if (!filePath) return fileUrl.startsWith("http://") || fileUrl.startsWith("https://") || fileUrl.startsWith("/uploads/");
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function GET(request: Request) {
+  try {
+    const { error } = await requireUser();
+    if (error) return error;
+    const searchParams = new URL(request.url).searchParams;
+    const category = searchParams.get("category") || undefined;
+    const page = Math.max(1, Number(searchParams.get("page") || 1));
+    const pageSize = Math.min(100, Math.max(1, Number(searchParams.get("pageSize") || 100)));
+    const skip = (page - 1) * pageSize;
+    const where = category ? { category } : {};
+
+    const [documents, total] = await Promise.all([
+      prisma.documentUpload.findMany({ where, orderBy: { createdAt: "desc" }, skip, take: pageSize }),
+      prisma.documentUpload.count({ where }),
+    ]);
+    const assetTags = Array.from(new Set(documents.map((document) => document.assetTag).filter(Boolean)));
+    const assets = assetTags.length
+      ? await prisma.asset.findMany({
+          where: { tag: { in: assetTags } },
+          select: {
+            tag: true,
+            assetGroup: true,
+            category: true,
+            siteCode: true,
+            buildingCode: true,
+            floor: true,
+            room: true,
+            assignedSupervisorEmail: true,
+            assignedTeamCode: true,
+          },
+        })
+      : [];
+    const assetsByTag = new Map(assets.map((asset) => [asset.tag, asset]));
+    const rows = await Promise.all(documents.map(async (document) => {
+      const asset = assetsByTag.get(document.assetTag);
+      const exists = await fileExists(document.fileUrl);
+      return {
+        id: document.id,
+        canDelete: true,
+        category: document.category,
+        documentType:
+          document.category === "OM_MANUAL" ? "O&M Manual" :
+          document.category === "WARRANTY_GUARANTEE" ? "Warranty / Guarantee" :
+          "Support Contract / SLA",
+        reference: document.assetTag,
+        title: document.fileName,
+        assetType: asset?.assetGroup || asset?.category || "-",
+        location: [asset?.siteCode, asset?.buildingCode, asset?.floor, asset?.room].filter(Boolean).join(" / ") || "-",
+        owner: document.uploadedBy || asset?.assignedSupervisorEmail || asset?.assignedTeamCode || "Document Management",
+        provider: document.uploadedBy || "Document Management",
+        scope: document.assetTag,
+        sla: "-",
+        expiryDate: "-",
+        status: exists ? "AVAILABLE" : "MISSING FILE",
+        attachment: exists ? document.fileUrl : "",
+        missingFileUrl: exists ? "" : document.fileUrl,
+        uploadedAt: document.createdAt,
+        fileSize: document.fileSize,
+        size: document.fileSize,
+      };
+    }));
+
+    return NextResponse.json({ rows, total, page, pageSize });
+  } catch {
+    return NextResponse.json({ message: "Unable to load documents." }, { status: 500 });
+  }
 }
 
 export async function DELETE(request: Request) {
