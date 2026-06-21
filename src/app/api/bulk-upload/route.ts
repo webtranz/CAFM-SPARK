@@ -24,6 +24,7 @@ type ImportFailure = { row: number; message: string };
 type BulkUploadUser = { id?: string; name?: string; email?: string; role?: string } | null;
 type UploadedDocumentFile = { file: File; name: string; size: number };
 type ImportContext = { documentFiles?: Map<string, UploadedDocumentFile> };
+type ManualLibraryRecord = { checksum: string; fileName: string; fileSize: number; fileUrl: string; mimeType: string; originalName: string };
 
 const BACKGROUND_ROW_THRESHOLD = 5000;
 const BULK_UPLOAD_CHUNK_SIZE = 500;
@@ -40,6 +41,7 @@ const allowedManualRoots = [
 ];
 const documentSourceCache = new Map<string, { checksum: string; ext: string; size: number }>();
 const copiedDocumentCache = new Set<string>();
+let manualLibraryManifestCache: Record<string, ManualLibraryRecord> | null = null;
 
 export async function GET(request: Request) {
   try {
@@ -851,6 +853,8 @@ async function importDocumentIndex(row: Row, context: ImportContext = {}) {
   if (!asset) throw new Error(`Asset not found for document upload: ${assetTag}`);
 
   if (uploadedFile) return importUploadedDocument(row, assetTag, category, folder, uploadedFile, originalName);
+  const libraryRecord = await getManualLibraryRecord(originalName);
+  if (libraryRecord) return importLibraryDocument(assetTag, category, libraryRecord);
 
   const sourcePath = required(row, "sourcePath", "filePath", "path");
   const resolvedSource = path.resolve(sourcePath);
@@ -906,6 +910,40 @@ async function importDocumentIndex(row: Row, context: ImportContext = {}) {
     },
   });
   return importResult("document_upload", "CREATE", record, assetTag, originalName);
+}
+
+async function getManualLibraryRecord(originalName: string) {
+  if (!originalName) return null;
+  if (!manualLibraryManifestCache) {
+    const manifestPath = path.join(privateUploadRoot, "document-management", documentCategories.OM_MANUAL, "_manual-library", "manifest.json");
+    try {
+      manualLibraryManifestCache = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, ManualLibraryRecord>;
+    } catch {
+      manualLibraryManifestCache = {};
+    }
+  }
+  return manualLibraryManifestCache[originalName.trim().toLowerCase()] ?? null;
+}
+
+async function importLibraryDocument(assetTag: string, category: string, libraryRecord: ManualLibraryRecord) {
+  const existing = await prisma.documentUpload.findUnique({
+    where: { category_assetTag_checksum: { category, assetTag, checksum: libraryRecord.checksum } },
+  });
+  if (existing) return importResult("document_upload", "EXISTS", existing, assetTag, existing.fileName);
+
+  const record = await prisma.documentUpload.create({
+    data: {
+      category,
+      assetTag,
+      fileName: libraryRecord.originalName,
+      fileUrl: libraryRecord.fileUrl,
+      fileSize: libraryRecord.fileSize,
+      mimeType: libraryRecord.mimeType,
+      checksum: libraryRecord.checksum,
+      uploadedBy: "Bulk Upload",
+    },
+  });
+  return importResult("document_upload", "CREATE", record, assetTag, libraryRecord.originalName);
 }
 
 async function importUploadedDocument(_row: Row, assetTag: string, category: string, folder: string, uploadedFile: UploadedDocumentFile, originalName: string) {

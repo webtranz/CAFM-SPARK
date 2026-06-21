@@ -7011,6 +7011,8 @@ function JobPlans({ jobPlans, jobPlansTotal, services, departments, submitJobPla
 
 function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSubmit: (formData: FormData) => void; initialModule: string }) {
   const [module, setModule] = useState(initialModule);
+  const [manualProgress, setManualProgress] = useState("");
+  const [manualUploading, setManualUploading] = useState(false);
 
   useEffect(() => {
     setModule(initialModule);
@@ -7018,8 +7020,38 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await onSubmit(new FormData(event.currentTarget));
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    if (module === "omManuals") {
+      const manualInput = form.elements.namedItem("manualFiles") as HTMLInputElement | null;
+      const manualFiles = Array.from(manualInput?.files ?? []);
+      if (manualFiles.length) {
+        setManualUploading(true);
+        setManualProgress(`Uploading manual file 1 of ${manualFiles.length}...`);
+        try {
+          for (const [index, manualFile] of manualFiles.entries()) {
+            const manualFormData = new FormData();
+            manualFormData.set("files", manualFile);
+            const response = await fetch("/api/manual-library", { method: "POST", body: manualFormData });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(cleanMessage(result.message ?? `${manualFile.name} failed to upload.`));
+            setManualProgress(`Uploaded ${index + 1} of ${manualFiles.length} manual files.`);
+          }
+        } finally {
+          setManualUploading(false);
+        }
+      }
+
+      const csvFile = formData.get("file");
+      const uploadData = new FormData();
+      uploadData.set("module", module);
+      if (csvFile instanceof File) uploadData.set("file", csvFile);
+      await onSubmit(uploadData);
+    } else {
+      await onSubmit(formData);
+    }
     event.currentTarget.reset();
+    setManualProgress("");
     setModule(initialModule);
   }
 
@@ -7058,11 +7090,12 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
             <label className="grid gap-1 text-sm font-bold text-slate-600">
               Manual PDF Files
               <input name="manualFiles" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.csv,.xlsx,.docx,.pptx" multiple className="rounded-lg border border-slate-200 bg-white p-3" />
-              <span className="text-xs font-bold text-slate-500">Select all files from the O&M manual upload folder. The system matches them by file name and stores them online.</span>
+              <span className="text-xs font-bold text-slate-500">Select all files from the O&M manual upload folder. Files upload one by one, then the CSV links them to assets.</span>
             </label>
           )}
-          <button disabled={saving} className="h-11 rounded-lg bg-ink font-black text-white disabled:bg-slate-400">
-            {saving ? "Uploading..." : module === "omManuals" ? "Upload CSV and Manuals" : "Upload CSV"}
+          {manualProgress && <div className="rounded-lg border border-lagoon/20 bg-lagoon/5 p-3 text-sm font-black text-lagoon">{manualProgress}</div>}
+          <button disabled={saving || manualUploading} className="h-11 rounded-lg bg-ink font-black text-white disabled:bg-slate-400">
+            {saving || manualUploading ? "Uploading..." : module === "omManuals" ? "Upload Manuals then CSV" : "Upload CSV"}
           </button>
         </form>
       </Panel>
