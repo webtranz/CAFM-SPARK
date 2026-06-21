@@ -1,9 +1,13 @@
+import { createHash } from "crypto";
+import { copyFile, mkdir, readFile, stat } from "fs/promises";
+import path from "path";
 import { NextResponse } from "next/server";
 import { addDays, addHours, addYears } from "date-fns";
 import { apiError } from "@/lib/api-response";
 import { requireAnyPermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { csvResponse, parseCsv } from "@/lib/csv";
+import { privateFileUrl, privateUploadRoot } from "@/lib/private-files";
 import { prisma } from "@/lib/prisma";
 
 type Row = Record<string, string>;
@@ -21,12 +25,25 @@ type BulkUploadUser = { id?: string; name?: string; email?: string; role?: strin
 
 const BACKGROUND_ROW_THRESHOLD = 5000;
 const BULK_UPLOAD_CHUNK_SIZE = 500;
+const MAX_DOCUMENT_FILE_SIZE = 60 * 1024 * 1024;
+const documentCategories: Record<string, string> = {
+  OM_MANUAL: "operation-maintenance-management",
+  WARRANTY_GUARANTEE: "equipment-warranties-and-guarantees",
+  SUPPORT_CONTRACT_SLA: "support-contracts-and-slas",
+};
+const allowedDocumentExtensions = new Set([".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".txt", ".csv", ".xlsx", ".docx", ".pptx"]);
+const allowedManualRoots = [
+  path.resolve("C:\\Users\\HP\\Documents\\FADHILI DATA FINAL\\EAM\\SYSTEM O&M MANUALS"),
+  path.resolve("C:\\Users\\HP\\Documents\\FADHILI_CAFM_UPLOAD_PACK"),
+];
+const documentSourceCache = new Map<string, { checksum: string; ext: string; size: number }>();
+const copiedDocumentCache = new Set<string>();
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const jobId = searchParams.get("jobId");
-    const { error } = await requireAnyPermission(["assets.manage", "work.manage", "requests.manage", "users.manage"]);
+    const { error } = await requireAnyPermission(["assets.manage", "work.manage", "requests.manage", "users.manage", "documents.upload"]);
     if (error) return error;
 
     const job = jobId
@@ -128,8 +145,8 @@ async function processRows(
       const imported = await importRow(module, row);
       entries.push({ row: rowNumber, status: "SUCCESS", module, ...imported });
       created += 1;
-    } catch {
-      const message = "Import failed for this row.";
+    } catch (error) {
+      const message = error instanceof Error && error.message ? error.message : "Import failed for this row.";
       failed.push({ row: rowNumber, message });
       entries.push({
         row: rowNumber,
@@ -259,6 +276,7 @@ function serializeBulkUploadJob(job: {
 }
 
 function bulkUploadPermissions(module: string) {
+  if (module === "omManuals") return ["documents.upload"];
   if (module === "ppm") return ["ppm.manage", "assets.manage"];
   if (module === "workOrders") return ["work.manage", "assets.manage"];
   if (module === "requests") return ["requests.manage"];
@@ -284,6 +302,7 @@ async function importRow(module: string, row: Row) {
   if (module === "locations") return importLocation(row);
   if (module === "jobPlans") return importJobPlan(row);
   if (module === "ppm") return importPpm(row);
+  if (module === "omManuals") return importDocumentIndex(row);
   throw new Error(`Unsupported module: ${module}`);
 }
 
@@ -804,6 +823,72 @@ async function importPpm(row: Row) {
   return importResult("preventive_maintenance", "UPSERT", ppm, code, data.name);
 }
 
+async function importDocumentIndex(row: Row) {
+  const category = value(row, "category") || "OM_MANUAL";
+  const folder = documentCategories[category];
+  if (!folder) throw new Error(`Invalid document category: ${category}`);
+
+  const assetTag = required(row, "assetTag", "EQUIPMENTNO", "Asset Number");
+  const sourcePath = required(row, "sourcePath", "filePath", "path");
+  const resolvedSource = path.resolve(sourcePath);
+  if (!allowedManualRoots.some((root) => resolvedSource === root || resolvedSource.startsWith(`${root}${path.sep}`))) {
+    throw new Error("Document source path is outside the allowed manual folders");
+  }
+
+  const asset = await prisma.asset.findUnique({ where: { tag: assetTag } });
+  if (!asset) throw new Error(`Asset not found for document upload: ${assetTag}`);
+
+  const ext = path.extname(resolvedSource).toLowerCase();
+  if (!allowedDocumentExtensions.has(ext)) throw new Error(`Unsupported document type: ${ext || "unknown"}`);
+
+  let sourceInfo = documentSourceCache.get(resolvedSource);
+  if (!sourceInfo) {
+    const fileStats = await stat(resolvedSource);
+    if (!fileStats.isFile()) throw new Error("Document source path is not a file");
+    if (fileStats.size > MAX_DOCUMENT_FILE_SIZE) throw new Error(`${path.basename(resolvedSource)} exceeds the 60 MB document size limit`);
+    sourceInfo = {
+      checksum: createHash("sha256").update(await readFile(resolvedSource)).digest("hex"),
+      ext,
+      size: fileStats.size,
+    };
+    documentSourceCache.set(resolvedSource, sourceInfo);
+  }
+
+  const checksum = sourceInfo.checksum;
+  const existing = await prisma.documentUpload.findUnique({
+    where: { category_assetTag_checksum: { category, assetTag, checksum } },
+  });
+  if (existing) return importResult("document_upload", "EXISTS", existing, assetTag, existing.fileName);
+
+  const uploadDir = path.join(privateUploadRoot, "document-management", folder, "_manual-library");
+  await mkdir(uploadDir, { recursive: true });
+  const originalName = value(row, "fileName") || path.basename(resolvedSource);
+  const storedName = `${checksum}-${safeSegment(path.basename(originalName, ext)) || "document"}${ext}`;
+  const storedPath = path.join(uploadDir, storedName);
+  if (!copiedDocumentCache.has(storedPath)) {
+    try {
+      await stat(storedPath);
+    } catch {
+      await copyFile(resolvedSource, storedPath);
+    }
+    copiedDocumentCache.add(storedPath);
+  }
+
+  const record = await prisma.documentUpload.create({
+    data: {
+      category,
+      assetTag,
+      fileName: originalName,
+      fileUrl: privateFileUrl(`document-management/${folder}/_manual-library/${storedName}`),
+      fileSize: sourceInfo.size,
+      mimeType: mimeTypeFromExtension(ext),
+      checksum,
+      uploadedBy: "Bulk Upload",
+    },
+  });
+  return importResult("document_upload", "CREATE", record, assetTag, originalName);
+}
+
 function importResult(recordType: string, action: string, record: { id?: string } | null | undefined, recordKey?: string, displayName?: string): ImportResult {
   return {
     action,
@@ -816,6 +901,24 @@ function importResult(recordType: string, action: string, record: { id?: string 
 
 function rowIdentifier(module: string, row: Row) {
   return value(row, "tag", "Asset Code", "Housing Asset Code", "EQUIPMENTNO", "ASSET NUMBER", "sku", "ticketNo", "woNo", "code", "Location", "locationCode", "assetTag", "companyId", "email") || module || "unknown";
+}
+
+function safeSegment(value: string) {
+  return value.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+}
+
+function mimeTypeFromExtension(ext: string) {
+  if (ext === ".pdf") return "application/pdf";
+  if (ext === ".png") return "image/png";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".gif") return "image/gif";
+  if (ext === ".csv") return "text/csv";
+  if (ext === ".txt") return "text/plain";
+  if (ext === ".xlsx") return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  if (ext === ".docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (ext === ".pptx") return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  return "application/octet-stream";
 }
 
 function rowDisplayName(row: Row) {

@@ -7040,6 +7040,7 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
               <option value="requests">Service Requests</option>
               <option value="workOrders">Work Orders</option>
               <option value="ppm">PPM Schedule</option>
+              <option value="omManuals">O&M Manual Index</option>
               <option value="jobPlans">Job Plans</option>
               <option value="locations">Locations</option>
               <option value="inspections">Inspections</option>
@@ -7077,6 +7078,7 @@ function Templates() {
     ["requests", "Requests", "ticketNo,title,category,departmentCode,serviceCode,assignedTeamCode,requester,channel,priority,status,location,attachmentUrls,rejectionReason,slaHours,description"],
     ["workOrders", "Work Orders", "woNo,title,type,assetType,departmentCode,serviceCode,assignedTeamCode,jobPlanCode,priority,status,assetTag,plannedStart,dueAt,finishedAt,resolutionAt,dateTimeCreated,estimatedHours,actualHours,cost,jobPlan,safetyNotes,workNotes,materialRequest,photoUrls,assetsUsed,inventoryUsed,supervisorDecision,sourceYear,sourceWorkOrder,sourceServiceRequest,sourceEquipmentLocation,sourceLocation,matchSource"],
     ["ppm", "PPM Schedule", "code,name,assetTag,locationCode,frequency,nextDue,durationHrs,departmentCode,priority,checklist,active"],
+    ["omManuals", "O&M Manual Index", "category,assetTag,sourcePath,fileName,manualCode,manualTitle,matchField,assetClass,assetCategory,assetPrimarySystem,department"],
     ["jobPlans", "Job Plans", "code,name,assetType,departmentCode,serviceCode,estimatedHours,priority,steps,safetyNotes"],
     ["locations", "Locations", "Location,Description,Class,Parent Location,Out of Service,Residential"],
     ["inspections", "Inspections", "code,title,area,inspector,risk,score,status,dueAt,findings"],

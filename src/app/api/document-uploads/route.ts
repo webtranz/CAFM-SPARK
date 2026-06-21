@@ -7,7 +7,7 @@ import { auditAction } from "@/lib/audit";
 import { privateFileUrl, privateUploadRoot } from "@/lib/private-files";
 import { prisma } from "@/lib/prisma";
 
-const MAX_FILE_SIZE = 20 * 1024 * 1024;
+const MAX_FILE_SIZE = 60 * 1024 * 1024;
 const documentCategories: Record<string, string> = {
   OM_MANUAL: "operation-maintenance-management",
   WARRANTY_GUARANTEE: "equipment-warranties-and-guarantees",
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     const saved = [];
     for (const file of files) {
       if (file.size > MAX_FILE_SIZE) {
-        return NextResponse.json({ message: `${file.name} exceeds the 20 MB file size limit.` }, { status: 400 });
+        return NextResponse.json({ message: `${file.name} exceeds the 60 MB file size limit.` }, { status: 400 });
       }
 
       const originalName = file.name || "document";

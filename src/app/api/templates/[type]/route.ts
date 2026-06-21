@@ -17,6 +17,7 @@ const templates: Record<string, string> = {
   locations: "code,site,zone,building,floor,room,type,description\n",
   jobPlans: "code,name,assetType,departmentCode,serviceCode,estimatedHours,priority,steps,safetyNotes\n",
   ppm: "code,name,assetTag,locationCode,frequency,nextDue,durationHrs,departmentCode,priority,checklist,active\n",
+  omManuals: "category,assetTag,sourcePath,fileName,manualCode,manualTitle,matchField,assetClass,assetCategory,assetPrimarySystem,department\n",
   inspections: "code,title,area,inspector,risk,score,status,dueAt,findings\n",
 };
 
