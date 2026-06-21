@@ -63,8 +63,8 @@ export async function getOperatingData(user: OperatingUser = null) {
     const visibleUsersWhere = kind === "admin" ? {} : { OR: [{ department: { in: departmentsForUser } }, { id: user?.id || "" }] };
 
     const [sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, shifts, rotations, roster, housingProperties, housingBlocks, housingRooms, housingBeds, housingResidents, housingBookings, housingInspections, housingAssets, housingInventory, housingApprovals, housingNotifications, housingNotificationSettings, housingHistory] = await Promise.all([
-      prisma.site.findMany({ include: { buildings: true }, orderBy: { name: "asc" } }),
-      prisma.building.findMany({ include: { site: true }, orderBy: { code: "asc" } }),
+      prisma.site.findMany({ include: { buildings: { take: 10, orderBy: { code: "asc" } } }, orderBy: { name: "asc" }, take: INITIAL_REFERENCE_LIMIT }),
+      prisma.building.findMany({ include: { site: true }, orderBy: { code: "asc" }, take: INITIAL_REFERENCE_LIMIT }),
       prisma.space.findMany({ include: { building: { include: { site: true } } }, orderBy: [{ building: { code: "asc" } }, { floor: "asc" }, { name: "asc" }], take: INITIAL_REFERENCE_LIMIT }),
       prisma.asset.findMany({
         where: visibleAssetWhere,
@@ -100,7 +100,7 @@ export async function getOperatingData(user: OperatingUser = null) {
       prisma.iotAlert.findMany({ orderBy: { detectedAt: "desc" }, take: INITIAL_LOAD_LIMIT }),
       prisma.team.findMany({ include: { services: true }, orderBy: { name: "asc" } }),
       prisma.serviceCatalog.findMany({ include: { team: true }, orderBy: { name: "asc" } }),
-      prisma.assetCategory.findMany({ orderBy: { name: "asc" } }),
+      prisma.assetCategory.findMany({ orderBy: { name: "asc" }, take: INITIAL_REFERENCE_LIMIT }),
       prisma.preventiveMaintenance.findMany({ orderBy: { nextDue: "asc" }, take: INITIAL_LOAD_LIMIT }),
       prisma.preventiveMaintenance.count(),
       prisma.user.findMany({ where: visibleUsersWhere, include: { team: true }, orderBy: { name: "asc" }, take: INITIAL_LOAD_LIMIT }),

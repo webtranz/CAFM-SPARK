@@ -6104,6 +6104,9 @@ function ScrollableRowsTable({
   bulkSelectable = false,
   bulkLabel = "documents",
   onBulkDelete,
+  totalRows,
+  loading = false,
+  onLoadMore,
 }: {
   rows: any[];
   columns: [string, string][];
@@ -6111,6 +6114,9 @@ function ScrollableRowsTable({
   bulkSelectable?: boolean;
   bulkLabel?: string;
   onBulkDelete?: (rows: any[]) => Promise<void> | void;
+  totalRows?: number;
+  loading?: boolean;
+  onLoadMore?: () => Promise<void> | void;
 }) {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
@@ -6121,7 +6127,8 @@ function ScrollableRowsTable({
   const selectedVisibleKeys = visibleRowKeys.filter((key) => selectedRowKeys.has(key));
   const allVisibleSelected = bulkSelectable && Boolean(visibleRowKeys.length) && selectedVisibleKeys.length === visibleRowKeys.length;
   const someVisibleSelected = bulkSelectable && selectedVisibleKeys.length > 0 && !allVisibleSelected;
-  const hasMoreRows = visibleRows.length < rows.length;
+  const displayTotal = totalRows ?? rows.length;
+  const hasMoreRows = onLoadMore ? rows.length < displayTotal : visibleRows.length < rows.length;
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
@@ -6135,7 +6142,11 @@ function ScrollableRowsTable({
   function handleScroll(event: UIEvent<HTMLDivElement>) {
     const element = event.currentTarget;
     const nearBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 180;
-    if (nearBottom && hasMoreRows) {
+    if (nearBottom && hasMoreRows && !loading) {
+      if (onLoadMore) {
+        void onLoadMore();
+        return;
+      }
       setVisibleCount((current) => Math.min(rows.length, current + PAGE_SIZE));
     }
   }
@@ -6234,8 +6245,8 @@ function ScrollableRowsTable({
         </table>
       </div>
       <p className="text-center text-sm font-black text-slate-500">
-        Showing {visibleRows.length.toLocaleString()} of {rows.length.toLocaleString()} documents
-        {hasMoreRows ? " / scroll down to load more" : ""}
+        Showing {visibleRows.length.toLocaleString()} of {displayTotal.toLocaleString()} rows
+        {loading ? " / loading..." : hasMoreRows ? " / scroll down to load more" : ""}
       </p>
     </div>
   );
@@ -6507,17 +6518,79 @@ function AssetHierarchySetup({
   submitDepartment: (formData: FormData) => void;
   submitCategory: (formData: FormData) => void;
 }) {
-  const siteRows = sites.map((site) => ({
+  const [setupRows, setSetupRows] = useState({ sites, buildings, spaces, categories });
+  const [setupTotals, setSetupTotals] = useState({ sites: sites.length, buildings: buildings.length, spaces: spaces.length, categories: categories.length });
+  const [setupPages, setSetupPages] = useState({ sites: 1, buildings: 1, spaces: 1, categories: 1 });
+  const [setupLoading, setSetupLoading] = useState("");
+  const setupKey = view === "asset-sites" ? "sites" : view === "asset-buildings" ? "buildings" : view === "asset-spaces" ? "spaces" : view === "asset-categories" ? "categories" : "";
+  const setupEndpoint = setupKey === "sites" ? "/api/sites" : setupKey === "buildings" ? "/api/buildings" : setupKey === "spaces" ? "/api/spaces" : setupKey === "categories" ? "/api/asset-categories" : "";
+  const setupResponseKey = setupKey === "categories" ? "categories" : setupKey;
+
+  useEffect(() => {
+    setSetupRows({ sites, buildings, spaces, categories });
+    setSetupTotals((current) => ({
+      sites: Math.max(current.sites, sites.length),
+      buildings: Math.max(current.buildings, buildings.length),
+      spaces: Math.max(current.spaces, spaces.length),
+      categories: Math.max(current.categories, categories.length),
+    }));
+  }, [sites, buildings, spaces, categories]);
+
+  useEffect(() => {
+    if (!setupEndpoint || !setupKey) return;
+    const controller = new AbortController();
+    async function loadFirstPage() {
+      setSetupLoading(setupKey);
+      try {
+        const response = await fetch(`${setupEndpoint}?page=1&pageSize=${PAGE_SIZE}`, { cache: "no-store", signal: controller.signal });
+        if (response.ok) {
+          const result = await response.json();
+          setSetupRows((current) => ({ ...current, [setupKey]: result[setupResponseKey] ?? [] }));
+          setSetupTotals((current) => ({ ...current, [setupKey]: Number(result.total ?? result[setupResponseKey]?.length ?? 0) }));
+          setSetupPages((current) => ({ ...current, [setupKey]: 1 }));
+        }
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) console.error(error);
+      } finally {
+        if (!controller.signal.aborted) setSetupLoading("");
+      }
+    }
+    void loadFirstPage();
+    return () => controller.abort();
+  }, [setupEndpoint, setupKey, setupResponseKey]);
+
+  async function loadMoreSetupRows() {
+    if (!setupEndpoint || !setupKey || setupLoading) return;
+    const currentRows = setupRows[setupKey as keyof typeof setupRows];
+    const total = setupTotals[setupKey as keyof typeof setupTotals];
+    if (currentRows.length >= total) return;
+    const nextPage = setupPages[setupKey as keyof typeof setupPages] + 1;
+    setSetupLoading(setupKey);
+    try {
+      const response = await fetch(`${setupEndpoint}?page=${nextPage}&pageSize=${PAGE_SIZE}`, { cache: "no-store" });
+      if (response.ok) {
+        const result = await response.json();
+        const nextRows = result[setupResponseKey] ?? [];
+        setSetupRows((current) => ({ ...current, [setupKey]: [...current[setupKey as keyof typeof setupRows], ...nextRows] }));
+        setSetupTotals((current) => ({ ...current, [setupKey]: Number(result.total ?? total) }));
+        setSetupPages((current) => ({ ...current, [setupKey]: nextPage }));
+      }
+    } finally {
+      setSetupLoading("");
+    }
+  }
+
+  const siteRows = setupRows.sites.map((site) => ({
     ...site,
-    buildingCount: site.buildings?.length ?? buildings.filter((building) => building.siteId === site.id).length,
+    buildingCount: site.buildings?.length ?? setupRows.buildings.filter((building) => building.siteId === site.id).length,
   }));
-  const buildingRows = buildings.map((building) => ({
+  const buildingRows = setupRows.buildings.map((building) => ({
     ...building,
-    siteName: building.site?.name || sites.find((site) => site.id === building.siteId)?.name || "",
+    siteName: building.site?.name || setupRows.sites.find((site) => site.id === building.siteId)?.name || "",
   }));
-  const spaceRows = spaces.map((space) => ({
+  const spaceRows = setupRows.spaces.map((space) => ({
     ...space,
-    buildingCode: space.building?.code || buildings.find((building) => building.id === space.buildingId)?.code || "",
+    buildingCode: space.building?.code || setupRows.buildings.find((building) => building.id === space.buildingId)?.code || "",
     siteName: space.building?.site?.name || "",
   }));
   const showSites = view === "asset-sites";
@@ -6531,17 +6604,17 @@ function AssetHierarchySetup({
       <div className="space-y-5">
         {showSites && (
           <Panel title="Sites" icon={MapPinned}>
-            <ScrollableRowsTable rows={siteRows} columns={[["name", "Site"], ["city", "City"], ["country", "Country"], ["type", "Type"], ["areaSqm", "Area sqm"], ["buildingCount", "Buildings"]]} />
+            <ScrollableRowsTable rows={siteRows} totalRows={setupTotals.sites} loading={setupLoading === "sites"} onLoadMore={loadMoreSetupRows} columns={[["name", "Site"], ["city", "City"], ["country", "Country"], ["type", "Type"], ["areaSqm", "Area sqm"], ["buildingCount", "Buildings"]]} />
           </Panel>
         )}
         {showBuildings && (
           <Panel title="Buildings" icon={Building2}>
-            <ScrollableRowsTable rows={buildingRows} columns={[["code", "Code"], ["name", "Building"], ["siteName", "Site"], ["floors", "Floors"], ["areaSqm", "Area sqm"]]} />
+            <ScrollableRowsTable rows={buildingRows} totalRows={setupTotals.buildings} loading={setupLoading === "buildings"} onLoadMore={loadMoreSetupRows} columns={[["code", "Code"], ["name", "Building"], ["siteName", "Site"], ["floors", "Floors"], ["areaSqm", "Area sqm"]]} />
           </Panel>
         )}
         {showSpaces && (
           <Panel title="Spaces" icon={Boxes}>
-            <ScrollableRowsTable rows={spaceRows} columns={[["name", "Space"], ["buildingCode", "Building"], ["floor", "Floor"], ["type", "Type"], ["capacity", "Capacity"], ["areaSqm", "Area sqm"], ["occupancy", "Occupancy"]]} />
+            <ScrollableRowsTable rows={spaceRows} totalRows={setupTotals.spaces} loading={setupLoading === "spaces"} onLoadMore={loadMoreSetupRows} columns={[["name", "Space"], ["buildingCode", "Building"], ["floor", "Floor"], ["type", "Type"], ["capacity", "Capacity"], ["areaSqm", "Area sqm"], ["occupancy", "Occupancy"]]} />
           </Panel>
         )}
         {showDepartments && (
@@ -6551,7 +6624,7 @@ function AssetHierarchySetup({
         )}
         {showCategories && (
           <Panel title="Asset Categories" icon={PackagePlus}>
-            <ScrollableRowsTable rows={categories} columns={[["code", "Code"], ["name", "Category"], ["type", "Type"], ["defaultLifeYrs", "Life yrs"], ["statutory", "Statutory"], ["description", "Description"]]} />
+            <ScrollableRowsTable rows={setupRows.categories} totalRows={setupTotals.categories} loading={setupLoading === "categories"} onLoadMore={loadMoreSetupRows} columns={[["code", "Code"], ["name", "Category"], ["type", "Type"], ["defaultLifeYrs", "Life yrs"], ["statutory", "Statutory"], ["description", "Description"]]} />
           </Panel>
         )}
       </div>

@@ -14,8 +14,21 @@ const schema = z.object({
   description: z.string().optional(),
 });
 
-export async function GET() {
-  return NextResponse.json(await prisma.assetCategory.findMany({ orderBy: { name: "asc" } }));
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const pageInput = Number(url.searchParams.get("page") || 1);
+  const pageSizeInput = Number(url.searchParams.get("pageSize") || 100);
+  const page = Number.isFinite(pageInput) ? Math.max(1, Math.floor(pageInput)) : 1;
+  const pageSize = Number.isFinite(pageSizeInput) ? Math.min(200, Math.max(25, Math.floor(pageSizeInput))) : 100;
+  const [total, categories] = await Promise.all([
+    prisma.assetCategory.count(),
+    prisma.assetCategory.findMany({
+      orderBy: { name: "asc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+  return NextResponse.json({ categories, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
 }
 
 export async function DELETE(request: Request) {

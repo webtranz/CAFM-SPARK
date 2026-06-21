@@ -31,8 +31,22 @@ async function resolveSite(input: z.infer<typeof schema>) {
   });
 }
 
-export async function GET() {
-  return NextResponse.json(await prisma.building.findMany({ include: { site: true }, orderBy: { code: "asc" } }));
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const pageInput = Number(url.searchParams.get("page") || 1);
+  const pageSizeInput = Number(url.searchParams.get("pageSize") || 100);
+  const page = Number.isFinite(pageInput) ? Math.max(1, Math.floor(pageInput)) : 1;
+  const pageSize = Number.isFinite(pageSizeInput) ? Math.min(200, Math.max(25, Math.floor(pageSizeInput))) : 100;
+  const [total, buildings] = await Promise.all([
+    prisma.building.count(),
+    prisma.building.findMany({
+      include: { site: true },
+      orderBy: { code: "asc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+  return NextResponse.json({ buildings, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
 }
 
 export async function POST(request: Request) {

@@ -38,8 +38,22 @@ async function resolveBuilding(input: z.infer<typeof schema>) {
   return prisma.building.create({ data: { code, name: code, siteId: site.id, floors: 1, areaSqm: 0 } });
 }
 
-export async function GET() {
-  return NextResponse.json(await prisma.space.findMany({ include: { building: { include: { site: true } } }, orderBy: [{ building: { code: "asc" } }, { floor: "asc" }, { name: "asc" }] }));
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const pageInput = Number(url.searchParams.get("page") || 1);
+  const pageSizeInput = Number(url.searchParams.get("pageSize") || 100);
+  const page = Number.isFinite(pageInput) ? Math.max(1, Math.floor(pageInput)) : 1;
+  const pageSize = Number.isFinite(pageSizeInput) ? Math.min(200, Math.max(25, Math.floor(pageSizeInput))) : 100;
+  const [total, spaces] = await Promise.all([
+    prisma.space.count(),
+    prisma.space.findMany({
+      include: { building: { include: { site: true } } },
+      orderBy: [{ building: { code: "asc" } }, { floor: "asc" }, { name: "asc" }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+  return NextResponse.json({ spaces, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
 }
 
 export async function POST(request: Request) {
