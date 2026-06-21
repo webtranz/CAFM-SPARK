@@ -729,7 +729,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
     setSaving(false);
   }
 
-  async function postRecord(path: string, formData: FormData, successLabel: string) {
+  async function postRecord(path: string, formData: FormData, successLabel: string, refresh = true) {
     setSaving(true);
     const payload = Object.fromEntries(formData.entries());
     const response = await fetch(path, {
@@ -739,7 +739,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
     });
     const result = await response.json();
     setToast(response.ok ? `${successLabel} saved.` : cleanMessage(result.message ?? "Action failed."));
-    if (response.ok) await refreshData();
+    if (response.ok && refresh) await refreshData();
     setSaving(false);
   }
 
@@ -810,7 +810,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
     }
   }
 
-  async function patchRecord(path: string, body: Record<string, unknown>, successLabel: string) {
+  async function patchRecord(path: string, body: Record<string, unknown>, successLabel: string, refresh = true) {
     setSaving(true);
     const response = await fetch(path, {
       method: "PATCH",
@@ -819,7 +819,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
     });
     const result = await response.json();
     setToast(response.ok ? successLabel : cleanMessage(result.message ?? "Action failed."));
-    if (response.ok) await refreshData();
+    if (response.ok && refresh) await refreshData();
     setSaving(false);
   }
 
@@ -827,12 +827,12 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
     await patchRecord(`/api/assets/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "Asset updated by admin.");
   }
 
-  async function deleteRecord(path: string, successLabel: string) {
+  async function deleteRecord(path: string, successLabel: string, refresh = true) {
     setSaving(true);
     const response = await fetch(path, { method: "DELETE" });
     const result = await response.json();
     setToast(response.ok ? successLabel : cleanMessage(result.message ?? "Delete failed."));
-    if (response.ok) await refreshData();
+    if (response.ok && refresh) await refreshData();
     setSaving(false);
   }
 
@@ -1197,10 +1197,10 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
               permissions={records.permissions}
               rolePermissions={records.rolePermissions}
               saving={saving}
-              submitUser={(formData) => postRecord("/api/users", formData, "User")}
+              submitUser={(formData) => postRecord("/api/users", formData, "User", false)}
               submitRole={(formData) => postRecord("/api/roles", formData, "Custom role")}
-              updateUser={(id, formData) => patchRecord(`/api/users/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "User updated.")}
-              deleteUser={(id) => deleteRecord(`/api/users/${id}`, "User deleted.")}
+              updateUser={(id, formData) => patchRecord(`/api/users/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "User updated.", false)}
+              deleteUser={(id) => deleteRecord(`/api/users/${id}`, "User deleted.", false)}
               deleteRole={(roleName) => deleteRecord(`/api/roles?name=${encodeURIComponent(roleName)}`, "Role deleted.")}
               isAdmin={isAdmin}
               refreshData={refreshData}
@@ -2548,6 +2548,13 @@ function WorkOrders({
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
+      const defaultFilters = page === 1 && !search && statusFilter === "All" && priorityFilter === "All" && categoryFilter === "All" && departmentFilter === "All" && typeFilter === "All" && assignedFilter === "All" && !overdueOnly && !showOnlyDelayed;
+      if (defaultFilters && data.workOrders.length) {
+        setWorkRowsSource(data.workOrders);
+        setWorkTotal(data.workOrdersTotal ?? data.workOrders.length);
+        setWorkLoading(false);
+        return;
+      }
       setWorkLoading(true);
       try {
         const params = new URLSearchParams({
@@ -4926,6 +4933,13 @@ function Ppm({
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
+      const defaultFilters = page === 1 && !search && statusFilter === "All";
+      if (defaultFilters && ppms.length) {
+        setPpmRowsSource(ppms);
+        setPpmTotal(ppmsTotal ?? ppms.length);
+        setPpmLoading(false);
+        return;
+      }
       setPpmLoading(true);
       try {
         const params = new URLSearchParams({
@@ -7164,10 +7178,10 @@ function UsersRoles({
   currentUser: { id?: string; email: string; name: string; role: string };
   permissions: any[];
   rolePermissions: any[];
-  submitUser: (formData: FormData) => void;
+  submitUser: (formData: FormData) => Promise<void> | void;
   submitRole: (formData: FormData) => void;
-  updateUser: (id: string, formData: FormData) => void;
-  deleteUser: (id: string) => void;
+  updateUser: (id: string, formData: FormData) => Promise<void> | void;
+  deleteUser: (id: string) => Promise<void> | void;
   deleteRole: (role: string) => void;
   isAdmin: boolean;
   saveRolePermissions: (role: string, permissionCodes: string[]) => void;
@@ -7177,6 +7191,12 @@ function UsersRoles({
 }) {
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [role, setRole] = useState("Admin");
+  const [userRows, setUserRows] = useState<any[]>(users);
+  const [userTotal, setUserTotal] = useState(users.length);
+  const [userPage, setUserPage] = useState(1);
+  const [userSearch, setUserSearch] = useState("");
+  const [userLoading, setUserLoading] = useState(false);
+  const userScrollRef = useRef<HTMLDivElement | null>(null);
   const permissionsByCode = useMemo(() => {
     const catalog = new Map(permissionCatalog.map((permission) => [permission.code, { ...permission, id: permission.code }]));
     permissions.forEach((permission) => {
@@ -7201,6 +7221,87 @@ function UsersRoles({
     setRole(nextRole);
     const nextPermissions = rolePermissions.filter((item) => item.role === nextRole).map((item) => item.permission.code);
     setSelectedPermissions(nextRole === "Admin" ? nextPermissions : nextPermissions.filter((code) => code !== "documents.upload"));
+  }
+
+  useEffect(() => {
+    setUserRows(users);
+    setUserTotal((current) => Math.max(current, users.length));
+  }, [users]);
+
+  useEffect(() => {
+    setUserPage(1);
+    userScrollRef.current?.scrollTo({ top: 0 });
+  }, [userSearch]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setUserLoading(true);
+      try {
+        const params = new URLSearchParams({
+          page: String(userPage),
+          pageSize: String(PAGE_SIZE),
+          query: userSearch,
+        });
+        const response = await fetch(`/api/users?${params.toString()}`, { cache: "no-store", signal: controller.signal });
+        if (response.ok) {
+          const result = await response.json();
+          setUserRows((current) => userPage === 1 ? result.users ?? [] : [...current, ...(result.users ?? [])]);
+          setUserTotal(Number(result.total ?? result.users?.length ?? 0));
+        }
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.error(error);
+        }
+      } finally {
+        if (!controller.signal.aborted) setUserLoading(false);
+      }
+    }, 250);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [userPage, userSearch]);
+
+  async function refreshUserRows() {
+    setUserLoading(true);
+    try {
+      const params = new URLSearchParams({ page: "1", pageSize: String(Math.max(PAGE_SIZE, userRows.length || PAGE_SIZE)), query: userSearch });
+      const response = await fetch(`/api/users?${params.toString()}`, { cache: "no-store" });
+      if (response.ok) {
+        const result = await response.json();
+        setUserRows(result.users ?? []);
+        setUserTotal(Number(result.total ?? result.users?.length ?? 0));
+        setUserPage(1);
+      }
+    } finally {
+      setUserLoading(false);
+    }
+  }
+
+  function handleUserScroll(event: UIEvent<HTMLDivElement>) {
+    const element = event.currentTarget;
+    const nearBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 160;
+    if (nearBottom && userRows.length < userTotal && !userLoading) {
+      setUserLoading(true);
+      setUserPage((current) => current + 1);
+    }
+  }
+
+  async function submitUserAndRefresh(formData: FormData) {
+    await submitUser(formData);
+    await refreshUserRows();
+  }
+
+  async function updateUserAndRefresh(id: string, formData: FormData) {
+    await updateUser(id, formData);
+    await refreshUserRows();
+    setEditingUser(null);
+  }
+
+  async function deleteUserAndRefresh(id: string) {
+    await deleteUser(id);
+    await refreshUserRows();
   }
 
   function togglePermission(code: string) {
@@ -7235,8 +7336,18 @@ function UsersRoles({
       <div className="space-y-5">
         <Panel title="Users" icon={Users}>
           <ReportButtons type="users" label="Users report" />
-          <div className="grid gap-2">
-            {users.map((account) => (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-[260px] flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 lg:max-w-md">
+              <Search size={16} className="text-slate-400" />
+              <input value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Search users" className="h-11 w-full text-sm outline-none" />
+            </div>
+            <div className="text-sm font-black text-slate-600">
+              Showing {userRows.length.toLocaleString()} of {userTotal.toLocaleString()} users
+              {userLoading && <span className="ml-2 text-lagoon">Loading...</span>}
+            </div>
+          </div>
+          <div ref={userScrollRef} onScroll={handleUserScroll} className="grid max-h-[60vh] gap-2 overflow-auto pr-1 scrollbar-thin">
+            {userRows.map((account) => (
               <div key={account.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-slate-50 p-3">
                 <div>
                   <p className="font-black">{account.name}</p>
@@ -7256,7 +7367,7 @@ function UsersRoles({
                           setToast("Initial admin user cannot be deleted.");
                           return;
                         }
-                        deleteUser(account.id);
+                        void deleteUserAndRefresh(account.id);
                       }}
                       className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300"
                     >
@@ -7328,8 +7439,8 @@ function UsersRoles({
       </div>
       <div className="space-y-5">
         <RoleForm onSubmit={submitRole} saving={saving} />
-        <UserForm title="Create User" teams={teams} departments={departments} users={users} roles={roles} onSubmit={submitUser} saving={saving} />
-        {editingUser && <UserForm title="Edit User" user={editingUser} teams={teams} departments={departments} users={users} roles={roles} onSubmit={(formData) => updateUser(editingUser.id, formData)} saving={saving} />}
+        <UserForm title="Create User" teams={teams} departments={departments} users={userRows} roles={roles} onSubmit={submitUserAndRefresh} saving={saving} />
+        {editingUser && <UserForm title="Edit User" user={editingUser} teams={teams} departments={departments} users={userRows} roles={roles} onSubmit={(formData) => updateUserAndRefresh(editingUser.id, formData)} saving={saving} />}
       </div>
     </section>
   );

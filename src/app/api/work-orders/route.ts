@@ -51,7 +51,7 @@ function visibleWorkWhere(user: Awaited<ReturnType<typeof getCurrentUser>>) {
 }
 
 export async function GET(request: Request) {
-  const { error } = await requireUser();
+  const { error, user } = await requireUser();
   if (error) return error;
   const url = new URL(request.url);
   const query = url.searchParams.get("query")?.trim() || "";
@@ -67,7 +67,6 @@ export async function GET(request: Request) {
   const pageSizeInput = Number(url.searchParams.get("pageSize") || 100);
   const page = Number.isFinite(pageInput) ? Math.max(1, Math.floor(pageInput)) : 1;
   const pageSize = Number.isFinite(pageSizeInput) ? Math.min(200, Math.max(25, Math.floor(pageSizeInput))) : 100;
-  const user = await getCurrentUser();
   const where: any = {
     ...visibleWorkWhere(user),
     ...(status && status !== "All" ? { status } : {}),

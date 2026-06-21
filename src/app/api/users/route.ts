@@ -21,10 +21,36 @@ const schema = z.object({
   active: z.coerce.boolean().optional(),
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   const { error } = await requirePermission("users.manage");
   if (error) return error;
-  return NextResponse.json(await prisma.user.findMany({ include: { team: true }, orderBy: { name: "asc" } }));
+  const url = new URL(request.url);
+  const query = url.searchParams.get("query")?.trim() || "";
+  const pageInput = Number(url.searchParams.get("page") || 1);
+  const pageSizeInput = Number(url.searchParams.get("pageSize") || 100);
+  const page = Number.isFinite(pageInput) ? Math.max(1, Math.floor(pageInput)) : 1;
+  const pageSize = Number.isFinite(pageSizeInput) ? Math.min(200, Math.max(25, Math.floor(pageSizeInput))) : 100;
+  const where = query
+    ? {
+        OR: [
+          { name: { contains: query, mode: "insensitive" as const } },
+          { email: { contains: query, mode: "insensitive" as const } },
+          { role: { contains: query, mode: "insensitive" as const } },
+          { department: { contains: query, mode: "insensitive" as const } },
+        ],
+      }
+    : {};
+  const [total, users] = await Promise.all([
+    prisma.user.count({ where }),
+    prisma.user.findMany({
+      where,
+      include: { team: true },
+      orderBy: { name: "asc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+  ]);
+  return NextResponse.json({ users, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
 }
 
 export async function POST(request: Request) {
