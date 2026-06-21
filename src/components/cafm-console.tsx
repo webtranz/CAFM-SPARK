@@ -580,7 +580,7 @@ function roleKindLabel(role: string) {
   return "requester";
 }
 
-export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: string; name: string; email: string; role: string; department?: string | null; team?: { code: string; name?: string } | null } }) {
+export function CafmConsole({ data, user, deferInitialData = false }: { data: ConsoleData; user: { id?: string; name: string; email: string; role: string; department?: string | null; team?: { code: string; name?: string } | null }; deferInitialData?: boolean }) {
   const [records, setRecords] = useState(data);
   const [active, setActive] = useState("command");
   const [activeView, setActiveView] = useState("dashboard");
@@ -588,14 +588,31 @@ export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: st
   const [query, setQuery] = useState("");
   const [toast, setToast] = useState("");
   const [health, setHealth] = useState<{ app: string; database: string; message?: string } | null>(null);
+  const [initialDataLoading, setInitialDataLoading] = useState(deferInitialData);
   const [saving, setSaving] = useState(false);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [bulkUploadProgress, setBulkUploadProgress] = useState<BulkUploadProgressState | null>(null);
 
   useEffect(() => {
-    checkHealth();
-  }, []);
+    let cancelled = false;
+    async function loadInitialData() {
+      if (!deferInitialData) {
+        await checkHealth();
+        return;
+      }
+      setInitialDataLoading(true);
+      try {
+        await refreshData();
+      } finally {
+        if (!cancelled) setInitialDataLoading(false);
+      }
+    }
+    void loadInitialData();
+    return () => {
+      cancelled = true;
+    };
+  }, [deferInitialData]);
 
   useEffect(() => {
     const jobId = bulkUploadProgress?.jobId;
@@ -912,7 +929,7 @@ export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: st
           <div className="m-4 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm">
             <div className="flex items-center gap-2 font-medium text-emerald-700">
               <Activity size={16} />
-              {health?.database === "connected" || records.live ? "Database online" : "Database issue"}
+              {initialDataLoading ? "Loading data" : health?.database === "connected" || records.live ? "Database online" : "Database issue"}
             </div>
             <p className="mt-1 text-xs text-emerald-700">
               {health ? `Status: ${health.database}` : "Checking database..."}
@@ -1021,6 +1038,7 @@ export function CafmConsole({ data, user }: { data: ConsoleData; user: { id?: st
           )}
 
           {toast && <div className="rounded-lg border border-emerald-100 bg-white p-3 font-medium text-emerald-700 shadow-sm">{toast}</div>}
+          {initialDataLoading && <div className="rounded-lg border border-emerald-100 bg-white p-3 font-medium text-emerald-700 shadow-sm">Loading latest dashboard data...</div>}
 
           {active !== "command" && (
             <section className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-4">

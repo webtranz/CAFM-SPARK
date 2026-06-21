@@ -1,6 +1,6 @@
-import { getOperatingData } from "@/lib/data";
 import { CafmConsole } from "@/components/cafm-console";
 import { getCurrentUser } from "@/lib/auth";
+import { emptyOperatingData } from "@/lib/empty-operating-data";
 import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +8,5 @@ export const dynamic = "force-dynamic";
 export default async function Home() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
-  const data = await getOperatingData(user);
-  const serialized = JSON.parse(JSON.stringify(data));
-  return <CafmConsole data={serialized} user={user} />;
+  return <CafmConsole data={emptyOperatingData} user={user} deferInitialData />;
 }
