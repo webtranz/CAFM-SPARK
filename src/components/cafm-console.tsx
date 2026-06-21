@@ -6025,7 +6025,7 @@ function DocumentManagement({
         {canUploadDocuments && <DocumentUploadForm assets={assets} category={activeCategory} refreshData={refreshData} />}
         <div className="mt-5">
           {tab === "documents-om-manuals" && (
-            <DataTable
+            <DocumentRowsTable
               rows={manualRows}
               columns={[
                 ["documentType", "Document Type"],
@@ -6046,7 +6046,7 @@ function DocumentManagement({
             />
           )}
           {tab === "documents-warranties" && (
-            <DataTable
+            <DocumentRowsTable
               rows={warrantyRows}
               columns={[
                 ["documentType", "Document Type"],
@@ -6067,7 +6067,7 @@ function DocumentManagement({
             />
           )}
           {tab === "documents-contracts-slas" && (
-            <DataTable
+            <DocumentRowsTable
               rows={contractRows}
               columns={[
                 ["documentType", "Document Type"],
@@ -6090,6 +6090,150 @@ function DocumentManagement({
         </div>
       </Panel>
     </section>
+  );
+}
+
+function DocumentRowsTable({
+  rows,
+  columns,
+  actions,
+  bulkSelectable = false,
+  bulkLabel = "documents",
+  onBulkDelete,
+}: {
+  rows: any[];
+  columns: [string, string][];
+  actions?: (row: any) => ReactNode;
+  bulkSelectable?: boolean;
+  bulkLabel?: string;
+  onBulkDelete?: (rows: any[]) => Promise<void> | void;
+}) {
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
+  const visibleRows = rows.slice(0, visibleCount);
+  const rowKey = (row: any, index: number) => String(row.id ?? row.reference ?? row.title ?? index);
+  const visibleRowKeys = visibleRows.map((row, index) => rowKey(row, index));
+  const selectedRows = rows.filter((row, index) => selectedRowKeys.has(rowKey(row, index)));
+  const selectedVisibleKeys = visibleRowKeys.filter((key) => selectedRowKeys.has(key));
+  const allVisibleSelected = bulkSelectable && Boolean(visibleRowKeys.length) && selectedVisibleKeys.length === visibleRowKeys.length;
+  const someVisibleSelected = bulkSelectable && selectedVisibleKeys.length > 0 && !allVisibleSelected;
+  const hasMoreRows = visibleRows.length < rows.length;
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [rows.length]);
+
+  useEffect(() => {
+    const allKeys = new Set(rows.map((row, index) => rowKey(row, index)));
+    setSelectedRowKeys((current) => new Set(Array.from(current).filter((key) => allKeys.has(key))));
+  }, [rows]);
+
+  function handleScroll(event: UIEvent<HTMLDivElement>) {
+    const element = event.currentTarget;
+    const nearBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 180;
+    if (nearBottom && hasMoreRows) {
+      setVisibleCount((current) => Math.min(rows.length, current + PAGE_SIZE));
+    }
+  }
+
+  function toggleVisibleRows(checked: boolean) {
+    setSelectedRowKeys((current) => {
+      const next = new Set(current);
+      visibleRows.forEach((row, index) => {
+        const key = rowKey(row, index);
+        if (checked) next.add(key);
+        else next.delete(key);
+      });
+      return next;
+    });
+  }
+
+  function toggleRow(key: string, checked: boolean) {
+    setSelectedRowKeys((current) => {
+      const next = new Set(current);
+      if (checked) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }
+
+  async function deleteSelectedRows() {
+    if (!onBulkDelete || !selectedRows.length) return;
+    await onBulkDelete(selectedRows);
+    setSelectedRowKeys(new Set());
+  }
+
+  return (
+    <div className="grid gap-3">
+      {bulkSelectable && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm font-black text-slate-600">
+          <span>Selected {selectedRowKeys.size.toLocaleString()} {bulkLabel}</span>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => toggleVisibleRows(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
+            <button type="button" disabled={!selectedRowKeys.size || !onBulkDelete} onClick={deleteSelectedRows} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete All</button>
+            <button type="button" disabled={!selectedRowKeys.size} onClick={() => setSelectedRowKeys(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
+          </div>
+        </div>
+      )}
+      <div onScroll={handleScroll} className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
+        <table className="cafm-data-table min-w-[1500px] table-fixed border-collapse bg-white text-sm">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs uppercase text-slate-500">
+            <tr>
+              {bulkSelectable && (
+                <th className="w-12 px-3 py-3 font-black">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    ref={(input) => {
+                      if (input) input.indeterminate = someVisibleSelected;
+                    }}
+                    onChange={(event) => toggleVisibleRows(event.target.checked)}
+                  />
+                </th>
+              )}
+              <th className="w-14 px-3 py-3 font-black">#</th>
+              {columns.map(([, label]) => (
+                <th key={label} className="px-3 py-3 font-black">
+                  {label}
+                </th>
+              ))}
+              {actions && <th className="w-28 px-3 py-3 font-black">Actions</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row, index) => {
+              const key = rowKey(row, index);
+              return (
+                <tr key={key} className="border-t border-slate-100 align-top">
+                  {bulkSelectable && (
+                    <td className="px-3 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedRowKeys.has(key)}
+                        onChange={(event) => toggleRow(key, event.target.checked)}
+                      />
+                    </td>
+                  )}
+                  <td className="px-3 py-3 font-black text-slate-500">{index + 1}</td>
+                  {columns.map(([columnKey]) => (
+                    <td key={columnKey} className="px-3 py-3">
+                      <div className={`max-w-full leading-5 ${columnKey === "attachment" ? "break-all font-black text-lagoon" : "break-words"}`}>
+                        <CellValue value={row[columnKey]} field={columnKey} />
+                      </div>
+                    </td>
+                  ))}
+                  {actions && <td className="px-3 py-3">{actions(row)}</td>}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-center text-sm font-black text-slate-500">
+        Showing {visibleRows.length.toLocaleString()} of {rows.length.toLocaleString()} documents
+        {hasMoreRows ? " / scroll down to load more" : ""}
+      </p>
+    </div>
   );
 }
 
