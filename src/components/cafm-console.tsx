@@ -1168,6 +1168,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
               canUploadDocuments={roleKindLabel(user.role) === "admin"}
               isAdmin={isAdmin}
               deleteDocument={(id) => deleteRecord(`/api/document-uploads?id=${encodeURIComponent(id)}`, "Document deleted.")}
+              setToast={(message) => setToast(cleanMessage(message))}
             />
           )}
           {canViewActive && active === "incidents" && (
@@ -5892,6 +5893,7 @@ function DocumentManagement({
   canUploadDocuments,
   isAdmin,
   deleteDocument,
+  setToast,
 }: {
   assets: any[];
   services: any[];
@@ -5903,9 +5905,11 @@ function DocumentManagement({
   canUploadDocuments: boolean;
   isAdmin: boolean;
   deleteDocument: (id: string) => void;
+  setToast: (message: string) => void;
 }) {
   const [tab, setTab] = useState(view || "documents-om-manuals");
   const [documentPages, setDocumentPages] = useState<Record<string, { rows: any[]; total: number; page: number; loading: boolean }>>({});
+  const [bulkDeletingCategory, setBulkDeletingCategory] = useState("");
 
   useEffect(() => {
     if (view?.startsWith("documents")) setTab(view);
@@ -5917,6 +5921,7 @@ function DocumentManagement({
     ["documents-contracts-slas", "Support Contracts and SLAs", "SUPPORT_CONTRACT_SLA"],
   ] as const;
   const activeCategory = tabs.find(([id]) => id === tab)?.[2] ?? "OM_MANUAL";
+  const activeLabel = tabs.find(([, , category]) => category === activeCategory)?.[1] ?? "Documents";
   const activeDocuments = documentPages[activeCategory] ?? { rows: [], total: 0, page: 0, loading: false };
 
   async function loadDocuments(category: string, reset = false) {
@@ -5956,6 +5961,22 @@ function DocumentManagement({
     await loadDocuments(activeCategory, true);
   }
 
+  async function deleteAllActiveDocuments() {
+    const expectedText = `DELETE ${activeLabel}`;
+    const typed = window.prompt(`This will delete all ${activeDocuments.total.toLocaleString()} ${activeLabel} records from the database. Type "${expectedText}" to continue.`);
+    if (typed !== expectedText) return;
+    setBulkDeletingCategory(activeCategory);
+    const response = await fetch(`/api/document-uploads?category=${encodeURIComponent(activeCategory)}&confirm=DELETE_ALL`, { method: "DELETE" });
+    const result = await response.json();
+    if (response.ok) {
+      setToast(`${Number(result.deletedCount ?? 0).toLocaleString()} ${activeLabel} records deleted.`);
+      setDocumentPages((pages) => ({ ...pages, [activeCategory]: { rows: [], total: 0, page: 0, loading: false } }));
+    } else {
+      setToast(cleanMessage(result.message ?? `Unable to delete ${activeLabel}.`));
+    }
+    setBulkDeletingCategory("");
+  }
+
   return (
     <section className="grid gap-5">
       <Panel title="Document Management" icon={FileText}>
@@ -5979,6 +6000,22 @@ function DocumentManagement({
             </button>
           )})}
         </div>
+        {isAdmin && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-coral/20 bg-coral/5 p-3">
+            <div>
+              <p className="text-sm font-black text-coral">Delete all {activeLabel} records</p>
+              <p className="text-xs font-bold text-slate-500">Deletes all rows in this document category from the database. Stored files are not deleted.</p>
+            </div>
+            <button
+              type="button"
+              disabled={bulkDeletingCategory === activeCategory || activeDocuments.loading || activeDocuments.total === 0}
+              onClick={deleteAllActiveDocuments}
+              className="rounded-lg bg-coral px-4 py-2 text-xs font-black text-white disabled:bg-slate-300"
+            >
+              {bulkDeletingCategory === activeCategory ? "Deleting..." : "Delete All Records"}
+            </button>
+          </div>
+        )}
         {canUploadDocuments && <DocumentUploadForm assets={assets} category={activeCategory} refreshData={async () => loadDocuments(activeCategory, true)} />}
         <div className="mt-5">
           {tab === "documents-om-manuals" && (

@@ -112,7 +112,23 @@ export async function DELETE(request: Request) {
   try {
     const { error, user } = await requireAdmin();
     if (error) return error;
-    const id = new URL(request.url).searchParams.get("id");
+    const searchParams = new URL(request.url).searchParams;
+    const id = searchParams.get("id");
+    const category = searchParams.get("category");
+    const confirm = searchParams.get("confirm");
+    if (category) {
+      if (!documentCategories[category]) return NextResponse.json({ message: "Invalid document category." }, { status: 400 });
+      if (confirm !== "DELETE_ALL") return NextResponse.json({ message: "Bulk document delete confirmation is required." }, { status: 400 });
+      const result = await prisma.documentUpload.deleteMany({ where: { category } });
+      await auditAction({
+        user,
+        action: "DOCUMENT_UPLOAD_BULK_DELETE",
+        entity: "document_upload",
+        entityId: category,
+        details: { category, deletedCount: result.count },
+      });
+      return NextResponse.json({ ok: true, deletedCount: result.count });
+    }
     if (!id) return NextResponse.json({ message: "Document id is required." }, { status: 400 });
     const current = await prisma.documentUpload.findUnique({ where: { id } });
     if (!current) return NextResponse.json({ message: "Document not found." }, { status: 404 });
