@@ -37,10 +37,13 @@ export function parseCsv(text: string) {
   );
 }
 
-export function csvResponse(created: number, failed: Array<{ row: number; message: string }>) {
+export function csvResponse(created: number, failed: Array<{ row: number; message: string }>, skipped = 0) {
   return {
     created,
+    skipped,
     failed,
-    message: failed.length ? `${created} rows imported, ${failed.length} failed.` : `${created} rows imported successfully.`,
+    message: failed.length
+      ? `${created} rows imported, ${skipped} skipped, ${failed.length} failed.`
+      : `${created} rows imported successfully${skipped ? `, ${skipped} skipped` : ""}.`,
   };
 }

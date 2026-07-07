@@ -23,7 +23,8 @@ type ImportEntry = ImportResult & { row: number; status: "SUCCESS" | "FAILED"; m
 type ImportFailure = { row: number; message: string };
 type BulkUploadUser = { id?: string; name?: string; email?: string; role?: string } | null;
 type UploadedDocumentFile = { file: File; name: string; size: number };
-type ImportContext = { documentFiles?: Map<string, UploadedDocumentFile> };
+type ImportMode = "keepExisting" | "replaceExisting";
+type ImportContext = { documentFiles?: Map<string, UploadedDocumentFile>; mode?: ImportMode };
 type ManualLibraryRecord = { checksum: string; fileName: string; fileSize: number; fileUrl: string; mimeType: string; originalName: string };
 
 const BACKGROUND_ROW_THRESHOLD = 5000;
@@ -111,7 +112,7 @@ export async function POST(request: Request) {
       }, { status: 202 });
     }
 
-    const { created, failed, entries, result } = await processRows(module, rows, context);
+    const { created, skipped, failed, entries, result } = await processRows(module, rows, context);
 
     await auditAction({
       user,
@@ -124,9 +125,11 @@ export async function POST(request: Request) {
         fileSize: file.size,
         totalRows: rows.length,
         created,
+        skipped,
         failed,
         entries,
         result,
+        importMode: context.mode || "keepExisting",
       },
     });
     return NextResponse.json(result, { status: failed.length ? 207 : 201 });
@@ -141,16 +144,19 @@ async function processRows(
   context: ImportContext = {},
   onProgress?: (progress: { processedRows: number; createdRows: number; failedRows: number; failed: ImportFailure[]; entries: ImportEntry[] }) => Promise<void>,
 ) {
+  await syncHierarchyModuleBeforeImport(module, rows, context);
   const failed: ImportFailure[] = [];
   const entries: ImportEntry[] = [];
   let created = 0;
+  let skipped = 0;
 
   for (const [index, row] of rows.entries()) {
     const rowNumber = index + 2;
     try {
       const imported = await importRow(module, row, context);
       entries.push({ row: rowNumber, status: "SUCCESS", module, ...imported });
-      created += 1;
+      if (imported.action === "EXISTS" || imported.action === "SKIPPED") skipped += 1;
+      else created += 1;
     } catch (error) {
       const message = error instanceof Error && error.message ? error.message : "Import failed for this row.";
       failed.push({ row: rowNumber, message });
@@ -172,7 +178,7 @@ async function processRows(
     }
   }
 
-  return { created, failed, entries, result: csvResponse(created, failed) };
+  return { created, skipped, failed, entries, result: csvResponse(created, failed, skipped) };
 }
 
 async function processBulkUploadJob(jobId: string, module: string, rows: Row[], file: { name: string; size: number }, user: BulkUploadUser, context: ImportContext = {}) {
@@ -186,7 +192,7 @@ async function processBulkUploadJob(jobId: string, module: string, rows: Row[], 
       },
     });
 
-    const { created, failed, entries, result } = await processRows(module, rows, context, async ({ processedRows, createdRows, failedRows }) => {
+    const { created, skipped, failed, entries, result } = await processRows(module, rows, context, async ({ processedRows, createdRows, failedRows }) => {
       await prisma.bulkUploadJob.update({
         where: { id: jobId },
         data: {
@@ -225,12 +231,14 @@ async function processBulkUploadJob(jobId: string, module: string, rows: Row[], 
         fileSize: file.size,
         totalRows: rows.length,
         created,
+        skipped,
         failed,
         entries,
         result,
         jobId,
         background: true,
         chunkSize: BULK_UPLOAD_CHUNK_SIZE,
+        importMode: context.mode || "keepExisting",
       },
     });
   } catch (error) {
@@ -291,34 +299,35 @@ function bulkUploadPermissions(module: string) {
 }
 
 function buildImportContext(module: string, formData: FormData): ImportContext {
-  if (module !== "omManuals") return {};
+  const mode: ImportMode = String(formData.get("importMode") || "keepExisting") === "replaceExisting" ? "replaceExisting" : "keepExisting";
+  if (module !== "omManuals") return { mode };
   const documentFiles = new Map<string, UploadedDocumentFile>();
   formData.getAll("manualFiles").forEach((item) => {
     if (item instanceof File && item.size > 0) {
       documentFiles.set(item.name.trim().toLowerCase(), { file: item, name: item.name, size: item.size });
     }
   });
-  return { documentFiles };
+  return { documentFiles, mode };
 }
 
 async function importRow(module: string, row: Row, context: ImportContext = {}) {
-  if (module === "sites") return importSite(row);
-  if (module === "buildings") return importBuilding(row);
-  if (module === "spaces") return importSpace(row);
-  if (module === "assets") return importAsset(row);
-  if (module === "housingAssets") return importHousingAsset(row);
-  if (module === "inventory") return importInventory(row);
+  if (module === "sites") return importSite(row, context);
+  if (module === "buildings") return importBuilding(row, context);
+  if (module === "spaces") return importSpace(row, context);
+  if (module === "assets") return importAsset(row, context);
+  if (module === "housingAssets") return importHousingAsset(row, context);
+  if (module === "inventory") return importInventory(row, context);
   if (module === "requests") return importRequest(row);
-  if (module === "workOrders") return importWorkOrder(row);
-  if (module === "teams") return importTeam(row);
-  if (module === "services") return importService(row);
-  if (module === "departments") return importDepartment(row);
-  if (module === "employees") return importEmployee(row);
-  if (module === "categories") return importCategory(row);
+  if (module === "workOrders") return importWorkOrder(row, context);
+  if (module === "teams") return importTeam(row, context);
+  if (module === "services") return importService(row, context);
+  if (module === "departments") return importDepartment(row, context);
+  if (module === "employees") return importEmployee(row, context);
+  if (module === "categories") return importCategory(row, context);
   if (module === "inspections") return importInspection(row);
-  if (module === "locations") return importLocation(row);
-  if (module === "jobPlans") return importJobPlan(row);
-  if (module === "ppm") return importPpm(row);
+  if (module === "locations") return importLocation(row, context);
+  if (module === "jobPlans") return importJobPlan(row, context);
+  if (module === "ppm") return importPpm(row, context);
   if (module === "omManuals") return importDocumentIndex(row, context);
   throw new Error(`Unsupported module: ${module}`);
 }
@@ -347,12 +356,77 @@ async function firstSite() {
   });
 }
 
-async function ensureSite(row: Row = {}) {
+function shouldReplace(context: ImportContext = {}) {
+  return context.mode === "replaceExisting";
+}
+
+function existingResult(recordType: string, record: { id?: string } | null | undefined, recordKey?: string, displayName?: string): ImportResult {
+  return importResult(recordType, "EXISTS", record, recordKey, displayName);
+}
+
+async function syncHierarchyModuleBeforeImport(module: string, rows: Row[], context: ImportContext = {}) {
+  if (!shouldReplace(context)) return;
+  if (module === "locations") {
+    const codes = rows.map((row) => value(row, "code", "Code", "LOCATION", "Location", "location")).filter(Boolean);
+    if (!codes.length) return;
+    await prisma.location.updateMany({
+      where: { code: { notIn: codes } },
+      data: { active: false, outOfService: true },
+    });
+    return;
+  }
+  if (module === "spaces") {
+    const incomingBuildingCodes = rows.map((row) => value(row, "buildingCode", "Building code", "Building Code", "building", "BLDG")).filter(Boolean);
+    const incoming = new Set(rows.map((row) => [value(row, "buildingCode", "Building code", "Building Code", "building", "BLDG"), value(row, "floor", "FLOOR"), value(row, "name", "space", "room", "locationCode", "Location code", "code")].join("|").toUpperCase()));
+    const spaces = await prisma.space.findMany({ select: { id: true, name: true, floor: true, building: { select: { code: true } } } });
+    const staleIds = spaces
+      .filter((space) => !incoming.has([space.building.code, space.floor, space.name].join("|").toUpperCase()))
+      .map((space) => space.id);
+    if (staleIds.length) await prisma.space.deleteMany({ where: { id: { in: staleIds } } });
+    if (incomingBuildingCodes.length) {
+      await prisma.building.deleteMany({
+        where: {
+          code: { notIn: incomingBuildingCodes },
+          assets: { none: {} },
+          spaces: { none: {} },
+        },
+      });
+    }
+    return;
+  }
+  if (module === "buildings") {
+    const codes = rows.map((row) => value(row, "buildingCode", "Building code", "Building Code", "code", "building", "Building", "BLDG")).filter(Boolean);
+    if (!codes.length) return;
+    await prisma.building.deleteMany({
+      where: {
+        code: { notIn: codes },
+        assets: { none: {} },
+        spaces: { none: {} },
+      },
+    });
+    return;
+  }
+  if (module === "sites") {
+    const names = rows.map((row) => value(row, "site", "siteName", "name", "Site")).filter(Boolean);
+    if (!names.length) return;
+    await prisma.site.deleteMany({
+      where: {
+        name: { notIn: names },
+        assets: { none: {} },
+        buildings: { none: {} },
+      },
+    });
+  }
+}
+
+async function ensureSite(row: Row = {}, context: ImportContext = {}) {
   const name = value(row, "site", "siteName", "name", "Site") || "Fadhili Bachelor Camp";
   const city = value(row, "city", "City") || "Fadhili";
   const country = value(row, "country", "Country") || "Saudi Arabia";
   const type = value(row, "type", "siteType", "Type") || "Accommodation Camp";
   const areaSqm = integer(value(row, "areaSqm", "area", "AreaSqm"), 0);
+  const existing = await prisma.site.findUnique({ where: { name_city_country: { name, city, country } } });
+  if (existing && !shouldReplace(context)) return existing;
   return prisma.site.upsert({
     where: { name_city_country: { name, city, country } },
     update: { type, areaSqm },
@@ -360,12 +434,14 @@ async function ensureSite(row: Row = {}) {
   });
 }
 
-async function ensureBuilding(row: Row = {}, siteInput?: { id: string }) {
-  const site = siteInput || await ensureSite(row);
+async function ensureBuilding(row: Row = {}, siteInput?: { id: string }, context: ImportContext = {}) {
+  const site = siteInput || await ensureSite(row, context);
   const code = value(row, "buildingCode", "code", "building", "Building", "BLDG") || "FBC";
   const name = value(row, "buildingName", "name", "description", "Description") || code;
   const floors = integer(value(row, "floors", "floorCount"), 1);
   const areaSqm = integer(value(row, "areaSqm", "area", "AreaSqm"), 0);
+  const existing = await prisma.building.findUnique({ where: { code } });
+  if (existing && !shouldReplace(context)) return existing;
   return prisma.building.upsert({
     where: { code },
     update: { name, siteId: site.id, floors, areaSqm },
@@ -373,57 +449,69 @@ async function ensureBuilding(row: Row = {}, siteInput?: { id: string }) {
   });
 }
 
-async function siteAndBuildingForAsset(location: { site?: string | null; building?: string | null; description?: string | null } | null, row: Row) {
+async function siteAndBuildingForAsset(location: { site?: string | null; building?: string | null; description?: string | null } | null, row: Row, context: ImportContext = {}) {
   const site = await ensureSite({
     site: value(row, "siteCode", "SITE") || location?.site || "Fadhili Bachelor Camp",
     city: value(row, "siteCity") || "Fadhili",
     country: value(row, "siteCountry") || "Saudi Arabia",
     type: value(row, "siteType") || "Accommodation Camp",
-  });
+  }, context);
   const buildingCode = value(row, "buildingCode", "BLDG") || location?.building || "FBC";
   const building = await ensureBuilding({
     code: buildingCode,
     name: location?.description || buildingCode,
     floors: value(row, "buildingFloors") || "1",
     areaSqm: value(row, "buildingAreaSqm") || "0",
-  }, site);
+  }, site, context);
   return { site, building };
 }
 
-async function importSite(row: Row) {
-  const site = await ensureSite(row);
-  return importResult("site", "UPSERT", site, site.name, site.name);
+async function importSite(row: Row, context: ImportContext = {}) {
+  const name = value(row, "site", "siteName", "name", "Site") || "Fadhili Bachelor Camp";
+  const city = value(row, "city", "City") || "Fadhili";
+  const country = value(row, "country", "Country") || "Saudi Arabia";
+  const existing = await prisma.site.findUnique({ where: { name_city_country: { name, city, country } } });
+  if (existing && !shouldReplace(context)) return existingResult("site", existing, existing.name, existing.name);
+  const site = await ensureSite(row, context);
+  return importResult("site", existing ? "UPDATE" : "CREATE", site, site.name, site.name);
 }
 
-async function importBuilding(row: Row) {
-  const site = await ensureSite(row);
-  const building = await ensureBuilding(row, site);
-  return importResult("building", "UPSERT", building, building.code, building.name);
+async function importBuilding(row: Row, context: ImportContext = {}) {
+  const code = value(row, "buildingCode", "code", "building", "Building", "BLDG") || "FBC";
+  const existing = await prisma.building.findUnique({ where: { code } });
+  if (existing && !shouldReplace(context)) return existingResult("building", existing, code, existing.name);
+  const site = await ensureSite(row, context);
+  const building = await ensureBuilding(row, site, context);
+  return importResult("building", existing ? "UPDATE" : "CREATE", building, building.code, building.name);
 }
 
-async function importSpace(row: Row) {
-  const site = await ensureSite(row);
-  const building = await ensureBuilding(row, site);
+async function importSpace(row: Row, context: ImportContext = {}) {
+  const site = await ensureSite(row, context);
+  const building = await ensureBuilding(row, site, context);
   const name = value(row, "name", "space", "room", "code") || "Space";
   const floor = value(row, "floor", "FLOOR") || "Ground";
   const type = value(row, "type", "spaceType", "locationClass") || "Space";
   const capacity = integer(value(row, "capacity"), 0);
   const areaSqm = integer(value(row, "areaSqm", "area"), 0);
   const occupancy = integer(value(row, "occupancy"), 0);
+  const existing = await prisma.space.findUnique({ where: { buildingId_floor_name: { buildingId: building.id, floor, name } } });
+  if (existing && !shouldReplace(context)) return existingResult("space", existing, `${building.code}/${floor}/${name}`, name);
   const space = await prisma.space.upsert({
     where: { buildingId_floor_name: { buildingId: building.id, floor, name } },
     update: { type, capacity, areaSqm, occupancy },
     create: { buildingId: building.id, name, floor, type, capacity, areaSqm, occupancy },
   });
-  return importResult("space", "UPSERT", space, `${building.code}/${floor}/${name}`, name);
+  return importResult("space", existing ? "UPDATE" : "CREATE", space, `${building.code}/${floor}/${name}`, name);
 }
 
-async function importAsset(row: Row) {
+async function importAsset(row: Row, context: ImportContext = {}) {
   const tag = value(row, "EQUIPMENTNO", "tag", "ASSET NUMBER", "assetNumber", "Asset Code");
   if (!tag) throw new Error("EQUIPMENTNO is required");
+  const existing = await prisma.asset.findUnique({ where: { tag } });
+  if (existing && !shouldReplace(context)) return existingResult("asset", existing, tag, existing.name);
   const locationCode = value(row, "LOCATION", "Location", "Location Name", "location", "ROOM", "room");
   const location = locationCode ? await prisma.location.findUnique({ where: { code: locationCode } }) : null;
-  const hierarchy = location || value(row, "siteCode", "SITE", "buildingCode", "BLDG") ? await siteAndBuildingForAsset(location, row) : { site: await firstSite(), building: null };
+  const hierarchy = location || value(row, "siteCode", "SITE", "buildingCode", "BLDG") ? await siteAndBuildingForAsset(location, row, context) : { site: await firstSite(), building: null };
   const name = value(row, "EQUIPMENTDESC", "name", "Asset Name", "Asset Description", "Asset Description ", "assetDescription") || tag;
   const description = value(row, "ADDITIONAL_NOTE", "Description", "Additional description", "additionalDescription");
   const category = value(row, "CATEGORY", "category", "Asset Type", "Asset Group", "Asset Group ", "assetGroup") || "General";
@@ -518,12 +606,14 @@ async function importAsset(row: Row) {
       actor: "Admin",
     },
   });
-  return importResult("asset", "UPSERT", asset, tag, name);
+  return importResult("asset", existing ? "UPDATE" : "CREATE", asset, tag, name);
 }
 
-async function importHousingAsset(row: Row) {
+async function importHousingAsset(row: Row, context: ImportContext = {}) {
   const tag = value(row, "tag", "code", "Asset Code", "Housing Asset Code", "assetCode");
   if (!tag) throw new Error("Asset Code is required");
+  const existing = await prisma.housingAsset.findUnique({ where: { tag } });
+  if (existing && !shouldReplace(context)) return existingResult("housing_asset", existing, tag, existing.name);
 
   const room = await housingRoomForAsset(row);
   const assetValue = number(value(row, "assetValue", "Asset Value", "purchaseCost", "Purchase Cost"), 0);
@@ -585,11 +675,13 @@ async function importHousingAsset(row: Row) {
       details: value(row, "notes", "Notes", "remarks", "Remarks") || `${asset.tag} / ${asset.status}`,
     },
   });
-  return importResult("housing_asset", "UPSERT", asset, tag, asset.name);
+  return importResult("housing_asset", existing ? "UPDATE" : "CREATE", asset, tag, asset.name);
 }
 
-async function importInventory(row: Row) {
+async function importInventory(row: Row, context: ImportContext = {}) {
   const sku = required(row, "sku");
+  const existing = await prisma.inventoryItem.findUnique({ where: { sku } });
+  if (existing && !shouldReplace(context)) return existingResult("inventory_item", existing, sku, existing.name);
   const item = await prisma.inventoryItem.upsert({
     where: { sku },
     update: {
@@ -614,7 +706,7 @@ async function importInventory(row: Row) {
       location: row.location || "Central Store",
     },
   });
-  return importResult("inventory_item", "UPSERT", item, sku, item.name);
+  return importResult("inventory_item", existing ? "UPDATE" : "CREATE", item, sku, item.name);
 }
 
 async function importRequest(row: Row) {
@@ -643,10 +735,12 @@ async function importRequest(row: Row) {
   return importResult("service_request", "CREATE", request, request.ticketNo, request.title);
 }
 
-async function importWorkOrder(row: Row) {
+async function importWorkOrder(row: Row, context: ImportContext = {}) {
   const count = await prisma.workOrder.count();
   const asset = row.assetTag ? await prisma.asset.findUnique({ where: { tag: row.assetTag } }) : null;
   const woNo = row.woNo || `WO-${String(count + 81001).padStart(5, "0")}`;
+  const existing = await prisma.workOrder.findUnique({ where: { woNo } });
+  if (existing && !shouldReplace(context)) return existingResult("work_order", existing, woNo, existing.title);
   const plannedStart = date(value(row, "plannedStart", "schedStartDate", "Sched. Start Date"), new Date());
   const finishedAt = optionalDate(value(row, "finishedAt", "dateCompleted", "Date Completed"));
   const resolutionAt = optionalDate(value(row, "resolutionAt", "dateCompleted", "Date Completed")) || finishedAt;
@@ -701,21 +795,25 @@ async function importWorkOrder(row: Row) {
       },
     });
   }
-  return importResult("work_order", "CREATE", workOrder, workOrder.woNo, workOrder.title);
+  return importResult("work_order", existing ? "UPDATE" : "CREATE", workOrder, workOrder.woNo, workOrder.title);
 }
 
-async function importTeam(row: Row) {
+async function importTeam(row: Row, context: ImportContext = {}) {
   const code = row.departmentCode || required(row, "code");
+  const existing = await prisma.team.findUnique({ where: { code } });
+  if (existing && !shouldReplace(context)) return existingResult("team", existing, code, existing.name);
   const team = await prisma.team.upsert({
     where: { code },
     update: teamPayload(row),
     create: { code, ...teamPayload(row) },
   });
-  return importResult("team", "UPSERT", team, code, team.name);
+  return importResult("team", existing ? "UPDATE" : "CREATE", team, code, team.name);
 }
 
-async function importDepartment(row: Row) {
+async function importDepartment(row: Row, context: ImportContext = {}) {
   const code = required(row, "code");
+  const existing = await prisma.department.findUnique({ where: { code } });
+  if (existing && !shouldReplace(context)) return existingResult("department", existing, code, existing.name);
   const department = await prisma.department.upsert({
     where: { code },
     update: {
@@ -730,38 +828,44 @@ async function importDepartment(row: Row) {
       description: row.description || "",
     },
   });
-  return importResult("department", "UPSERT", department, code, department.name);
+  return importResult("department", existing ? "UPDATE" : "CREATE", department, code, department.name);
 }
 
-async function importEmployee(row: Row) {
+async function importEmployee(row: Row, context: ImportContext = {}) {
   const companyId = required(row, "companyId");
+  const existing = await prisma.employee.findUnique({ where: { companyId } });
+  if (existing && !shouldReplace(context)) return existingResult("employee", existing, companyId, existing.name);
   const employee = await prisma.employee.upsert({
     where: { companyId },
     update: employeePayload(row),
     create: { companyId, ...employeePayload(row) },
   });
-  return importResult("employee", "UPSERT", employee, companyId, employee.name);
+  return importResult("employee", existing ? "UPDATE" : "CREATE", employee, companyId, employee.name);
 }
 
-async function importService(row: Row) {
+async function importService(row: Row, context: ImportContext = {}) {
   const team = row.teamCode ? await prisma.team.findUnique({ where: { code: row.teamCode } }) : null;
   const code = row.departmentCode || required(row, "code");
+  const existing = await prisma.serviceCatalog.findUnique({ where: { code } });
+  if (existing && !shouldReplace(context)) return existingResult("service_catalog", existing, code, existing.name);
   const service = await prisma.serviceCatalog.upsert({
     where: { code },
     update: servicePayload(row, team?.id),
     create: { code, ...servicePayload(row, team?.id) },
   });
-  return importResult("service_catalog", "UPSERT", service, code, service.name);
+  return importResult("service_catalog", existing ? "UPDATE" : "CREATE", service, code, service.name);
 }
 
-async function importCategory(row: Row) {
+async function importCategory(row: Row, context: ImportContext = {}) {
   const code = required(row, "code");
+  const existing = await prisma.assetCategory.findUnique({ where: { code } });
+  if (existing && !shouldReplace(context)) return existingResult("asset_category", existing, code, existing.name);
   const category = await prisma.assetCategory.upsert({
     where: { code },
     update: categoryPayload(row),
     create: { code, ...categoryPayload(row) },
   });
-  return importResult("asset_category", "UPSERT", category, code, category.name);
+  return importResult("asset_category", existing ? "UPDATE" : "CREATE", category, code, category.name);
 }
 
 async function importInspection(row: Row) {
@@ -782,27 +886,31 @@ async function importInspection(row: Row) {
   return importResult("inspection", "CREATE", inspection, inspection.code, inspection.title);
 }
 
-async function importLocation(row: Row) {
+async function importLocation(row: Row, context: ImportContext = {}) {
   const code = required(row, "code", "Location");
+  const existing = await prisma.location.findUnique({ where: { code } });
+  if (existing && !shouldReplace(context)) return existingResult("location", existing, code, existing.description || code);
   const location = await prisma.location.upsert({
     where: { code },
     update: locationPayload(row),
     create: { code, ...locationPayload(row) },
   });
-  return importResult("location", "UPSERT", location, code, location.description || code);
+  return importResult("location", existing ? "UPDATE" : "CREATE", location, code, location.description || code);
 }
 
-async function importJobPlan(row: Row) {
+async function importJobPlan(row: Row, context: ImportContext = {}) {
   const code = required(row, "code");
+  const existing = await prisma.jobPlan.findUnique({ where: { code } });
+  if (existing && !shouldReplace(context)) return existingResult("job_plan", existing, code, existing.name);
   const jobPlan = await prisma.jobPlan.upsert({
     where: { code },
     update: jobPlanPayload(row),
     create: { code, ...jobPlanPayload(row) },
   });
-  return importResult("job_plan", "UPSERT", jobPlan, code, jobPlan.name);
+  return importResult("job_plan", existing ? "UPDATE" : "CREATE", jobPlan, code, jobPlan.name);
 }
 
-async function importPpm(row: Row) {
+async function importPpm(row: Row, context: ImportContext = {}) {
   const baseCode = required(row, "code", "PPM CODE", "ppmCode");
   const rawAssetTag = value(row, "assetTag", "asset", "assetCode", "EQUIPMENTNO", "OBJECT (ASSET/LOCATION)");
   const rawLocationCode = value(row, "locationCode", "location", "Location", "LOCATION", "OBJECTS LOCATIONS");
@@ -818,6 +926,8 @@ async function importPpm(row: Row) {
 
   const targetKey = assetTag || locationCode;
   const code = value(row, "uniqueCode") || uniquePpmCode(baseCode, targetKey);
+  const existing = await prisma.preventiveMaintenance.findUnique({ where: { code } });
+  if (existing && !shouldReplace(context)) return existingResult("preventive_maintenance", existing, code, existing.name);
   const nextDue = optionalDate(value(row, "nextDue", "DUE DATE", "dueAt")) || addDays(new Date(), 7);
   const activeValue = value(row, "active");
   const data = {
@@ -837,7 +947,7 @@ async function importPpm(row: Row) {
     update: data,
     create: { code, ...data },
   });
-  return importResult("preventive_maintenance", "UPSERT", ppm, code, data.name);
+  return importResult("preventive_maintenance", existing ? "UPDATE" : "CREATE", ppm, code, data.name);
 }
 
 async function importDocumentIndex(row: Row, context: ImportContext = {}) {

@@ -770,6 +770,11 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
     if (file instanceof File) {
       fileName = file.name;
       fileSize = file.size;
+      if (!file.name.toLowerCase().endsWith(".csv")) {
+        setToast("Bulk upload accepts CSV files only. Please upload the prepared CSV file, not XLSX.");
+        setSaving(false);
+        return;
+      }
       totalRows = countCsvDataRows(await file.text());
     }
 
@@ -794,7 +799,13 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
         body: formData,
       });
       setBulkUploadProgress((current) => current ? { ...current, processedRows: Math.max(0, Math.floor(totalRows * 0.7)), completion: 70, status: "PROCESSING", message: "Server is validating rows and creating records." } : current);
-      const result = await response.json();
+      const responseText = await response.text();
+      let result: any = {};
+      try {
+        result = responseText ? JSON.parse(responseText) : {};
+      } catch {
+        throw new Error(response.ok ? "Bulk upload finished but the server returned an unreadable response." : `Bulk upload failed: ${response.status} ${response.statusText || responseText.slice(0, 120)}`);
+      }
       if (response.status === 202 && result.jobId) {
         setBulkUploadProgress({
           jobId: result.jobId,
@@ -816,6 +827,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
       setBulkUploadProgress((current) => current ? { ...current, processedRows: totalRows, completion: 95, status: "FINALIZING", message: "Finalizing upload and refreshing audit logs." } : current);
       setToast(cleanMessage(result.message ?? (response.ok ? "Bulk upload complete." : "Bulk upload failed.")));
       await refreshData();
+      await refreshUploadedModule(module);
       setBulkUploadProgress(null);
     } catch (error) {
       setToast(cleanMessage(error instanceof Error ? error.message : "Bulk upload failed."));
@@ -823,6 +835,22 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
     } finally {
       setSaving(false);
     }
+  }
+
+  async function refreshUploadedModule(module: string) {
+    const endpoints: Record<string, { path: string; key: keyof ConsoleData }> = {
+      sites: { path: "/api/sites", key: "sites" },
+      buildings: { path: "/api/buildings", key: "buildings" },
+      spaces: { path: "/api/spaces", key: "spaces" },
+      locations: { path: "/api/locations", key: "locations" },
+    };
+    const endpoint = endpoints[module];
+    if (!endpoint) return;
+    const response = await fetch(`${endpoint.path}?page=1&pageSize=all`, { cache: "no-store" });
+    if (!response.ok) return;
+    const result = await response.json();
+    const nextRows = result[endpoint.key] ?? [];
+    setRecords((current) => ({ ...current, [endpoint.key]: nextRows }));
   }
 
   async function patchRecord(path: string, body: Record<string, unknown>, successLabel: string, refresh = true) {
@@ -7245,12 +7273,18 @@ function JobPlans({ jobPlans, jobPlansTotal, services, departments, submitJobPla
 
 function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSubmit: (formData: FormData) => void; initialModule: string }) {
   const [module, setModule] = useState(initialModule);
+  const [importMode, setImportMode] = useState("keepExisting");
   const [manualProgress, setManualProgress] = useState("");
   const [manualUploading, setManualUploading] = useState(false);
+  const hierarchyUploadModule = ["sites", "buildings", "spaces", "locations"].includes(module);
 
   useEffect(() => {
     setModule(initialModule);
   }, [initialModule]);
+
+  useEffect(() => {
+    setImportMode(["sites", "buildings", "spaces", "locations"].includes(module) ? "replaceExisting" : "keepExisting");
+  }, [module]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -7279,6 +7313,7 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
       const csvFile = formData.get("file");
       const uploadData = new FormData();
       uploadData.set("module", module);
+      uploadData.set("importMode", importMode);
       if (csvFile instanceof File) uploadData.set("file", csvFile);
       await onSubmit(uploadData);
     } else {
@@ -7315,6 +7350,18 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
               <option value="departments">Departments</option>
               <option value="employees">Employees</option>
             </select>
+          </label>
+          <label className="grid gap-1 text-sm font-bold text-slate-600">
+            Existing Data Handling
+            <select name="importMode" value={importMode} onChange={(event) => setImportMode(event.target.value)} className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon">
+              <option value="keepExisting">Keep existing data unchanged</option>
+              <option value="replaceExisting">Replace with this upload</option>
+            </select>
+            <span className="text-xs font-bold text-slate-500">
+              {hierarchyUploadModule
+                ? "For site/building/space/location uploads, replace mode syncs the visible hierarchy to this file. Old locations not in the file are hidden."
+                : "Keep existing is safest: matching records are skipped and old data stays the same. Replace updates records with the same module key."}
+            </span>
           </label>
           <label className="grid gap-1 text-sm font-bold text-slate-600">
             CSV File
