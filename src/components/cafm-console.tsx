@@ -443,7 +443,7 @@ function isCurrencyField(keyOrLabel: string) {
 
 function formatCurrencyValue(value: unknown) {
   if (value === null || value === undefined || value === "") return "-";
-  const text = String(value).trim().replace(/^\$\s*/, "").replace(/^SAR\s*/i, "").replace(/^ر\.س\s*/, "");
+  const text = String(value).trim().replace(/^\$\s*/, "").replace(/^SAR\s*/i, "").replace(/^Ø±\.Ø³\s*/, "");
   const numeric = Number(text.replaceAll(",", ""));
   if (Number.isFinite(numeric) && text !== "") {
     return numeric.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -1165,6 +1165,12 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
               submitSpace={(formData) => postRecord("/api/spaces", formData, "Space")}
               submitDepartment={(formData) => postRecord("/api/departments", formData, "Department")}
               submitCategory={(formData) => postRecord("/api/asset-categories", formData, "Asset category")}
+              deleteSite={(id) => deleteRecord(`/api/sites?id=${encodeURIComponent(id)}`, "Site deleted.")}
+              deleteBuilding={(id) => deleteRecord(`/api/buildings?id=${encodeURIComponent(id)}`, "Building deleted.")}
+              deleteSpace={(id) => deleteRecord(`/api/spaces?id=${encodeURIComponent(id)}`, "Space deleted.")}
+              deleteDepartment={(id) => deleteRecord(`/api/departments/${id}`, "Department deleted.")}
+              deleteCategory={(id) => deleteRecord(`/api/asset-categories?id=${encodeURIComponent(id)}`, "Asset category deleted.")}
+              isAdmin={isAdmin}
             />
           )}
           {canViewActive && active === "ppm" && <Ppm ppms={records.ppms} ppmsTotal={records.ppmsTotal} assets={records.assets} locations={records.locations} workOrders={records.workOrders} saving={saving} isAdmin={isAdmin} submitPpm={(formData) => postRecord("/api/ppm", formData, "PPM")} updatePpm={(body) => patchRecord("/api/ppm", body, "PPM updated.")} deletePpm={(id) => deleteRecord(`/api/ppm?id=${encodeURIComponent(id)}`, "PPM deleted.")} />}
@@ -6290,6 +6296,7 @@ function ScrollableRowsTable({
   bulkSelectable = false,
   bulkLabel = "documents",
   onBulkDelete,
+  onSelectAllRows,
   totalRows,
   loading = false,
   onLoadMore,
@@ -6300,6 +6307,7 @@ function ScrollableRowsTable({
   bulkSelectable?: boolean;
   bulkLabel?: string;
   onBulkDelete?: (rows: any[]) => Promise<void> | void;
+  onSelectAllRows?: () => Promise<any[]> | any[];
   totalRows?: number;
   loading?: boolean;
   onLoadMore?: () => Promise<void> | void;
@@ -6359,7 +6367,20 @@ function ScrollableRowsTable({
     });
   }
 
-  function selectAllRows() {
+  async function selectAllRows() {
+    if (bulkProgress) return;
+    if (onSelectAllRows) {
+      const expectedTotal = totalRows ?? rows.length;
+      setBulkProgress({ total: expectedTotal, done: 0, label: `Selecting ${bulkLabel}` });
+      try {
+        const allRows = await onSelectAllRows();
+        setSelectedRowKeys(new Set(allRows.map((row, index) => rowKey(row, index))));
+        setBulkProgress({ total: allRows.length, done: allRows.length, label: `Selecting ${bulkLabel}` });
+      } finally {
+        window.setTimeout(() => setBulkProgress(null), 600);
+      }
+      return;
+    }
     setSelectedRowKeys(new Set(rows.map((row, index) => rowKey(row, index))));
   }
 
@@ -6386,7 +6407,7 @@ function ScrollableRowsTable({
           <span>Selected {selectedRowKeys.size.toLocaleString()} {bulkLabel}</span>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => toggleVisibleRows(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-            <button type="button" onClick={selectAllRows} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+            <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllRows} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon disabled:opacity-50">Select All</button>
             <button type="button" disabled={!selectedRowKeys.size || !onBulkDelete || Boolean(bulkProgress)} onClick={deleteSelectedRows} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
             <button type="button" disabled={!selectedRowKeys.size || Boolean(bulkProgress)} onClick={() => setSelectedRowKeys(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
           </div>
@@ -6707,6 +6728,12 @@ function AssetHierarchySetup({
   submitSpace,
   submitDepartment,
   submitCategory,
+  deleteSite,
+  deleteBuilding,
+  deleteSpace,
+  deleteDepartment,
+  deleteCategory,
+  isAdmin,
 }: {
   view: string;
   sites: any[];
@@ -6720,6 +6747,12 @@ function AssetHierarchySetup({
   submitSpace: (formData: FormData) => void;
   submitDepartment: (formData: FormData) => void;
   submitCategory: (formData: FormData) => void;
+  deleteSite: (id: string) => void;
+  deleteBuilding: (id: string) => void;
+  deleteSpace: (id: string) => void;
+  deleteDepartment: (id: string) => void;
+  deleteCategory: (id: string) => void;
+  isAdmin: boolean;
 }) {
   const [setupRows, setSetupRows] = useState({ sites, buildings, spaces, categories });
   const [setupTotals, setSetupTotals] = useState({ sites: sites.length, buildings: buildings.length, spaces: spaces.length, categories: categories.length });
@@ -6783,6 +6816,31 @@ function AssetHierarchySetup({
     }
   }
 
+  async function selectAllSetupRows(key: keyof typeof setupRows) {
+    const endpoint = key === "sites" ? "/api/sites" : key === "buildings" ? "/api/buildings" : key === "spaces" ? "/api/spaces" : "/api/asset-categories";
+    const responseKey = key === "categories" ? "categories" : key;
+    const pageSize = 200;
+    let page = 1;
+    let total = setupTotals[key];
+    const allRows: any[] = [];
+
+    while (page === 1 || allRows.length < total) {
+      const response = await fetch(`${endpoint}?page=${page}&pageSize=${pageSize}`, { cache: "no-store" });
+      if (!response.ok) break;
+      const result = await response.json();
+      const nextRows = result[responseKey] ?? [];
+      total = Number(result.total ?? total ?? nextRows.length);
+      allRows.push(...nextRows);
+      if (!nextRows.length || nextRows.length < pageSize) break;
+      page += 1;
+    }
+
+    setSetupRows((current) => ({ ...current, [key]: allRows }));
+    setSetupTotals((current) => ({ ...current, [key]: total }));
+    setSetupPages((current) => ({ ...current, [key]: Math.max(1, page) }));
+    return allRows;
+  }
+
   const siteRows = setupRows.sites.map((site) => ({
     ...site,
     buildingCount: site.buildings?.length ?? setupRows.buildings.filter((building) => building.siteId === site.id).length,
@@ -6807,27 +6865,27 @@ function AssetHierarchySetup({
       <div className="space-y-5">
         {showSites && (
           <Panel title="Sites" icon={MapPinned}>
-            <ScrollableRowsTable rows={siteRows} totalRows={setupTotals.sites} loading={setupLoading === "sites"} onLoadMore={loadMoreSetupRows} columns={[["name", "Site"], ["city", "City"], ["country", "Country"], ["type", "Type"], ["areaSqm", "Area sqm"], ["buildingCount", "Buildings"]]} />
+            <ScrollableRowsTable rows={siteRows} totalRows={setupTotals.sites} loading={setupLoading === "sites"} onLoadMore={loadMoreSetupRows} onSelectAllRows={() => selectAllSetupRows("sites")} columns={[["name", "Site"], ["city", "City"], ["country", "Country"], ["type", "Type"], ["areaSqm", "Area sqm"], ["buildingCount", "Buildings"]]} actions={isAdmin ? (row) => <DeleteRowButton saving={saving} onDelete={() => deleteSite(row.id)} /> : undefined} bulkSelectable={isAdmin} bulkLabel="sites" onBulkDelete={async (rows) => { await Promise.all(rows.map((row) => deleteSite(row.id))); }} />
           </Panel>
         )}
         {showBuildings && (
           <Panel title="Buildings" icon={Building2}>
-            <ScrollableRowsTable rows={buildingRows} totalRows={setupTotals.buildings} loading={setupLoading === "buildings"} onLoadMore={loadMoreSetupRows} columns={[["code", "Code"], ["name", "Building"], ["siteName", "Site"], ["floors", "Floors"], ["areaSqm", "Area sqm"]]} />
+            <ScrollableRowsTable rows={buildingRows} totalRows={setupTotals.buildings} loading={setupLoading === "buildings"} onLoadMore={loadMoreSetupRows} onSelectAllRows={() => selectAllSetupRows("buildings")} columns={[["code", "Code"], ["name", "Building"], ["siteName", "Site"], ["floors", "Floors"], ["areaSqm", "Area sqm"]]} actions={isAdmin ? (row) => <DeleteRowButton saving={saving} onDelete={() => deleteBuilding(row.id)} /> : undefined} bulkSelectable={isAdmin} bulkLabel="buildings" onBulkDelete={async (rows) => { await Promise.all(rows.map((row) => deleteBuilding(row.id))); }} />
           </Panel>
         )}
         {showSpaces && (
           <Panel title="Spaces" icon={Boxes}>
-            <ScrollableRowsTable rows={spaceRows} totalRows={setupTotals.spaces} loading={setupLoading === "spaces"} onLoadMore={loadMoreSetupRows} columns={[["name", "Space"], ["buildingCode", "Building"], ["floor", "Floor"], ["type", "Type"], ["capacity", "Capacity"], ["areaSqm", "Area sqm"], ["occupancy", "Occupancy"]]} />
+            <ScrollableRowsTable rows={spaceRows} totalRows={setupTotals.spaces} loading={setupLoading === "spaces"} onLoadMore={loadMoreSetupRows} onSelectAllRows={() => selectAllSetupRows("spaces")} columns={[["name", "Space"], ["buildingCode", "Building"], ["floor", "Floor"], ["type", "Type"], ["capacity", "Capacity"], ["areaSqm", "Area sqm"], ["occupancy", "Occupancy"]]} actions={isAdmin ? (row) => <DeleteRowButton saving={saving} onDelete={() => deleteSpace(row.id)} /> : undefined} bulkSelectable={isAdmin} bulkLabel="spaces" onBulkDelete={async (rows) => { await Promise.all(rows.map((row) => deleteSpace(row.id))); }} />
           </Panel>
         )}
         {showDepartments && (
           <Panel title="Departments" icon={Users}>
-            <DataTable rows={departments} columns={[["code", "Code"], ["name", "Department"], ["siteLocation", "Site"], ["description", "Description"]]} />
+            <DataTable rows={departments} columns={[["code", "Code"], ["name", "Department"], ["siteLocation", "Site"], ["description", "Description"]]} actions={isAdmin ? (row) => <DeleteRowButton saving={saving} onDelete={() => deleteDepartment(row.id)} /> : undefined} bulkSelectable={isAdmin} bulkLabel="departments" onBulkDelete={async (rows) => { await Promise.all(rows.map((row) => deleteDepartment(row.id))); }} />
           </Panel>
         )}
         {showCategories && (
           <Panel title="Asset Categories" icon={PackagePlus}>
-            <ScrollableRowsTable rows={setupRows.categories} totalRows={setupTotals.categories} loading={setupLoading === "categories"} onLoadMore={loadMoreSetupRows} columns={[["code", "Code"], ["name", "Category"], ["type", "Type"], ["defaultLifeYrs", "Life yrs"], ["statutory", "Statutory"], ["description", "Description"]]} />
+            <ScrollableRowsTable rows={setupRows.categories} totalRows={setupTotals.categories} loading={setupLoading === "categories"} onLoadMore={loadMoreSetupRows} onSelectAllRows={() => selectAllSetupRows("categories")} columns={[["code", "Code"], ["name", "Category"], ["type", "Type"], ["defaultLifeYrs", "Life yrs"], ["statutory", "Statutory"], ["description", "Description"]]} actions={isAdmin ? (row) => <DeleteRowButton saving={saving} onDelete={() => deleteCategory(row.id)} /> : undefined} bulkSelectable={isAdmin} bulkLabel="categories" onBulkDelete={async (rows) => { await Promise.all(rows.map((row) => deleteCategory(row.id))); }} />
           </Panel>
         )}
       </div>
@@ -9223,7 +9281,7 @@ function HousingTable({ title, rows, columns, onSelect, actions, reportType, bul
           <span>Selected {selectedRowIds.size.toLocaleString()} records</span>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => toggleVisibleRows(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-            <button type="button" onClick={selectAllRows} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+            <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllRows} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon disabled:opacity-50">Select All</button>
             <button type="button" disabled={!selectedRowIds.size || !onBulkDelete || Boolean(bulkProgress)} onClick={deleteSelectedRows} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
             <button type="button" disabled={!selectedRowIds.size || Boolean(bulkProgress)} onClick={() => setSelectedRowIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
           </div>
@@ -10368,6 +10426,8 @@ function DataTable({
   bulkSelectable = false,
   bulkLabel = "rows",
   onBulkDelete,
+  onSelectAllRows,
+  totalRows,
 }: {
   rows: any[];
   columns: [string, string][];
@@ -10376,6 +10436,8 @@ function DataTable({
   bulkSelectable?: boolean;
   bulkLabel?: string;
   onBulkDelete?: (rows: any[]) => Promise<void> | void;
+  onSelectAllRows?: () => Promise<any[]> | any[];
+  totalRows?: number;
 }) {
   const [page, setPage] = useState(1);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
@@ -10421,7 +10483,20 @@ function DataTable({
     });
   }
 
-  function selectAllRows() {
+  async function selectAllRows() {
+    if (bulkProgress) return;
+    if (onSelectAllRows) {
+      const expectedTotal = totalRows ?? rows.length;
+      setBulkProgress({ total: expectedTotal, done: 0, label: `Selecting ${bulkLabel}` });
+      try {
+        const allRows = await onSelectAllRows();
+        setSelectedRowKeys(new Set(allRows.map((row, index) => rowKey(row, index))));
+        setBulkProgress({ total: allRows.length, done: allRows.length, label: `Selecting ${bulkLabel}` });
+      } finally {
+        window.setTimeout(() => setBulkProgress(null), 600);
+      }
+      return;
+    }
     setSelectedRowKeys(new Set(rows.map((row, index) => rowKey(row, index))));
   }
 
@@ -10448,7 +10523,7 @@ function DataTable({
           <span>Selected {selectedRowKeys.size.toLocaleString()} {bulkLabel}</span>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => toggleVisibleRows(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-            <button type="button" onClick={selectAllRows} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+            <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllRows} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon disabled:opacity-50">Select All</button>
             <button type="button" disabled={!selectedRowKeys.size || !onBulkDelete || Boolean(bulkProgress)} onClick={deleteSelectedRows} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
             <button type="button" disabled={!selectedRowKeys.size || Boolean(bulkProgress)} onClick={() => setSelectedRowKeys(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
           </div>

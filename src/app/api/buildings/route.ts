@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api-response";
-import { requirePermission } from "@/lib/api-auth";
+import { requireAdmin, requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 
@@ -67,5 +67,30 @@ export async function POST(request: Request) {
     return NextResponse.json(building, { status: 201 });
   } catch (error) {
     return apiError(error, "Unable to save building");
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const { error, user } = await requireAdmin();
+    if (error) return error;
+    const id = new URL(request.url).searchParams.get("id");
+    if (!id) throw new Error("Building id is required");
+    const current = await prisma.building.findUnique({
+      where: { id },
+      include: {
+        assets: { select: { id: true }, take: 1 },
+        spaces: { select: { id: true }, take: 1 },
+      },
+    });
+    if (!current) throw new Error("Building not found");
+    if (current.assets.length || current.spaces.length) {
+      throw new Error("Delete linked assets and spaces before deleting this building.");
+    }
+    await prisma.building.delete({ where: { id } });
+    await auditAction({ user, action: "BUILDING_DELETE", entity: "building", entityId: id, details: { deletedRecord: current } });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return apiError(error, "Unable to delete building");
   }
 }

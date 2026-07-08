@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api-response";
-import { requirePermission } from "@/lib/api-auth";
+import { requireAdmin, requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 
@@ -49,5 +49,30 @@ export async function POST(request: Request) {
     return NextResponse.json(site, { status: 201 });
   } catch (error) {
     return apiError(error, "Unable to save site");
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const { error, user } = await requireAdmin();
+    if (error) return error;
+    const id = new URL(request.url).searchParams.get("id");
+    if (!id) throw new Error("Site id is required");
+    const current = await prisma.site.findUnique({
+      where: { id },
+      include: {
+        assets: { select: { id: true }, take: 1 },
+        buildings: { select: { id: true }, take: 1 },
+      },
+    });
+    if (!current) throw new Error("Site not found");
+    if (current.assets.length || current.buildings.length) {
+      throw new Error("Delete linked assets and buildings before deleting this site.");
+    }
+    await prisma.site.delete({ where: { id } });
+    await auditAction({ user, action: "SITE_DELETE", entity: "site", entityId: id, details: { deletedRecord: current } });
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return apiError(error, "Unable to delete site");
   }
 }
