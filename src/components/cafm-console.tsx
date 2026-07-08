@@ -1967,8 +1967,43 @@ function Assets({
     });
   }
 
-  function selectAllAssets() {
-    setSelectedAssetIds(new Set(visibleAssets.map((asset) => asset.id)));
+  async function selectAllAssets() {
+    if (bulkProgress) return;
+    const selected = new Set<string>();
+    const pageSize = 200;
+    let nextPage = 1;
+    let total = assetTotal || visibleAssets.length;
+    setBulkProgress({ total, done: 0, label: "Selecting assets" });
+    try {
+      while (selected.size < total) {
+        const params = new URLSearchParams({
+          page: String(nextPage),
+          pageSize: String(pageSize),
+          query,
+          filterField,
+          filterValue,
+          locationCode: locationFilter,
+          locationQuery: locationSearch,
+          class: classFilter,
+          status: statusFilter,
+        });
+        Object.entries(columnFilters).forEach(([field, value]) => {
+          const trimmed = value.trim();
+          if (trimmed) params.set(`column_${field}`, trimmed);
+        });
+        const response = await fetch(`/api/assets/filter?${params.toString()}`, { cache: "no-store" });
+        const result = await response.json();
+        const nextRows = result.assets ?? [];
+        total = Number(result.total ?? total ?? nextRows.length);
+        nextRows.forEach((asset: any) => selected.add(asset.id));
+        setBulkProgress({ total, done: selected.size, label: "Selecting assets" });
+        if (!nextRows.length || nextRows.length < pageSize) break;
+        nextPage += 1;
+      }
+      setSelectedAssetIds(selected);
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 600);
+    }
   }
 
   async function bulkDeleteSelectedAssets() {
@@ -1997,7 +2032,7 @@ function Assets({
             {isAdmin && (
               <>
                 <button type="button" onClick={() => toggleVisibleAssets(true)} className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-black text-lagoon">Select Visible</button>
-                <button type="button" onClick={selectAllAssets} className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-black text-lagoon">Select All</button>
+                <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllAssets} className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-black text-lagoon">Select All</button>
                 <button
                   type="button"
                   disabled={saving || !selectedAssetIds.size || Boolean(bulkProgress)}
@@ -2705,8 +2740,41 @@ function WorkOrders({
     });
   }
 
-  function selectAllWorks() {
-    setSelectedWorkIds(new Set(visibleWorks.map((work) => work.id)));
+  async function selectAllWorks() {
+    if (bulkProgress) return;
+    const selected = new Set<string>();
+    const pageSize = 200;
+    let nextPage = 1;
+    let total = workTotal || visibleWorks.length;
+    setBulkProgress({ total, done: 0, label: "Selecting work orders" });
+    try {
+      while (selected.size < total) {
+        const params = new URLSearchParams({
+          page: String(nextPage),
+          pageSize: String(pageSize),
+          query: search,
+          status: statusFilter,
+          priority: priorityFilter,
+          category: categoryFilter,
+          department: departmentFilter,
+          type: typeFilter,
+          assigned: assignedFilter,
+          overdueOnly: overdueOnly ? "true" : "false",
+          delayedOnly: showTimeMetrics && showOnlyDelayed ? "true" : "false",
+        });
+        const response = await fetch(`/api/work-orders?${params.toString()}`, { cache: "no-store" });
+        const result = await response.json();
+        const nextRows = result.workOrders ?? [];
+        total = Number(result.total ?? total ?? nextRows.length);
+        nextRows.forEach((work: any) => selected.add(work.id));
+        setBulkProgress({ total, done: selected.size, label: "Selecting work orders" });
+        if (!nextRows.length || nextRows.length < pageSize) break;
+        nextPage += 1;
+      }
+      setSelectedWorkIds(selected);
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 600);
+    }
   }
 
   async function bulkDeleteSelectedWorks() {
@@ -2736,7 +2804,7 @@ function WorkOrders({
             {isAdmin && view === "list" && (
               <>
                 <button type="button" onClick={() => toggleVisibleWorks(true)} className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon">Select Visible</button>
-                <button type="button" onClick={selectAllWorks} className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon">Select All</button>
+                <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllWorks} className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon">Select All</button>
                 <button
                   type="button"
                   disabled={saving || !selectedWorkIds.size || Boolean(bulkProgress)}
@@ -5096,8 +5164,29 @@ function Ppm({
     });
   }
 
-  function selectAllPpms() {
-    setSelectedPpmIds(new Set(ppmRowsSource.map((ppm) => ppm.id)));
+  async function selectAllPpms() {
+    if (bulkProgress) return;
+    const selected = new Set<string>();
+    const pageSize = 200;
+    let nextPage = 1;
+    let total = ppmTotal || ppmRowsSource.length;
+    setBulkProgress({ total, done: 0, label: "Selecting PPM plans" });
+    try {
+      while (selected.size < total) {
+        const params = new URLSearchParams({ page: String(nextPage), pageSize: String(pageSize), query: search, status: statusFilter });
+        const response = await fetch(`/api/ppm?${params.toString()}`, { cache: "no-store" });
+        const result = await response.json();
+        const nextRows = result.ppms ?? [];
+        total = Number(result.total ?? total ?? nextRows.length);
+        nextRows.forEach((ppm: any) => selected.add(ppm.id));
+        setBulkProgress({ total, done: selected.size, label: "Selecting PPM plans" });
+        if (!nextRows.length || nextRows.length < pageSize) break;
+        nextPage += 1;
+      }
+      setSelectedPpmIds(selected);
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 600);
+    }
   }
 
   async function bulkDeleteSelectedPpms() {
@@ -5142,7 +5231,7 @@ function Ppm({
                 <span>Selected {selectedPpmIds.size.toLocaleString()} PPM plans</span>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => toggleVisiblePpms(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-                  <button type="button" onClick={selectAllPpms} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+                  <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllPpms} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
                   <button type="button" disabled={!selectedPpmIds.size || Boolean(bulkProgress)} onClick={bulkDeleteSelectedPpms} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
                   <button type="button" disabled={!selectedPpmIds.size || Boolean(bulkProgress)} onClick={() => setSelectedPpmIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
                 </div>
@@ -7066,8 +7155,36 @@ function Locations({ locations, submitLocation, deleteLocation, isAdmin, saving 
     });
   }
 
-  function selectAllLocations() {
-    setSelectedLocationIds(new Set(locationRows.map((location) => location.id)));
+  async function selectAllLocations() {
+    if (bulkProgress) return;
+    const selected = new Set<string>();
+    const pageSize = 200;
+    let nextPage = 1;
+    let total = locationTotal || locationRows.length;
+    setBulkProgress({ total, done: 0, label: "Selecting locations" });
+    try {
+      while (selected.size < total) {
+        const params = new URLSearchParams({
+          page: String(nextPage),
+          pageSize: String(pageSize),
+          query,
+          parentLocation: parentFilter,
+          locationClass: classFilter,
+          residential: residentialFilter,
+        });
+        const response = await fetch(`/api/locations?${params.toString()}`, { cache: "no-store" });
+        const result = await response.json();
+        const nextRows = result.locations ?? [];
+        total = Number(result.total ?? total ?? nextRows.length);
+        nextRows.forEach((location: any) => selected.add(location.id));
+        setBulkProgress({ total, done: selected.size, label: "Selecting locations" });
+        if (!nextRows.length || nextRows.length < pageSize) break;
+        nextPage += 1;
+      }
+      setSelectedLocationIds(selected);
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 600);
+    }
   }
 
   async function bulkDeleteSelectedLocations() {
@@ -7122,7 +7239,7 @@ function Locations({ locations, submitLocation, deleteLocation, isAdmin, saving 
             <span>Selected {selectedLocationIds.size.toLocaleString()} locations</span>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => toggleVisibleLocations(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-              <button type="button" onClick={selectAllLocations} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+              <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllLocations} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
               <button type="button" disabled={!selectedLocationIds.size || Boolean(bulkProgress)} onClick={bulkDeleteSelectedLocations} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
               <button type="button" disabled={!selectedLocationIds.size || Boolean(bulkProgress)} onClick={() => setSelectedLocationIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
             </div>
@@ -7266,8 +7383,29 @@ function JobPlans({ jobPlans, jobPlansTotal, services, departments, submitJobPla
     });
   }
 
-  function selectAllJobPlans() {
-    setSelectedJobPlanIds(new Set(jobPlanRowsSource.map((jobPlan) => jobPlan.id)));
+  async function selectAllJobPlans() {
+    if (bulkProgress) return;
+    const selected = new Set<string>();
+    const pageSize = 200;
+    let nextPage = 1;
+    let total = jobPlanTotal || jobPlanRowsSource.length;
+    setBulkProgress({ total, done: 0, label: "Selecting job plans" });
+    try {
+      while (selected.size < total) {
+        const params = new URLSearchParams({ page: String(nextPage), pageSize: String(pageSize) });
+        const response = await fetch(`/api/job-plans?${params.toString()}`, { cache: "no-store" });
+        const result = await response.json();
+        const nextRows = result.jobPlans ?? [];
+        total = Number(result.total ?? total ?? nextRows.length);
+        nextRows.forEach((jobPlan: any) => selected.add(jobPlan.id));
+        setBulkProgress({ total, done: selected.size, label: "Selecting job plans" });
+        if (!nextRows.length || nextRows.length < pageSize) break;
+        nextPage += 1;
+      }
+      setSelectedJobPlanIds(selected);
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 600);
+    }
   }
 
   async function bulkDeleteSelectedJobPlans() {
@@ -7306,7 +7444,7 @@ function JobPlans({ jobPlans, jobPlansTotal, services, departments, submitJobPla
             <span>Selected {selectedJobPlanIds.size.toLocaleString()} job plans</span>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => toggleVisibleJobPlans(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-              <button type="button" onClick={selectAllJobPlans} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+              <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllJobPlans} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
               <button type="button" disabled={!selectedJobPlanIds.size || Boolean(bulkProgress)} onClick={bulkDeleteSelectedJobPlans} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
               <button type="button" disabled={!selectedJobPlanIds.size || Boolean(bulkProgress)} onClick={() => setSelectedJobPlanIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
             </div>
