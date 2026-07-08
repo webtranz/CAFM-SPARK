@@ -1821,6 +1821,7 @@ function Assets({
   const [statusFilter, setStatusFilter] = useState("");
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
+  const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
   const [page, setPage] = useState(1);
   const [assetRowsSource, setAssetRowsSource] = useState<any[]>(assets);
   const [assetTotal, setAssetTotal] = useState(assets.length);
@@ -1966,11 +1967,24 @@ function Assets({
     });
   }
 
+  function selectAllAssets() {
+    setSelectedAssetIds(new Set(visibleAssets.map((asset) => asset.id)));
+  }
+
   async function bulkDeleteSelectedAssets() {
     const ids = Array.from(selectedAssetIds);
     if (!ids.length) return;
-    await deleteAssets(ids);
-    setSelectedAssetIds(new Set());
+    if (!window.confirm(`Delete ${ids.length.toLocaleString()} selected assets?`)) return;
+    setBulkProgress({ total: ids.length, done: 0, label: "Deleting assets" });
+    try {
+      for (const [index, id] of ids.entries()) {
+        await deleteAssets([id]);
+        setBulkProgress({ total: ids.length, done: index + 1, label: "Deleting assets" });
+      }
+      setSelectedAssetIds(new Set());
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 600);
+    }
   }
 
   return (
@@ -1981,14 +1995,18 @@ function Assets({
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" onClick={() => setFilterOpen((current) => !current)} className="rounded-lg bg-lagoon px-4 py-3 text-sm font-black text-white">Filters</button>
             {isAdmin && (
-              <button
-                type="button"
-                disabled={saving || !selectedAssetIds.size}
-                onClick={bulkDeleteSelectedAssets}
-                className="rounded-lg bg-coral px-4 py-3 text-sm font-black text-white disabled:bg-slate-300"
-              >
-                Delete All
-              </button>
+              <>
+                <button type="button" onClick={() => toggleVisibleAssets(true)} className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-black text-lagoon">Select Visible</button>
+                <button type="button" onClick={selectAllAssets} className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-black text-lagoon">Select All</button>
+                <button
+                  type="button"
+                  disabled={saving || !selectedAssetIds.size || Boolean(bulkProgress)}
+                  onClick={bulkDeleteSelectedAssets}
+                  className="rounded-lg bg-coral px-4 py-3 text-sm font-black text-white disabled:bg-slate-300"
+                >
+                  Delete Selected
+                </button>
+              </>
             )}
           </div>
           <div className="flex min-w-[280px] flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 lg:max-w-md">
@@ -1997,6 +2015,7 @@ function Assets({
           </div>
           {canManageAssets && <button type="button" onClick={() => setCreateOpen(true)} className="flex h-11 items-center gap-2 rounded-lg bg-lagoon px-4 text-sm font-black text-white"><Plus size={16} /> Asset</button>}
         </div>
+        {bulkProgress && <div className="mb-4"><BulkActionProgress label={bulkProgress.label} done={bulkProgress.done} total={bulkProgress.total} /></div>}
         {filterOpen && (
           <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 shadow-lift">
             <p className="text-sm font-black">Filters</p>
@@ -2534,6 +2553,7 @@ function WorkOrders({
   const [reviewWork, setReviewWork] = useState<{ work: any; action: "close" | "reopen" } | null>(null);
   const [selectedWorkId, setSelectedWorkId] = useState<string | null>(data.workOrders[0]?.id ?? null);
   const [selectedWorkIds, setSelectedWorkIds] = useState<Set<string>>(new Set());
+  const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
   const [workAction, setWorkAction] = useState<string | null>(null);
   const [showTimeMetrics, setShowTimeMetrics] = useState(false);
   const [showOnlyDelayed, setShowOnlyDelayed] = useState(false);
@@ -2685,11 +2705,24 @@ function WorkOrders({
     });
   }
 
+  function selectAllWorks() {
+    setSelectedWorkIds(new Set(visibleWorks.map((work) => work.id)));
+  }
+
   async function bulkDeleteSelectedWorks() {
     const ids = Array.from(selectedWorkIds);
     if (!ids.length) return;
-    await deleteWorkOrders(ids);
-    setSelectedWorkIds(new Set());
+    if (!window.confirm(`Delete ${ids.length.toLocaleString()} selected work orders?`)) return;
+    setBulkProgress({ total: ids.length, done: 0, label: "Deleting work orders" });
+    try {
+      for (const [index, id] of ids.entries()) {
+        await deleteWorkOrders([id]);
+        setBulkProgress({ total: ids.length, done: index + 1, label: "Deleting work orders" });
+      }
+      setSelectedWorkIds(new Set());
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 600);
+    }
   }
 
   return (
@@ -2701,14 +2734,18 @@ function WorkOrders({
             <button type="button" onClick={() => setView("list")} className={`h-10 rounded-lg px-4 text-sm font-black ${view === "list" ? "bg-lagoon text-white" : "bg-slate-50 text-slate-600"}`}>List</button>
             <button type="button" onClick={() => setView("calendar")} className={`h-10 rounded-lg px-4 text-sm font-black ${view === "calendar" ? "bg-lagoon text-white" : "bg-slate-50 text-slate-600"}`}>Calendar</button>
             {isAdmin && view === "list" && (
-              <button
-                type="button"
-                disabled={saving || !selectedWorkIds.size}
-                onClick={bulkDeleteSelectedWorks}
-                className="h-10 rounded-lg bg-coral px-4 text-sm font-black text-white disabled:bg-slate-300"
-              >
-                Delete All
-              </button>
+              <>
+                <button type="button" onClick={() => toggleVisibleWorks(true)} className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon">Select Visible</button>
+                <button type="button" onClick={selectAllWorks} className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon">Select All</button>
+                <button
+                  type="button"
+                  disabled={saving || !selectedWorkIds.size || Boolean(bulkProgress)}
+                  onClick={bulkDeleteSelectedWorks}
+                  className="h-10 rounded-lg bg-coral px-4 text-sm font-black text-white disabled:bg-slate-300"
+                >
+                  Delete Selected
+                </button>
+              </>
             )}
           </div>
           <div className="flex min-w-[280px] flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 lg:max-w-md">
@@ -2730,6 +2767,7 @@ function WorkOrders({
             {canAssignOrEdit && <button type="button" onClick={() => { setEditing(null); setCreateOpen(true); }} className="flex h-10 items-center gap-2 rounded-lg bg-lagoon px-4 text-sm font-black text-white"><Plus size={16} /> Work Order</button>}
           </div>
         </div>
+        {bulkProgress && <div className="mb-4"><BulkActionProgress label={bulkProgress.label} done={bulkProgress.done} total={bulkProgress.total} /></div>}
         <div className="mb-4 flex flex-wrap gap-3 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-700">
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3">
             {statuses.map((status) => <option key={status} value={status}>{status === "All" ? "Status" : status}</option>)}
@@ -3078,6 +3116,7 @@ function Helpdesk({
   const [previewRequest, setPreviewRequest] = useState<any | null>(null);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(requests[0]?.id ?? null);
   const [selectedRequestIds, setSelectedRequestIds] = useState<Set<string>>(new Set());
+  const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
   const [requestAction, setRequestAction] = useState<string | null>(null);
   const [assignments, setAssignments] = useState<Record<string, { assignedTeamCode: string; assignedToEmail: string; assetTag: string }>>({});
   const [search, setSearch] = useState("");
@@ -3143,11 +3182,24 @@ function Helpdesk({
     });
   }
 
+  function selectAllRequests() {
+    setSelectedRequestIds(new Set(filteredRequests.map((request) => request.id)));
+  }
+
   async function bulkDeleteSelectedRequests() {
     const ids = Array.from(selectedRequestIds);
     if (!ids.length) return;
-    await Promise.all(ids.map((id) => deleteRequest(id)));
-    setSelectedRequestIds(new Set());
+    if (!window.confirm(`Delete ${ids.length.toLocaleString()} selected service requests?`)) return;
+    setBulkProgress({ total: ids.length, done: 0, label: "Deleting service requests" });
+    try {
+      for (const [index, id] of ids.entries()) {
+        await deleteRequest(id);
+        setBulkProgress({ total: ids.length, done: index + 1, label: "Deleting service requests" });
+      }
+      setSelectedRequestIds(new Set());
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 600);
+    }
   }
 
   async function runRequestAction(key: string, request: any, action: () => Promise<void> | void) {
@@ -3228,11 +3280,13 @@ function Helpdesk({
             <span>Selected {selectedRequestIds.size.toLocaleString()} service requests</span>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => toggleVisibleRequests(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-              <button type="button" disabled={!selectedRequestIds.size} onClick={bulkDeleteSelectedRequests} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete All</button>
-              <button type="button" disabled={!selectedRequestIds.size} onClick={() => setSelectedRequestIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
+              <button type="button" onClick={selectAllRequests} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+              <button type="button" disabled={!selectedRequestIds.size || Boolean(bulkProgress)} onClick={bulkDeleteSelectedRequests} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
+              <button type="button" disabled={!selectedRequestIds.size || Boolean(bulkProgress)} onClick={() => setSelectedRequestIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
             </div>
           </div>
         )}
+        {bulkProgress && <div className="mb-3"><BulkActionProgress label={bulkProgress.label} done={bulkProgress.done} total={bulkProgress.total} /></div>}
         <div className="cafm-scroll-x overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
           <table className="cafm-data-table min-w-[1680px] border-collapse bg-white text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
@@ -4945,6 +4999,7 @@ function Ppm({
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [selectedPpmIds, setSelectedPpmIds] = useState<Set<string>>(new Set());
+  const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
   const [page, setPage] = useState(1);
   const [ppmRowsSource, setPpmRowsSource] = useState<any[]>(ppms);
   const [ppmTotal, setPpmTotal] = useState(ppmsTotal ?? ppms.length);
@@ -5041,11 +5096,24 @@ function Ppm({
     });
   }
 
+  function selectAllPpms() {
+    setSelectedPpmIds(new Set(ppmRowsSource.map((ppm) => ppm.id)));
+  }
+
   async function bulkDeleteSelectedPpms() {
     const ids = Array.from(selectedPpmIds);
     if (!ids.length) return;
-    await Promise.all(ids.map((id) => deletePpm(id)));
-    setSelectedPpmIds(new Set());
+    if (!window.confirm(`Delete ${ids.length.toLocaleString()} selected PPM plans?`)) return;
+    setBulkProgress({ total: ids.length, done: 0, label: "Deleting PPM plans" });
+    try {
+      for (const [index, id] of ids.entries()) {
+        await deletePpm(id);
+        setBulkProgress({ total: ids.length, done: index + 1, label: "Deleting PPM plans" });
+      }
+      setSelectedPpmIds(new Set());
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 600);
+    }
   }
 
   return (
@@ -5074,11 +5142,13 @@ function Ppm({
                 <span>Selected {selectedPpmIds.size.toLocaleString()} PPM plans</span>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => toggleVisiblePpms(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-                  <button type="button" disabled={!selectedPpmIds.size} onClick={bulkDeleteSelectedPpms} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete All</button>
-                  <button type="button" disabled={!selectedPpmIds.size} onClick={() => setSelectedPpmIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
+                  <button type="button" onClick={selectAllPpms} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+                  <button type="button" disabled={!selectedPpmIds.size || Boolean(bulkProgress)} onClick={bulkDeleteSelectedPpms} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
+                  <button type="button" disabled={!selectedPpmIds.size || Boolean(bulkProgress)} onClick={() => setSelectedPpmIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
                 </div>
               </div>
             )}
+            {bulkProgress && <div className="mb-3"><BulkActionProgress label={bulkProgress.label} done={bulkProgress.done} total={bulkProgress.total} /></div>}
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm font-black text-slate-600">
               <span>Showing {ppmRowsSource.length.toLocaleString()} of {ppmTotal.toLocaleString()} PPM plans</span>
               {ppmLoading && <span className="text-lagoon">Loading PPM plans...</span>}
@@ -6147,6 +6217,7 @@ function ScrollableRowsTable({
 }) {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
+  const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
   const visibleRows = rows.slice(0, visibleCount);
   const rowKey = (row: any, index: number) => String(row.id ?? row.reference ?? row.title ?? index);
   const visibleRowKeys = visibleRows.map((row, index) => rowKey(row, index));
@@ -6199,10 +6270,24 @@ function ScrollableRowsTable({
     });
   }
 
+  function selectAllRows() {
+    setSelectedRowKeys(new Set(rows.map((row, index) => rowKey(row, index))));
+  }
+
   async function deleteSelectedRows() {
     if (!onBulkDelete || !selectedRows.length) return;
-    await onBulkDelete(selectedRows);
-    setSelectedRowKeys(new Set());
+    const count = selectedRows.length;
+    if (!window.confirm(`Delete ${count.toLocaleString()} selected ${bulkLabel}?`)) return;
+    setBulkProgress({ total: count, done: 0, label: `Deleting ${bulkLabel}` });
+    try {
+      for (const [index, row] of selectedRows.entries()) {
+        await onBulkDelete([row]);
+        setBulkProgress({ total: count, done: index + 1, label: `Deleting ${bulkLabel}` });
+      }
+      setSelectedRowKeys(new Set());
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 600);
+    }
   }
 
   return (
@@ -6212,11 +6297,13 @@ function ScrollableRowsTable({
           <span>Selected {selectedRowKeys.size.toLocaleString()} {bulkLabel}</span>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => toggleVisibleRows(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-            <button type="button" disabled={!selectedRowKeys.size || !onBulkDelete} onClick={deleteSelectedRows} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete All</button>
-            <button type="button" disabled={!selectedRowKeys.size} onClick={() => setSelectedRowKeys(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
+            <button type="button" onClick={selectAllRows} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+            <button type="button" disabled={!selectedRowKeys.size || !onBulkDelete || Boolean(bulkProgress)} onClick={deleteSelectedRows} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
+            <button type="button" disabled={!selectedRowKeys.size || Boolean(bulkProgress)} onClick={() => setSelectedRowKeys(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
           </div>
         </div>
       )}
+      {bulkProgress && <BulkActionProgress label={bulkProgress.label} done={bulkProgress.done} total={bulkProgress.total} />}
       <div onScroll={handleScroll} className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
         <table className="cafm-data-table min-w-[1500px] table-fixed border-collapse bg-white text-sm">
           <thead className="sticky top-0 z-10 bg-slate-50 text-left text-xs uppercase text-slate-500">
@@ -6875,6 +6962,7 @@ function Locations({ locations, submitLocation, deleteLocation, isAdmin, saving 
   const [locationTotal, setLocationTotal] = useState(locations.length);
   const [locationLoading, setLocationLoading] = useState(false);
   const [selectedLocationIds, setSelectedLocationIds] = useState<Set<string>>(new Set());
+  const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
   const locationScrollRef = useRef<HTMLDivElement | null>(null);
   const locationRows = locationRowsSource.map((location) => ({
     ...location,
@@ -6978,11 +7066,24 @@ function Locations({ locations, submitLocation, deleteLocation, isAdmin, saving 
     });
   }
 
+  function selectAllLocations() {
+    setSelectedLocationIds(new Set(locationRows.map((location) => location.id)));
+  }
+
   async function bulkDeleteSelectedLocations() {
     const ids = Array.from(selectedLocationIds);
     if (!ids.length) return;
-    await Promise.all(ids.map((id) => deleteLocation(id)));
-    setSelectedLocationIds(new Set());
+    if (!window.confirm(`Delete ${ids.length.toLocaleString()} selected locations?`)) return;
+    setBulkProgress({ total: ids.length, done: 0, label: "Deleting locations" });
+    try {
+      for (const [index, id] of ids.entries()) {
+        await deleteLocation(id);
+        setBulkProgress({ total: ids.length, done: index + 1, label: "Deleting locations" });
+      }
+      setSelectedLocationIds(new Set());
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 600);
+    }
   }
 
   return (
@@ -7021,11 +7122,13 @@ function Locations({ locations, submitLocation, deleteLocation, isAdmin, saving 
             <span>Selected {selectedLocationIds.size.toLocaleString()} locations</span>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => toggleVisibleLocations(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-              <button type="button" disabled={!selectedLocationIds.size} onClick={bulkDeleteSelectedLocations} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete All</button>
-              <button type="button" disabled={!selectedLocationIds.size} onClick={() => setSelectedLocationIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
+              <button type="button" onClick={selectAllLocations} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+              <button type="button" disabled={!selectedLocationIds.size || Boolean(bulkProgress)} onClick={bulkDeleteSelectedLocations} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
+              <button type="button" disabled={!selectedLocationIds.size || Boolean(bulkProgress)} onClick={() => setSelectedLocationIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
             </div>
           </div>
         )}
+        {bulkProgress && <div className="mb-3"><BulkActionProgress label={bulkProgress.label} done={bulkProgress.done} total={bulkProgress.total} /></div>}
         <div ref={locationScrollRef} onScroll={handleLocationScroll} className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
           <table className="cafm-data-table min-w-[1020px] border-collapse bg-white text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
@@ -7089,6 +7192,7 @@ function JobPlans({ jobPlans, jobPlansTotal, services, departments, submitJobPla
   const [jobPlanTotal, setJobPlanTotal] = useState(jobPlansTotal ?? jobPlans.length);
   const [jobPlanLoading, setJobPlanLoading] = useState(false);
   const [selectedJobPlanIds, setSelectedJobPlanIds] = useState<Set<string>>(new Set());
+  const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
   const jobPlanScrollRef = useRef<HTMLDivElement | null>(null);
   const hasMoreJobPlans = jobPlanRowsSource.length < jobPlanTotal;
   const selectedVisibleJobPlans = jobPlanRowsSource.filter((jobPlan) => selectedJobPlanIds.has(jobPlan.id));
@@ -7162,11 +7266,24 @@ function JobPlans({ jobPlans, jobPlansTotal, services, departments, submitJobPla
     });
   }
 
+  function selectAllJobPlans() {
+    setSelectedJobPlanIds(new Set(jobPlanRowsSource.map((jobPlan) => jobPlan.id)));
+  }
+
   async function bulkDeleteSelectedJobPlans() {
     const ids = Array.from(selectedJobPlanIds);
     if (!ids.length) return;
-    await Promise.all(ids.map((id) => deleteJobPlan(id)));
-    setSelectedJobPlanIds(new Set());
+    if (!window.confirm(`Delete ${ids.length.toLocaleString()} selected job plans?`)) return;
+    setBulkProgress({ total: ids.length, done: 0, label: "Deleting job plans" });
+    try {
+      for (const [index, id] of ids.entries()) {
+        await deleteJobPlan(id);
+        setBulkProgress({ total: ids.length, done: index + 1, label: "Deleting job plans" });
+      }
+      setSelectedJobPlanIds(new Set());
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 600);
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -7189,11 +7306,13 @@ function JobPlans({ jobPlans, jobPlansTotal, services, departments, submitJobPla
             <span>Selected {selectedJobPlanIds.size.toLocaleString()} job plans</span>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => toggleVisibleJobPlans(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-              <button type="button" disabled={!selectedJobPlanIds.size} onClick={bulkDeleteSelectedJobPlans} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete All</button>
-              <button type="button" disabled={!selectedJobPlanIds.size} onClick={() => setSelectedJobPlanIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
+              <button type="button" onClick={selectAllJobPlans} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+              <button type="button" disabled={!selectedJobPlanIds.size || Boolean(bulkProgress)} onClick={bulkDeleteSelectedJobPlans} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
+              <button type="button" disabled={!selectedJobPlanIds.size || Boolean(bulkProgress)} onClick={() => setSelectedJobPlanIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
             </div>
           </div>
         )}
+        {bulkProgress && <div className="mb-3"><BulkActionProgress label={bulkProgress.label} done={bulkProgress.done} total={bulkProgress.total} /></div>}
         <div ref={jobPlanScrollRef} onScroll={handleJobPlanScroll} className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
           <table className="cafm-data-table min-w-[1180px] border-collapse bg-white text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
@@ -8901,6 +9020,7 @@ function HousingSummaryTable({ title, rows }: { title: string; rows: Array<{ met
 function HousingTable({ title, rows, columns, onSelect, actions, reportType, bulkSelectable = false, onBulkDelete }: { title: string; rows: any[]; columns: [string, string][]; onSelect?: (record: any) => void; actions?: (record: any) => any; reportType: string; bulkSelectable?: boolean; onBulkDelete?: (rows: any[]) => Promise<void> | void }) {
   const [page, setPage] = useState(1);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
+  const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const visibleRows = rows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
@@ -8937,10 +9057,24 @@ function HousingTable({ title, rows, columns, onSelect, actions, reportType, bul
     });
   }
 
+  function selectAllRows() {
+    setSelectedRowIds(new Set(rows.map((row) => row.id).filter(Boolean)));
+  }
+
   async function deleteSelectedRows() {
     if (!onBulkDelete || !selectedRows.length) return;
-    await onBulkDelete(selectedRows);
-    setSelectedRowIds(new Set());
+    const count = selectedRows.length;
+    if (!window.confirm(`Delete ${count.toLocaleString()} selected records?`)) return;
+    setBulkProgress({ total: count, done: 0, label: "Deleting records" });
+    try {
+      for (const [index, row] of selectedRows.entries()) {
+        await onBulkDelete([row]);
+        setBulkProgress({ total: count, done: index + 1, label: "Deleting records" });
+      }
+      setSelectedRowIds(new Set());
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 600);
+    }
   }
 
   return (
@@ -8951,11 +9085,13 @@ function HousingTable({ title, rows, columns, onSelect, actions, reportType, bul
           <span>Selected {selectedRowIds.size.toLocaleString()} records</span>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => toggleVisibleRows(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-            <button type="button" disabled={!selectedRowIds.size || !onBulkDelete} onClick={deleteSelectedRows} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete All</button>
-            <button type="button" disabled={!selectedRowIds.size} onClick={() => setSelectedRowIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
+            <button type="button" onClick={selectAllRows} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+            <button type="button" disabled={!selectedRowIds.size || !onBulkDelete || Boolean(bulkProgress)} onClick={deleteSelectedRows} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
+            <button type="button" disabled={!selectedRowIds.size || Boolean(bulkProgress)} onClick={() => setSelectedRowIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
           </div>
         </div>
       )}
+      {bulkProgress && <div className="mt-3"><BulkActionProgress label={bulkProgress.label} done={bulkProgress.done} total={bulkProgress.total} /></div>}
       <div className="cafm-scroll-x mt-4 overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
         <table className="cafm-data-table min-w-[900px] bg-white text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
@@ -10063,6 +10199,21 @@ function Panel({ title, icon: Icon, children }: { title: string; icon: any; chil
   );
 }
 
+function BulkActionProgress({ label, done, total }: { label: string; done: number; total: number }) {
+  const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+  return (
+    <div className="rounded-lg border border-lagoon/20 bg-lagoon/5 p-3 text-sm font-black text-lagoon">
+      <div className="flex items-center justify-between gap-3">
+        <span>{label}</span>
+        <span>{done.toLocaleString()} / {total.toLocaleString()} ({percent}%)</span>
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
+        <div className="h-full rounded-full bg-lagoon transition-all" style={{ width: `${percent}%` }} />
+      </div>
+    </div>
+  );
+}
+
 function DeleteRowButton({ saving, onDelete }: { saving: boolean; onDelete: () => void }) {
   return (
     <button type="button" disabled={saving} onClick={onDelete} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-400">
@@ -10090,6 +10241,7 @@ function DataTable({
 }) {
   const [page, setPage] = useState(1);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
+  const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const startIndex = (currentPage - 1) * PAGE_SIZE;
@@ -10131,10 +10283,24 @@ function DataTable({
     });
   }
 
+  function selectAllRows() {
+    setSelectedRowKeys(new Set(rows.map((row, index) => rowKey(row, index))));
+  }
+
   async function deleteSelectedRows() {
     if (!onBulkDelete || !selectedRows.length) return;
-    await onBulkDelete(selectedRows);
-    setSelectedRowKeys(new Set());
+    const count = selectedRows.length;
+    if (!window.confirm(`Delete ${count.toLocaleString()} selected ${bulkLabel}?`)) return;
+    setBulkProgress({ total: count, done: 0, label: `Deleting ${bulkLabel}` });
+    try {
+      for (const [index, row] of selectedRows.entries()) {
+        await onBulkDelete([row]);
+        setBulkProgress({ total: count, done: index + 1, label: `Deleting ${bulkLabel}` });
+      }
+      setSelectedRowKeys(new Set());
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 600);
+    }
   }
 
   return (
@@ -10144,11 +10310,13 @@ function DataTable({
           <span>Selected {selectedRowKeys.size.toLocaleString()} {bulkLabel}</span>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => toggleVisibleRows(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-            <button type="button" disabled={!selectedRowKeys.size || !onBulkDelete} onClick={deleteSelectedRows} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete All</button>
-            <button type="button" disabled={!selectedRowKeys.size} onClick={() => setSelectedRowKeys(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
+            <button type="button" onClick={selectAllRows} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+            <button type="button" disabled={!selectedRowKeys.size || !onBulkDelete || Boolean(bulkProgress)} onClick={deleteSelectedRows} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
+            <button type="button" disabled={!selectedRowKeys.size || Boolean(bulkProgress)} onClick={() => setSelectedRowKeys(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
           </div>
         </div>
       )}
+      {bulkProgress && <BulkActionProgress label={bulkProgress.label} done={bulkProgress.done} total={bulkProgress.total} />}
       <div className="cafm-scroll-x overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
         <table className="cafm-data-table min-w-max border-collapse bg-white text-sm">
           <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
