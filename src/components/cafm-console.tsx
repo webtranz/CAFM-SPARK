@@ -296,6 +296,15 @@ const moduleGroups: ModuleGroup[] = [
 const healthColors = ["#35a852", "#0f8b8d", "#ffd166", "#f45d48"];
 const dashboardColors = ["#0f8b8d", "#f45d48", "#06d6a0", "#ffd166", "#0b1f3a", "#7c3aed", "#2563eb", "#db2777", "#64748b", "#16a34a"];
 const PAGE_SIZE = 100;
+const BULK_DELETE_BATCH_SIZE = 25;
+
+async function processBulkDeleteBatches<T>(items: T[], batchSize: number, action: (batch: T[]) => Promise<void> | void, onProgress: (done: number) => void) {
+  for (let start = 0; start < items.length; start += batchSize) {
+    const batch = items.slice(start, start + batchSize);
+    await action(batch);
+    onProgress(Math.min(items.length, start + batch.length));
+  }
+}
 const HOUSING_FIELD_CLASS = "h-11 rounded-lg border border-slate-200 bg-white px-3 outline-none focus:border-lagoon";
 const FACILITY_FIELD_CLASS = "h-11 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 outline-none focus:border-lagoon";
 const RESOURCE_EMPLOYEE_FIELD_CLASS = "h-11 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 outline-none focus:border-lagoon";
@@ -443,7 +452,7 @@ function isCurrencyField(keyOrLabel: string) {
 
 function formatCurrencyValue(value: unknown) {
   if (value === null || value === undefined || value === "") return "-";
-  const text = String(value).trim().replace(/^\$\s*/, "").replace(/^SAR\s*/i, "").replace(/^Ø±\.Ø³\s*/, "");
+  const text = String(value).trim().replace(/^\$\s*/, "").replace(/^SAR\s*/i, "").replace(/^ÃƒÆ’Ã‹Å“Ãƒâ€šÃ‚Â±\.ÃƒÆ’Ã‹Å“Ãƒâ€šÃ‚Â³\s*/, "");
   const numeric = Number(text.replaceAll(",", ""));
   if (Number.isFinite(numeric) && text !== "") {
     return numeric.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -2018,10 +2027,8 @@ function Assets({
     if (!window.confirm(`Delete ${ids.length.toLocaleString()} selected assets?`)) return;
     setBulkProgress({ total: ids.length, done: 0, label: "Deleting assets" });
     try {
-      for (const [index, id] of ids.entries()) {
-        await deleteAssets([id]);
-        setBulkProgress({ total: ids.length, done: index + 1, label: "Deleting assets" });
-      }
+      await deleteAssets(ids);
+      setBulkProgress({ total: ids.length, done: ids.length, label: "Deleting assets" });
       setSelectedAssetIds(new Set());
     } finally {
       window.setTimeout(() => setBulkProgress(null), 600);
@@ -2789,10 +2796,8 @@ function WorkOrders({
     if (!window.confirm(`Delete ${ids.length.toLocaleString()} selected work orders?`)) return;
     setBulkProgress({ total: ids.length, done: 0, label: "Deleting work orders" });
     try {
-      for (const [index, id] of ids.entries()) {
-        await deleteWorkOrders([id]);
-        setBulkProgress({ total: ids.length, done: index + 1, label: "Deleting work orders" });
-      }
+      await deleteWorkOrders(ids);
+      setBulkProgress({ total: ids.length, done: ids.length, label: "Deleting work orders" });
       setSelectedWorkIds(new Set());
     } finally {
       window.setTimeout(() => setBulkProgress(null), 600);
@@ -3266,10 +3271,9 @@ function Helpdesk({
     if (!window.confirm(`Delete ${ids.length.toLocaleString()} selected service requests?`)) return;
     setBulkProgress({ total: ids.length, done: 0, label: "Deleting service requests" });
     try {
-      for (const [index, id] of ids.entries()) {
-        await deleteRequest(id);
-        setBulkProgress({ total: ids.length, done: index + 1, label: "Deleting service requests" });
-      }
+      await processBulkDeleteBatches(ids, BULK_DELETE_BATCH_SIZE, async (batch) => {
+        await Promise.all(batch.map((id) => deleteRequest(id)));
+      }, (done) => setBulkProgress({ total: ids.length, done, label: "Deleting service requests" }));
       setSelectedRequestIds(new Set());
     } finally {
       window.setTimeout(() => setBulkProgress(null), 600);
@@ -5201,10 +5205,9 @@ function Ppm({
     if (!window.confirm(`Delete ${ids.length.toLocaleString()} selected PPM plans?`)) return;
     setBulkProgress({ total: ids.length, done: 0, label: "Deleting PPM plans" });
     try {
-      for (const [index, id] of ids.entries()) {
-        await deletePpm(id);
-        setBulkProgress({ total: ids.length, done: index + 1, label: "Deleting PPM plans" });
-      }
+      await processBulkDeleteBatches(ids, BULK_DELETE_BATCH_SIZE, async (batch) => {
+        await Promise.all(batch.map((id) => deletePpm(id)));
+      }, (done) => setBulkProgress({ total: ids.length, done, label: "Deleting PPM plans" }));
       setSelectedPpmIds(new Set());
     } finally {
       window.setTimeout(() => setBulkProgress(null), 600);
@@ -6390,10 +6393,7 @@ function ScrollableRowsTable({
     if (!window.confirm(`Delete ${count.toLocaleString()} selected ${bulkLabel}?`)) return;
     setBulkProgress({ total: count, done: 0, label: `Deleting ${bulkLabel}` });
     try {
-      for (const [index, row] of selectedRows.entries()) {
-        await onBulkDelete([row]);
-        setBulkProgress({ total: count, done: index + 1, label: `Deleting ${bulkLabel}` });
-      }
+      await processBulkDeleteBatches(selectedRows, BULK_DELETE_BATCH_SIZE, onBulkDelete, (done) => setBulkProgress({ total: count, done, label: `Deleting ${bulkLabel}` }));
       setSelectedRowKeys(new Set());
     } finally {
       window.setTimeout(() => setBulkProgress(null), 600);
@@ -7251,10 +7251,9 @@ function Locations({ locations, submitLocation, deleteLocation, isAdmin, saving 
     if (!window.confirm(`Delete ${ids.length.toLocaleString()} selected locations?`)) return;
     setBulkProgress({ total: ids.length, done: 0, label: "Deleting locations" });
     try {
-      for (const [index, id] of ids.entries()) {
-        await deleteLocation(id);
-        setBulkProgress({ total: ids.length, done: index + 1, label: "Deleting locations" });
-      }
+      await processBulkDeleteBatches(ids, BULK_DELETE_BATCH_SIZE, async (batch) => {
+        await Promise.all(batch.map((id) => deleteLocation(id)));
+      }, (done) => setBulkProgress({ total: ids.length, done, label: "Deleting locations" }));
       setSelectedLocationIds(new Set());
     } finally {
       window.setTimeout(() => setBulkProgress(null), 600);
@@ -7472,10 +7471,9 @@ function JobPlans({ jobPlans, jobPlansTotal, services, departments, submitJobPla
     if (!window.confirm(`Delete ${ids.length.toLocaleString()} selected job plans?`)) return;
     setBulkProgress({ total: ids.length, done: 0, label: "Deleting job plans" });
     try {
-      for (const [index, id] of ids.entries()) {
-        await deleteJobPlan(id);
-        setBulkProgress({ total: ids.length, done: index + 1, label: "Deleting job plans" });
-      }
+      await processBulkDeleteBatches(ids, BULK_DELETE_BATCH_SIZE, async (batch) => {
+        await Promise.all(batch.map((id) => deleteJobPlan(id)));
+      }, (done) => setBulkProgress({ total: ids.length, done, label: "Deleting job plans" }));
       setSelectedJobPlanIds(new Set());
     } finally {
       window.setTimeout(() => setBulkProgress(null), 600);
@@ -9263,10 +9261,7 @@ function HousingTable({ title, rows, columns, onSelect, actions, reportType, bul
     if (!window.confirm(`Delete ${count.toLocaleString()} selected records?`)) return;
     setBulkProgress({ total: count, done: 0, label: "Deleting records" });
     try {
-      for (const [index, row] of selectedRows.entries()) {
-        await onBulkDelete([row]);
-        setBulkProgress({ total: count, done: index + 1, label: "Deleting records" });
-      }
+      await processBulkDeleteBatches(selectedRows, BULK_DELETE_BATCH_SIZE, onBulkDelete, (done) => setBulkProgress({ total: count, done, label: "Deleting records" }));
       setSelectedRowIds(new Set());
     } finally {
       window.setTimeout(() => setBulkProgress(null), 600);
@@ -10506,10 +10501,7 @@ function DataTable({
     if (!window.confirm(`Delete ${count.toLocaleString()} selected ${bulkLabel}?`)) return;
     setBulkProgress({ total: count, done: 0, label: `Deleting ${bulkLabel}` });
     try {
-      for (const [index, row] of selectedRows.entries()) {
-        await onBulkDelete([row]);
-        setBulkProgress({ total: count, done: index + 1, label: `Deleting ${bulkLabel}` });
-      }
+      await processBulkDeleteBatches(selectedRows, BULK_DELETE_BATCH_SIZE, onBulkDelete, (done) => setBulkProgress({ total: count, done, label: `Deleting ${bulkLabel}` }));
       setSelectedRowKeys(new Set());
     } finally {
       window.setTimeout(() => setBulkProgress(null), 600);
