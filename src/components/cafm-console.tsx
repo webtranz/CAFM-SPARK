@@ -297,6 +297,7 @@ const healthColors = ["#35a852", "#0f8b8d", "#ffd166", "#f45d48"];
 const dashboardColors = ["#0f8b8d", "#f45d48", "#06d6a0", "#ffd166", "#0b1f3a", "#7c3aed", "#2563eb", "#db2777", "#64748b", "#16a34a"];
 const PAGE_SIZE = 100;
 const BULK_DELETE_BATCH_SIZE = 25;
+const BULK_SELECT_PERCENTAGES = [25, 50, 75, 100];
 
 async function processBulkDeleteBatches<T>(items: T[], batchSize: number, action: (batch: T[]) => Promise<void> | void, onProgress: (done: number) => void) {
   for (let start = 0; start < items.length; start += batchSize) {
@@ -452,7 +453,7 @@ function isCurrencyField(keyOrLabel: string) {
 
 function formatCurrencyValue(value: unknown) {
   if (value === null || value === undefined || value === "") return "-";
-  const text = String(value).trim().replace(/^\$\s*/, "").replace(/^SAR\s*/i, "").replace(/^ÃƒÆ’Ã‹Å“Ãƒâ€šÃ‚Â±\.ÃƒÆ’Ã‹Å“Ãƒâ€šÃ‚Â³\s*/, "");
+  const text = String(value).trim().replace(/^\$\s*/, "").replace(/^SAR\s*/i, "").replace(/^ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â±\.ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¹ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â³\s*/, "");
   const numeric = Number(text.replaceAll(",", ""));
   if (Number.isFinite(numeric) && text !== "") {
     return numeric.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -1982,15 +1983,16 @@ function Assets({
     });
   }
 
-  async function selectAllAssets() {
+  async function selectAllAssets(percent = 100) {
     if (bulkProgress) return;
     const selected = new Set<string>();
     const pageSize = 200;
     let nextPage = 1;
     let total = assetTotal || visibleAssets.length;
-    setBulkProgress({ total, done: 0, label: "Selecting assets" });
+    let target = Math.ceil((total * percent) / 100);
+    setBulkProgress({ total: target, done: 0, label: `Selecting ${percent}% assets` });
     try {
-      while (selected.size < total) {
+      while (selected.size < target) {
         const params = new URLSearchParams({
           page: String(nextPage),
           pageSize: String(pageSize),
@@ -2010,8 +2012,9 @@ function Assets({
         const result = await response.json();
         const nextRows = result.assets ?? [];
         total = Number(result.total ?? total ?? nextRows.length);
-        nextRows.forEach((asset: any) => selected.add(asset.id));
-        setBulkProgress({ total, done: selected.size, label: "Selecting assets" });
+        target = Math.ceil((total * percent) / 100);
+        nextRows.forEach((asset: any) => { if (selected.size < target) selected.add(asset.id); });
+        setBulkProgress({ total: target, done: selected.size, label: `Selecting ${percent}% assets` });
         if (!nextRows.length || nextRows.length < pageSize) break;
         nextPage += 1;
       }
@@ -2045,7 +2048,8 @@ function Assets({
             {isAdmin && (
               <>
                 <button type="button" onClick={() => toggleVisibleAssets(true)} className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-black text-lagoon">Select Visible</button>
-                <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllAssets} className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-black text-lagoon">Select All</button>
+                <button type="button" disabled={Boolean(bulkProgress)} onClick={() => selectAllAssets(100)} className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-black text-lagoon">Select All</button>
+                <BulkSelectPercentageButtons disabled={Boolean(bulkProgress)} onSelect={selectAllAssets} />
                 <button
                   type="button"
                   disabled={saving || !selectedAssetIds.size || Boolean(bulkProgress)}
@@ -2753,15 +2757,16 @@ function WorkOrders({
     });
   }
 
-  async function selectAllWorks() {
+  async function selectAllWorks(percent = 100) {
     if (bulkProgress) return;
     const selected = new Set<string>();
     const pageSize = 200;
     let nextPage = 1;
     let total = workTotal || visibleWorks.length;
-    setBulkProgress({ total, done: 0, label: "Selecting work orders" });
+    let target = Math.ceil((total * percent) / 100);
+    setBulkProgress({ total: target, done: 0, label: `Selecting ${percent}% work orders` });
     try {
-      while (selected.size < total) {
+      while (selected.size < target) {
         const params = new URLSearchParams({
           page: String(nextPage),
           pageSize: String(pageSize),
@@ -2779,8 +2784,9 @@ function WorkOrders({
         const result = await response.json();
         const nextRows = result.workOrders ?? [];
         total = Number(result.total ?? total ?? nextRows.length);
-        nextRows.forEach((work: any) => selected.add(work.id));
-        setBulkProgress({ total, done: selected.size, label: "Selecting work orders" });
+        target = Math.ceil((total * percent) / 100);
+        nextRows.forEach((work: any) => { if (selected.size < target) selected.add(work.id); });
+        setBulkProgress({ total: target, done: selected.size, label: `Selecting ${percent}% work orders` });
         if (!nextRows.length || nextRows.length < pageSize) break;
         nextPage += 1;
       }
@@ -2815,7 +2821,8 @@ function WorkOrders({
             {isAdmin && view === "list" && (
               <>
                 <button type="button" onClick={() => toggleVisibleWorks(true)} className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon">Select Visible</button>
-                <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllWorks} className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon">Select All</button>
+                <button type="button" disabled={Boolean(bulkProgress)} onClick={() => selectAllWorks(100)} className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon">Select All</button>
+                <BulkSelectPercentageButtons disabled={Boolean(bulkProgress)} onSelect={selectAllWorks} />
                 <button
                   type="button"
                   disabled={saving || !selectedWorkIds.size || Boolean(bulkProgress)}
@@ -3261,8 +3268,9 @@ function Helpdesk({
     });
   }
 
-  function selectAllRequests() {
-    setSelectedRequestIds(new Set(filteredRequests.map((request) => request.id)));
+  function selectAllRequests(percent = 100) {
+    const target = Math.ceil((filteredRequests.length * percent) / 100);
+    setSelectedRequestIds(new Set(filteredRequests.slice(0, target).map((request) => request.id)));
   }
 
   async function bulkDeleteSelectedRequests() {
@@ -3358,7 +3366,8 @@ function Helpdesk({
             <span>Selected {selectedRequestIds.size.toLocaleString()} service requests</span>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => toggleVisibleRequests(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-              <button type="button" onClick={selectAllRequests} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+              <button type="button" onClick={() => selectAllRequests(100)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+              <BulkSelectPercentageButtons disabled={Boolean(bulkProgress)} onSelect={selectAllRequests} />
               <button type="button" disabled={!selectedRequestIds.size || Boolean(bulkProgress)} onClick={bulkDeleteSelectedRequests} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
               <button type="button" disabled={!selectedRequestIds.size || Boolean(bulkProgress)} onClick={() => setSelectedRequestIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
             </div>
@@ -5174,22 +5183,24 @@ function Ppm({
     });
   }
 
-  async function selectAllPpms() {
+  async function selectAllPpms(percent = 100) {
     if (bulkProgress) return;
     const selected = new Set<string>();
     const pageSize = 200;
     let nextPage = 1;
     let total = ppmTotal || ppmRowsSource.length;
-    setBulkProgress({ total, done: 0, label: "Selecting PPM plans" });
+    let target = Math.ceil((total * percent) / 100);
+    setBulkProgress({ total: target, done: 0, label: `Selecting ${percent}% PPM plans` });
     try {
-      while (selected.size < total) {
+      while (selected.size < target) {
         const params = new URLSearchParams({ page: String(nextPage), pageSize: String(pageSize), query: search, status: statusFilter });
         const response = await fetch(`/api/ppm?${params.toString()}`, { cache: "no-store" });
         const result = await response.json();
         const nextRows = result.ppms ?? [];
         total = Number(result.total ?? total ?? nextRows.length);
-        nextRows.forEach((ppm: any) => selected.add(ppm.id));
-        setBulkProgress({ total, done: selected.size, label: "Selecting PPM plans" });
+        target = Math.ceil((total * percent) / 100);
+        nextRows.forEach((ppm: any) => { if (selected.size < target) selected.add(ppm.id); });
+        setBulkProgress({ total: target, done: selected.size, label: `Selecting ${percent}% PPM plans` });
         if (!nextRows.length || nextRows.length < pageSize) break;
         nextPage += 1;
       }
@@ -5240,7 +5251,8 @@ function Ppm({
                 <span>Selected {selectedPpmIds.size.toLocaleString()} PPM plans</span>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => toggleVisiblePpms(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-                  <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllPpms} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+                  <button type="button" disabled={Boolean(bulkProgress)} onClick={() => selectAllPpms(100)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+                  <BulkSelectPercentageButtons disabled={Boolean(bulkProgress)} onSelect={selectAllPpms} />
                   <button type="button" disabled={!selectedPpmIds.size || Boolean(bulkProgress)} onClick={bulkDeleteSelectedPpms} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
                   <button type="button" disabled={!selectedPpmIds.size || Boolean(bulkProgress)} onClick={() => setSelectedPpmIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
                 </div>
@@ -6370,21 +6382,25 @@ function ScrollableRowsTable({
     });
   }
 
-  async function selectAllRows() {
+  async function selectAllRows(percent = 100) {
     if (bulkProgress) return;
     if (onSelectAllRows) {
       const expectedTotal = totalRows ?? rows.length;
-      setBulkProgress({ total: expectedTotal, done: 0, label: `Selecting ${bulkLabel}` });
+      const expectedTarget = Math.ceil((expectedTotal * percent) / 100);
+      setBulkProgress({ total: expectedTarget, done: 0, label: `Selecting ${percent}% ${bulkLabel}` });
       try {
         const allRows = await onSelectAllRows();
-        setSelectedRowKeys(new Set(allRows.map((row, index) => rowKey(row, index))));
-        setBulkProgress({ total: allRows.length, done: allRows.length, label: `Selecting ${bulkLabel}` });
+        const target = Math.ceil((allRows.length * percent) / 100);
+        const selectedRows = allRows.slice(0, target);
+        setSelectedRowKeys(new Set(selectedRows.map((row, index) => rowKey(row, index))));
+        setBulkProgress({ total: target, done: selectedRows.length, label: `Selecting ${percent}% ${bulkLabel}` });
       } finally {
         window.setTimeout(() => setBulkProgress(null), 600);
       }
       return;
     }
-    setSelectedRowKeys(new Set(rows.map((row, index) => rowKey(row, index))));
+    const target = Math.ceil((rows.length * percent) / 100);
+    setSelectedRowKeys(new Set(rows.slice(0, target).map((row, index) => rowKey(row, index))));
   }
 
   async function deleteSelectedRows() {
@@ -6407,7 +6423,8 @@ function ScrollableRowsTable({
           <span>Selected {selectedRowKeys.size.toLocaleString()} {bulkLabel}</span>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => toggleVisibleRows(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-            <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllRows} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon disabled:opacity-50">Select All</button>
+            <button type="button" disabled={Boolean(bulkProgress)} onClick={() => selectAllRows(100)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon disabled:opacity-50">Select All</button>
+            <BulkSelectPercentageButtons disabled={Boolean(bulkProgress)} onSelect={selectAllRows} />
             <button type="button" disabled={!selectedRowKeys.size || !onBulkDelete || Boolean(bulkProgress)} onClick={deleteSelectedRows} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
             <button type="button" disabled={!selectedRowKeys.size || Boolean(bulkProgress)} onClick={() => setSelectedRowKeys(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
           </div>
@@ -7213,15 +7230,16 @@ function Locations({ locations, submitLocation, deleteLocation, isAdmin, saving 
     });
   }
 
-  async function selectAllLocations() {
+  async function selectAllLocations(percent = 100) {
     if (bulkProgress) return;
     const selected = new Set<string>();
     const pageSize = 200;
     let nextPage = 1;
     let total = locationTotal || locationRows.length;
-    setBulkProgress({ total, done: 0, label: "Selecting locations" });
+    let target = Math.ceil((total * percent) / 100);
+    setBulkProgress({ total: target, done: 0, label: `Selecting ${percent}% locations` });
     try {
-      while (selected.size < total) {
+      while (selected.size < target) {
         const params = new URLSearchParams({
           page: String(nextPage),
           pageSize: String(pageSize),
@@ -7234,8 +7252,9 @@ function Locations({ locations, submitLocation, deleteLocation, isAdmin, saving 
         const result = await response.json();
         const nextRows = result.locations ?? [];
         total = Number(result.total ?? total ?? nextRows.length);
-        nextRows.forEach((location: any) => selected.add(location.id));
-        setBulkProgress({ total, done: selected.size, label: "Selecting locations" });
+        target = Math.ceil((total * percent) / 100);
+        nextRows.forEach((location: any) => { if (selected.size < target) selected.add(location.id); });
+        setBulkProgress({ total: target, done: selected.size, label: `Selecting ${percent}% locations` });
         if (!nextRows.length || nextRows.length < pageSize) break;
         nextPage += 1;
       }
@@ -7296,7 +7315,8 @@ function Locations({ locations, submitLocation, deleteLocation, isAdmin, saving 
             <span>Selected {selectedLocationIds.size.toLocaleString()} locations</span>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => toggleVisibleLocations(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-              <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllLocations} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+              <button type="button" disabled={Boolean(bulkProgress)} onClick={() => selectAllLocations(100)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+              <BulkSelectPercentageButtons disabled={Boolean(bulkProgress)} onSelect={selectAllLocations} />
               <button type="button" disabled={!selectedLocationIds.size || Boolean(bulkProgress)} onClick={bulkDeleteSelectedLocations} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
               <button type="button" disabled={!selectedLocationIds.size || Boolean(bulkProgress)} onClick={() => setSelectedLocationIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
             </div>
@@ -7440,22 +7460,24 @@ function JobPlans({ jobPlans, jobPlansTotal, services, departments, submitJobPla
     });
   }
 
-  async function selectAllJobPlans() {
+  async function selectAllJobPlans(percent = 100) {
     if (bulkProgress) return;
     const selected = new Set<string>();
     const pageSize = 200;
     let nextPage = 1;
     let total = jobPlanTotal || jobPlanRowsSource.length;
-    setBulkProgress({ total, done: 0, label: "Selecting job plans" });
+    let target = Math.ceil((total * percent) / 100);
+    setBulkProgress({ total: target, done: 0, label: `Selecting ${percent}% job plans` });
     try {
-      while (selected.size < total) {
+      while (selected.size < target) {
         const params = new URLSearchParams({ page: String(nextPage), pageSize: String(pageSize) });
         const response = await fetch(`/api/job-plans?${params.toString()}`, { cache: "no-store" });
         const result = await response.json();
         const nextRows = result.jobPlans ?? [];
         total = Number(result.total ?? total ?? nextRows.length);
-        nextRows.forEach((jobPlan: any) => selected.add(jobPlan.id));
-        setBulkProgress({ total, done: selected.size, label: "Selecting job plans" });
+        target = Math.ceil((total * percent) / 100);
+        nextRows.forEach((jobPlan: any) => { if (selected.size < target) selected.add(jobPlan.id); });
+        setBulkProgress({ total: target, done: selected.size, label: `Selecting ${percent}% job plans` });
         if (!nextRows.length || nextRows.length < pageSize) break;
         nextPage += 1;
       }
@@ -7500,7 +7522,8 @@ function JobPlans({ jobPlans, jobPlansTotal, services, departments, submitJobPla
             <span>Selected {selectedJobPlanIds.size.toLocaleString()} job plans</span>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => toggleVisibleJobPlans(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-              <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllJobPlans} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+              <button type="button" disabled={Boolean(bulkProgress)} onClick={() => selectAllJobPlans(100)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select All</button>
+              <BulkSelectPercentageButtons disabled={Boolean(bulkProgress)} onSelect={selectAllJobPlans} />
               <button type="button" disabled={!selectedJobPlanIds.size || Boolean(bulkProgress)} onClick={bulkDeleteSelectedJobPlans} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
               <button type="button" disabled={!selectedJobPlanIds.size || Boolean(bulkProgress)} onClick={() => setSelectedJobPlanIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
             </div>
@@ -9251,8 +9274,9 @@ function HousingTable({ title, rows, columns, onSelect, actions, reportType, bul
     });
   }
 
-  function selectAllRows() {
-    setSelectedRowIds(new Set(rows.map((row) => row.id).filter(Boolean)));
+  function selectAllRows(percent = 100) {
+    const target = Math.ceil((rows.length * percent) / 100);
+    setSelectedRowIds(new Set(rows.slice(0, target).map((row) => row.id).filter(Boolean)));
   }
 
   async function deleteSelectedRows() {
@@ -9276,7 +9300,8 @@ function HousingTable({ title, rows, columns, onSelect, actions, reportType, bul
           <span>Selected {selectedRowIds.size.toLocaleString()} records</span>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => toggleVisibleRows(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-            <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllRows} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon disabled:opacity-50">Select All</button>
+            <button type="button" disabled={Boolean(bulkProgress)} onClick={() => selectAllRows(100)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon disabled:opacity-50">Select All</button>
+            <BulkSelectPercentageButtons disabled={Boolean(bulkProgress)} onSelect={selectAllRows} />
             <button type="button" disabled={!selectedRowIds.size || !onBulkDelete || Boolean(bulkProgress)} onClick={deleteSelectedRows} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
             <button type="button" disabled={!selectedRowIds.size || Boolean(bulkProgress)} onClick={() => setSelectedRowIds(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
           </div>
@@ -10390,6 +10415,17 @@ function Panel({ title, icon: Icon, children }: { title: string; icon: any; chil
   );
 }
 
+function BulkSelectPercentageButtons({ disabled = false, onSelect }: { disabled?: boolean; onSelect: (percent: number) => Promise<void> | void }) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      {BULK_SELECT_PERCENTAGES.map((percent) => (
+        <button key={percent} type="button" disabled={disabled} onClick={() => onSelect(percent)} className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-black text-lagoon disabled:opacity-50">
+          {percent}%
+        </button>
+      ))}
+    </div>
+  );
+}
 function BulkActionProgress({ label, done, total }: { label: string; done: number; total: number }) {
   const percent = total > 0 ? Math.round((done / total) * 100) : 0;
   return (
@@ -10478,21 +10514,25 @@ function DataTable({
     });
   }
 
-  async function selectAllRows() {
+  async function selectAllRows(percent = 100) {
     if (bulkProgress) return;
     if (onSelectAllRows) {
       const expectedTotal = totalRows ?? rows.length;
-      setBulkProgress({ total: expectedTotal, done: 0, label: `Selecting ${bulkLabel}` });
+      const expectedTarget = Math.ceil((expectedTotal * percent) / 100);
+      setBulkProgress({ total: expectedTarget, done: 0, label: `Selecting ${percent}% ${bulkLabel}` });
       try {
         const allRows = await onSelectAllRows();
-        setSelectedRowKeys(new Set(allRows.map((row, index) => rowKey(row, index))));
-        setBulkProgress({ total: allRows.length, done: allRows.length, label: `Selecting ${bulkLabel}` });
+        const target = Math.ceil((allRows.length * percent) / 100);
+        const selectedRows = allRows.slice(0, target);
+        setSelectedRowKeys(new Set(selectedRows.map((row, index) => rowKey(row, index))));
+        setBulkProgress({ total: target, done: selectedRows.length, label: `Selecting ${percent}% ${bulkLabel}` });
       } finally {
         window.setTimeout(() => setBulkProgress(null), 600);
       }
       return;
     }
-    setSelectedRowKeys(new Set(rows.map((row, index) => rowKey(row, index))));
+    const target = Math.ceil((rows.length * percent) / 100);
+    setSelectedRowKeys(new Set(rows.slice(0, target).map((row, index) => rowKey(row, index))));
   }
 
   async function deleteSelectedRows() {
@@ -10515,7 +10555,8 @@ function DataTable({
           <span>Selected {selectedRowKeys.size.toLocaleString()} {bulkLabel}</span>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => toggleVisibleRows(true)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon">Select Visible</button>
-            <button type="button" disabled={Boolean(bulkProgress)} onClick={selectAllRows} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon disabled:opacity-50">Select All</button>
+            <button type="button" disabled={Boolean(bulkProgress)} onClick={() => selectAllRows(100)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-lagoon disabled:opacity-50">Select All</button>
+            <BulkSelectPercentageButtons disabled={Boolean(bulkProgress)} onSelect={selectAllRows} />
             <button type="button" disabled={!selectedRowKeys.size || !onBulkDelete || Boolean(bulkProgress)} onClick={deleteSelectedRows} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete Selected</button>
             <button type="button" disabled={!selectedRowKeys.size || Boolean(bulkProgress)} onClick={() => setSelectedRowKeys(new Set())} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50">Clear Selection</button>
           </div>
