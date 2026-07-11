@@ -292,7 +292,7 @@ function serializeBulkUploadJob(job: {
 function bulkUploadPermissions(module: string) {
   if (module === "omManuals") return ["documents.upload"];
   if (module === "ppm") return ["ppm.manage", "assets.manage"];
-  if (module === "workOrders") return ["work.manage", "assets.manage"];
+  if (["workOrders", "workOrderComments"].includes(module)) return ["work.manage", "assets.manage"];
   if (module === "requests") return ["requests.manage"];
   if (["teams", "services", "departments", "employees"].includes(module)) return ["users.manage", "requests.manage"];
   return ["assets.manage"];
@@ -319,6 +319,7 @@ async function importRow(module: string, row: Row, context: ImportContext = {}) 
   if (module === "inventory") return importInventory(row, context);
   if (module === "requests") return importRequest(row);
   if (module === "workOrders") return importWorkOrder(row, context);
+  if (module === "workOrderComments") return importWorkOrderComment(row);
   if (module === "teams") return importTeam(row, context);
   if (module === "services") return importService(row, context);
   if (module === "departments") return importDepartment(row, context);
@@ -798,6 +799,30 @@ async function importWorkOrder(row: Row, context: ImportContext = {}) {
   return importResult("work_order", existing ? "UPDATE" : "CREATE", workOrder, workOrder.woNo, workOrder.title);
 }
 
+async function importWorkOrderComment(row: Row) {
+  const woNo = required(row, "woNo", "workOrder", "Work Order", "add_code");
+  const commentText = required(row, "commentText", "comment", "add_text", "Work Notes");
+  const workOrder = await prisma.workOrder.findUnique({ where: { woNo } });
+  if (!workOrder) throw new Error(`Work order not found for comment: ${woNo}`);
+
+  const commentedAt = value(row, "commentedAt", "add_created", "createdAt");
+  const commentedBy = value(row, "commentedBy", "usr_desc_cre", "add_user") || "Bulk Upload";
+  const sourceLine = value(row, "sourceLine", "add_line");
+  const sourceStamp = [commentedAt, commentedBy, sourceLine ? `Line ${sourceLine}` : ""].filter(Boolean).join(" / ");
+  const formattedComment = sourceStamp ? `[${sourceStamp}] ${commentText}` : commentText;
+  const existingNotes = workOrder.workNotes || "";
+
+  if (existingNotes.includes(commentText) || existingNotes.includes(formattedComment)) {
+    return existingResult("work_order_comment", workOrder, woNo, commentText.slice(0, 120));
+  }
+
+  const updated = await prisma.workOrder.update({
+    where: { id: workOrder.id },
+    data: { workNotes: existingNotes ? `${existingNotes}\n${formattedComment}` : formattedComment },
+  });
+  return importResult("work_order_comment", "UPDATE", updated, woNo, commentText.slice(0, 120));
+}
+
 async function importTeam(row: Row, context: ImportContext = {}) {
   const code = row.departmentCode || required(row, "code");
   const existing = await prisma.team.findUnique({ where: { code } });
@@ -1120,7 +1145,7 @@ function importResult(recordType: string, action: string, record: { id?: string 
 }
 
 function rowIdentifier(module: string, row: Row) {
-  return value(row, "tag", "Asset Code", "Housing Asset Code", "EQUIPMENTNO", "ASSET NUMBER", "sku", "ticketNo", "woNo", "code", "Location", "locationCode", "assetTag", "companyId", "email") || module || "unknown";
+  return value(row, "tag", "Asset Code", "Housing Asset Code", "EQUIPMENTNO", "ASSET NUMBER", "sku", "ticketNo", "woNo", "commentText", "code", "Location", "locationCode", "assetTag", "companyId", "email") || module || "unknown";
 }
 
 function safeSegment(value: string) {

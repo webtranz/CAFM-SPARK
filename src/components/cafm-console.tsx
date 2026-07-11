@@ -7693,6 +7693,7 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
               <option value="inventory">Inventory</option>
               <option value="requests">Service Requests</option>
               <option value="workOrders">Work Orders</option>
+              <option value="workOrderComments">Work Order Comments</option>
               <option value="ppm">PPM Schedule</option>
               <option value="omManuals">O&M Manual Index</option>
               <option value="jobPlans">Job Plans</option>
@@ -7751,6 +7752,7 @@ function Templates() {
     ["inventory", "Inventory", "sku,name,category,unit,onHand,reorderPoint,unitCost,vendor,location"],
     ["requests", "Requests", "ticketNo,title,category,departmentCode,serviceCode,assignedTeamCode,requester,channel,priority,status,location,attachmentUrls,rejectionReason,slaHours,description"],
     ["workOrders", "Work Orders", "woNo,title,type,assetType,departmentCode,serviceCode,assignedTeamCode,jobPlanCode,priority,status,assetTag,plannedStart,dueAt,finishedAt,resolutionAt,dateTimeCreated,estimatedHours,actualHours,cost,jobPlan,safetyNotes,workNotes,materialRequest,photoUrls,assetsUsed,inventoryUsed,supervisorDecision,sourceYear,sourceWorkOrder,sourceServiceRequest,sourceEquipmentLocation,sourceLocation,matchSource"],
+    ["workOrderComments", "Work Order Comments", "woNo,commentText,commentedAt,commentedBy,sourceYear,sourceLine,sourceUserCode"],
     ["ppm", "PPM Schedule", "code,name,assetTag,locationCode,frequency,nextDue,durationHrs,departmentCode,priority,checklist,active"],
     ["omManuals", "O&M Manual Index", "category,assetTag,sourcePath,fileName,manualCode,manualTitle,matchField,assetClass,assetCategory,assetPrimarySystem,department"],
     ["jobPlans", "Job Plans", "code,name,assetType,departmentCode,serviceCode,estimatedHours,priority,steps,safetyNotes"],

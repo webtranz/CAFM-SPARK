@@ -14,6 +14,7 @@ const templates: Record<string, string> = {
   inventory: "sku,name,category,unit,onHand,reorderPoint,unitCost,vendor,location\n",
   requests: "ticketNo,title,category,departmentCode,serviceCode,assignedTeamCode,requester,channel,priority,status,location,attachmentUrls,rejectionReason,slaHours,description\n",
   workOrders: "woNo,title,type,assetType,departmentCode,serviceCode,assignedTeamCode,jobPlanCode,priority,status,assetTag,plannedStart,dueAt,finishedAt,resolutionAt,dateTimeCreated,estimatedHours,actualHours,cost,jobPlan,safetyNotes,workNotes,materialRequest,photoUrls,assetsUsed,inventoryUsed,supervisorDecision,sourceYear,sourceWorkOrder,sourceServiceRequest,sourceEquipmentLocation,sourceLocation,matchSource\n",
+  workOrderComments: "woNo,commentText,commentedAt,commentedBy,sourceYear,sourceLine,sourceUserCode\n",
   locations: "code,site,zone,building,floor,room,type,description\n",
   jobPlans: "code,name,assetType,departmentCode,serviceCode,estimatedHours,priority,steps,safetyNotes\n",
   ppm: "code,name,assetTag,locationCode,frequency,nextDue,durationHrs,departmentCode,priority,checklist,active\n",
