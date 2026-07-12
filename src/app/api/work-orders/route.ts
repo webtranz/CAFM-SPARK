@@ -123,7 +123,7 @@ export async function GET(request: Request) {
       where,
       skip: (page - 1) * pageSize,
       take: pageSize,
-      orderBy: { dueAt: "asc" },
+      orderBy: [{ createdAt: "desc" }, { updatedAt: "desc" }, { dueAt: "asc" }],
       include: {
         assignedTo: { select: { name: true, email: true } },
         asset: { select: { tag: true, name: true, assetDescription: true, buildingCode: true, floor: true, room: true } },

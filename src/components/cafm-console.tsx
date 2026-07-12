@@ -754,7 +754,14 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
     });
     const result = await response.json();
     setToast(response.ok ? `Work order ${result.woNo} created and saved.` : cleanMessage(result.message ?? "Work order failed."));
-    if (response.ok) await refreshData();
+    if (response.ok) {
+      setRecords((current) => ({
+        ...current,
+        workOrders: [result, ...current.workOrders.filter((work) => work.id !== result.id)],
+        workOrdersTotal: Math.max(current.workOrdersTotal ?? 0, current.workOrders.length + 1),
+      }));
+      await refreshData();
+    }
     setSaving(false);
   }
 
