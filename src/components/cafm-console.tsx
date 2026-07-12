@@ -6012,21 +6012,82 @@ function LinkedTicketsTable({ rows, navigate }: { rows: any[]; navigate: (module
 }
 
 function IncidentCaseManagement({ requests, workOrders, inspections, navigate }: { requests: any[]; workOrders: any[]; inspections: any[]; navigate: (moduleId: string, menuKey: string, view?: string) => void }) {
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState("");
+  const [tab, setTab] = useState<"record" | "comments" | "documents" | "tasks" | "eventLog">("record");
   const incidentRequests = requests.filter((request) => request.isIncidentCase);
   const incidentWorkOrders = workOrders.filter((work) => work.isIncidentCase);
   const uploadedCases = inspections.filter((inspection) => inspection.code || inspection.findings || inspection.title);
+  const caseTypeOptions = [
+    "Customer Complaint",
+    "Health problem due to poor service",
+    "Injury or Accident",
+    "Improper Planning",
+    "Misuse of vacant unit",
+    "Unavailability of service",
+    "Without Protective Equipment",
+    "Misuse/misbehavior of Tenant",
+    "Nuisance alarm",
+  ];
+  const statusLabel = (status: string) => {
+    const normalized = String(status || "NEW").toUpperCase();
+    if (normalized === "ASSIGNED" || normalized === "ACCEPTED" || normalized === "APPROVED") return "Confirmed";
+    if (normalized === "IN_PROGRESS") return "In-progress";
+    if (normalized === "REJECTED") return "Cancel";
+    if (normalized === "NEW" || normalized === "OPEN") return "Initiated";
+    if (normalized === "CLOSED" || normalized === "COMPLETED" || normalized === "VERIFIED") return "Closed";
+    return displayValue(status);
+  };
   const rows = [
+    ...uploadedCases.map((inspection) => ({
+      id: inspection.id,
+      source: "Case",
+      reference: inspection.code,
+      title: inspection.title,
+      caseType: inspection.findings || "Customer Complaint",
+      organization: "FBC",
+      equipment: inspection.area,
+      equipmentDescription: inspection.area,
+      department: departmentFromCaseType(inspection.findings || inspection.title),
+      departmentDescription: departmentDescriptionFromCaseType(inspection.findings || inspection.title),
+      priority: inspection.risk === "EXTREME" ? "CRITICAL" : inspection.risk === "HIGH" ? "HIGH" : "MEDIUM",
+      risk: inspection.risk,
+      status: inspection.status,
+      statusLabel: statusLabel(inspection.status),
+      owner: inspection.inspector || "Bulk Upload",
+      createdBy: inspection.inspector || "Bulk Upload",
+      updatedBy: inspection.inspector || "Bulk Upload",
+      linkedRecord: inspection.findings || "Uploaded case record",
+      location: inspection.area,
+      dueAt: inspection.dueAt,
+      updatedAt: inspection.dueAt,
+      score: inspection.score,
+      moduleId: "hse",
+      menuKey: "Safety-HSE",
+    })),
     ...incidentRequests.map((request) => ({
       id: request.id,
       source: "Service Request",
       reference: request.ticketNo,
       title: request.title,
+      caseType: request.category || "Customer Complaint",
+      organization: "FBC",
+      equipment: request.assetTag || request.location,
+      equipmentDescription: request.location,
+      department: request.departmentCode || "",
+      departmentDescription: request.departmentCode || "",
       priority: request.priority,
+      risk: request.priority === "CRITICAL" ? "EXTREME" : request.priority === "HIGH" ? "HIGH" : "MODERATE",
       status: request.status,
+      statusLabel: statusLabel(request.status),
       owner: request.requester || request.assignedTeamCode || "Unassigned",
+      createdBy: request.requester || "Bulk Upload",
+      updatedBy: request.assignedTeamCode || request.requester || "Bulk Upload",
       linkedRecord: request.workOrder?.woNo || "Awaiting work order",
       location: request.location,
+      dueAt: request.dueAt || request.createdAt,
       updatedAt: request.updatedAt,
+      score: 85,
       moduleId: "helpdesk",
       menuKey: "Tickets-Service Requests",
     })),
@@ -6035,32 +6096,36 @@ function IncidentCaseManagement({ requests, workOrders, inspections, navigate }:
       source: "Work Order",
       reference: work.woNo,
       title: work.title,
+      caseType: work.type || "Customer Complaint",
+      organization: "FBC",
+      equipment: work.asset?.tag || work.assetTag || work.location,
+      equipmentDescription: work.asset?.name || work.asset?.description || work.location,
+      department: work.departmentCode || "",
+      departmentDescription: work.departmentCode || "",
       priority: work.priority,
+      risk: work.priority === "CRITICAL" ? "EXTREME" : work.priority === "HIGH" ? "HIGH" : "MODERATE",
       status: work.status,
+      statusLabel: statusLabel(work.status),
       owner: work.assignedTo?.name || work.assignedTo?.email || work.assignedTeamCode || "Unassigned",
+      createdBy: work.assignedTeamCode || "Bulk Upload",
+      updatedBy: work.assignedTo?.name || work.assignedTeamCode || "Bulk Upload",
       linkedRecord: work.request?.ticketNo || "Standalone work order",
       location: work.location || work.asset?.buildingCode || "-",
+      dueAt: work.dueAt || work.createdAt,
       updatedAt: work.updatedAt,
+      score: 85,
       moduleId: "work",
       menuKey: "Tickets-Work Orders",
     })),
-    ...uploadedCases.map((inspection) => ({
-      id: inspection.id,
-      source: "Inspection / Case",
-      reference: inspection.code,
-      title: inspection.title,
-      priority: inspection.risk === "EXTREME" ? "CRITICAL" : inspection.risk === "HIGH" ? "HIGH" : "MEDIUM",
-      status: inspection.status,
-      owner: inspection.inspector || "Bulk Upload",
-      linkedRecord: inspection.findings || "Uploaded case record",
-      location: inspection.area,
-      updatedAt: inspection.dueAt,
-      moduleId: "hse",
-      menuKey: "Safety-HSE",
-    })),
-  ].sort((left, right) => new Date(right.updatedAt || 0).getTime() - new Date(left.updatedAt || 0).getTime());
-  const openRows = rows.filter((row) => !["CLOSED", "COMPLETED", "VERIFIED", "REJECTED", "CANCELLED"].includes(String(row.status || "").toUpperCase()));
+  ].sort((left, right) => Number(right.reference || 0) - Number(left.reference || 0));
+  const filteredRows = rows.filter((row) => [row.reference, row.title, row.caseType, row.location, row.organization, row.statusLabel].join(" ").toLowerCase().includes(query.toLowerCase()));
+  const selected = filteredRows.find((row) => row.id === selectedId) || filteredRows[0] || rows[0];
+  const openRows = rows.filter((row) => !["CLOSED", "COMPLETED", "VERIFIED", "REJECTED"].includes(String(row.status || "").toUpperCase()));
   const criticalRows = rows.filter((row) => row.priority === "CRITICAL" || row.priority === "HIGH");
+  const comments = selected ? [
+    { author: selected.createdBy, createdAt: selected.dueAt, body: selected.title },
+    { author: selected.updatedBy, createdAt: selected.updatedAt, body: selected.linkedRecord },
+  ].filter((comment) => comment.body && comment.body !== "Uploaded case record") : [];
 
   return (
     <section className="grid gap-5">
@@ -6070,7 +6135,7 @@ function IncidentCaseManagement({ requests, workOrders, inspections, navigate }:
             ["Total Cases", rows.length],
             ["Open Cases", openRows.length],
             ["Uploaded Cases", uploadedCases.length],
-            ["Work Orders", incidentWorkOrders.length],
+            ["High Priority", criticalRows.length],
           ].map(([label, value]) => (
             <div key={label} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-xs font-black uppercase text-slate-500">{label}</p>
@@ -6078,48 +6143,186 @@ function IncidentCaseManagement({ requests, workOrders, inspections, navigate }:
             </div>
           ))}
         </div>
-        {criticalRows.length > 0 && (
-          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-800">
-            {criticalRows.length} high priority incident/case record{criticalRows.length === 1 ? "" : "s"} require active follow-up.
+        <div className="grid gap-4 xl:grid-cols-[290px_1fr]">
+          <div className="rounded-lg border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 p-3">
+              <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <Search size={16} className="text-slate-400" />
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search within all records" className="min-w-0 flex-1 bg-transparent text-sm font-bold outline-none" />
+              </div>
+            </div>
+            <div className="max-h-[640px] overflow-auto scrollbar-thin">
+              {filteredRows.map((row) => (
+                <button key={`${row.source}-${row.id}`} type="button" onClick={() => { setSelectedId(row.id); setTab("record"); }} className={`block w-full border-b border-slate-100 px-3 py-3 text-left hover:bg-lagoon/5 ${selected?.id === row.id ? "bg-lagoon/10" : "bg-white"}`}>
+                  <p className="truncate text-sm font-black text-ink">{row.reference} - {row.title}</p>
+                  <p className="mt-1 text-xs font-bold text-slate-500">Organization: {row.organization}</p>
+                  <p className="text-xs font-bold text-slate-500">Type: {row.caseType}</p>
+                  <p className="text-xs font-bold text-slate-500">Status: {row.statusLabel}</p>
+                </button>
+              ))}
+              {!filteredRows.length && <p className="p-4 text-sm font-bold text-slate-500">No matching case records.</p>}
+            </div>
           </div>
-        )}
-        <div className="cafm-scroll-x overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
-          <table className="cafm-data-table min-w-[1120px] border-collapse bg-white text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-              <tr>
-                {["Type", "Reference", "Incident / Case", "Linked Record", "Priority", "Status", "Owner", "Location", "Updated", "Action"].map((label) => (
-                  <th key={label} className="whitespace-nowrap px-3 py-3 font-black">{label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length ? rows.map((row) => (
-                <tr key={`${row.source}-${row.id}`} className="border-t border-slate-100">
-                  <td className="whitespace-nowrap px-3 py-3 font-bold">{row.source}</td>
-                  <td className="whitespace-nowrap px-3 py-3 font-black text-lagoon">{row.reference}</td>
-                  <td className="max-w-[320px] px-3 py-3">{row.title}</td>
-                  <td className="whitespace-nowrap px-3 py-3">{row.linkedRecord}</td>
-                  <td className="whitespace-nowrap px-3 py-3"><RequestPriorityBadge priority={row.priority} /></td>
-                  <td className="whitespace-nowrap px-3 py-3"><CellValue value={row.status} /></td>
-                  <td className="whitespace-nowrap px-3 py-3">{row.owner}</td>
-                  <td className="max-w-[220px] px-3 py-3 text-slate-600">{row.location || "-"}</td>
-                  <td className="whitespace-nowrap px-3 py-3">{formatDateCell(row.updatedAt)}</td>
-                  <td className="whitespace-nowrap px-3 py-3">
-                    <button type="button" onClick={() => navigate(row.moduleId, row.menuKey)} className="rounded-lg bg-lagoon px-3 py-2 text-xs font-black text-white">
-                      Open
-                    </button>
-                  </td>
-                </tr>
-              )) : (
-                <tr>
-                  <td colSpan={10} className="px-3 py-6 text-center text-sm font-bold text-slate-500">No incident or case records have been marked yet.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+          <div className="min-w-0 rounded-lg border border-slate-200 bg-white">
+            {selected ? (
+              <>
+                <div className="border-b border-slate-200 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-black text-lagoon">Case {selected.reference}</p>
+                      <h3 className="mt-1 text-xl font-black text-ink">{selected.title}</h3>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => navigate(selected.moduleId, selected.menuKey)} className="rounded-lg bg-lagoon px-3 py-2 text-xs font-black text-white">Open Source</button>
+                      <button type="button" className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600">More</button>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 border-b border-slate-200 px-4 py-3">
+                  {[
+                    ["record", "Record View"],
+                    ["comments", "Comments"],
+                    ["documents", "Documents"],
+                    ["tasks", "Tasks"],
+                    ["eventLog", "Event Log"],
+                  ].map(([id, label]) => (
+                    <button key={id} type="button" onClick={() => setTab(id as typeof tab)} className={`rounded-lg px-3 py-2 text-sm font-black ${tab === id ? "bg-lagoon text-white" : "bg-slate-50 text-slate-600 hover:bg-slate-100"}`}>{label}</button>
+                  ))}
+                </div>
+                {tab === "record" && <CaseRecordView record={selected} caseTypeOptions={caseTypeOptions} />}
+                {tab === "comments" && <CaseComments comments={comments} />}
+                {tab === "documents" && <CaseEmptyTab title="Documents" message="No case documents have been attached yet." />}
+                {tab === "tasks" && <CaseEmptyTab title="Tasks" message="No follow-up tasks are recorded for this case yet." />}
+                {tab === "eventLog" && <CaseEventLog record={selected} />}
+              </>
+            ) : <p className="p-6 text-sm font-bold text-slate-500">No incident or case records have been uploaded yet.</p>}
+          </div>
         </div>
       </Panel>
     </section>
+  );
+}
+
+function departmentFromCaseType(value: string) {
+  const text = String(value || "").toLowerCase();
+  if (text.includes("health")) return "MED";
+  if (text.includes("injury") || text.includes("protective")) return "HSE";
+  if (text.includes("planning")) return "OPS";
+  if (text.includes("service")) return "MNT";
+  return "HSK";
+}
+
+function departmentDescriptionFromCaseType(value: string) {
+  const code = departmentFromCaseType(value);
+  const map: Record<string, string> = { MED: "Medical", HSE: "Health and Safety", OPS: "Operations", MNT: "Maintenance", HSK: "Housekeeping" };
+  return map[code] || code;
+}
+
+function CaseField({ label, value, required = false }: { label: string; value: unknown; required?: boolean }) {
+  return (
+    <label className="grid gap-1 text-xs font-black text-slate-500">
+      <span>{required && <span className="text-coral">* </span>}{label}</span>
+      <div className="min-h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">{displayValue(value)}</div>
+    </label>
+  );
+}
+
+function CaseSelectField({ label, value, options, required = false }: { label: string; value: string; options: string[]; required?: boolean }) {
+  return (
+    <label className="grid gap-1 text-xs font-black text-slate-500">
+      <span>{required && <span className="text-coral">* </span>}{label}</span>
+      <select value={value} onChange={() => undefined} className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-bold text-slate-700 outline-none">
+        {[value, ...options.filter((option) => option !== value)].map((option) => <option key={option}>{option}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function CaseRecordView({ record, caseTypeOptions }: { record: any; caseTypeOptions: string[] }) {
+  return (
+    <div className="grid gap-5 p-4">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-2">
+          <CaseField label="Case" value={record.reference} required />
+          <CaseField label="Description" value={record.title} required />
+          <CaseField label="Equipment" value={record.equipment} />
+          <CaseField label="Equipment Description" value={record.equipmentDescription} />
+          <CaseSelectField label="Type" value={record.caseType} options={caseTypeOptions} required />
+          <CaseField label="Department" value={record.department} required />
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          <CaseField label="Organization" value={record.organization} required />
+          <CaseField label="Equipment Org." value={record.organization} />
+          <CaseField label="Created By" value={record.createdBy} />
+          <CaseField label="Date Created" value={formatDateCell(record.dueAt)} />
+          <CaseField label="Updated By" value={record.updatedBy} />
+          <CaseField label="Date Updated" value={formatDateCell(record.updatedAt)} />
+          <CaseSelectField label="Status" value={record.statusLabel} options={["Initiated", "Confirmed", "In-progress", "Cancel", "Closed"]} required />
+        </div>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-lg border border-slate-200 p-4">
+          <h4 className="mb-3 text-sm font-black text-ink">Case Details</h4>
+          <div className="grid gap-3 md:grid-cols-2">
+            <CaseField label="Class" value={record.risk} />
+            <CaseField label="Location" value={record.location} />
+            <CaseField label="Service Code" value={record.department} />
+            <CaseField label="Area" value={record.location} />
+            <CaseField label="Priority" value={record.priority} />
+            <CaseField label="Department Description" value={record.departmentDescription} />
+          </div>
+        </div>
+        <div className="rounded-lg border border-slate-200 p-4">
+          <h4 className="mb-3 text-sm font-black text-ink">Tracking Details</h4>
+          <div className="grid gap-3 md:grid-cols-2">
+            <CaseField label="Requested By" value={record.createdBy} />
+            <CaseField label="Date Requested" value={formatDateCell(record.dueAt)} />
+            <CaseField label="Responsible" value={record.owner} />
+            <CaseField label="Responsible Name" value={record.owner} />
+            <CaseField label="Assigned To" value={record.owner} />
+            <CaseField label="Sched. Start Date" value={formatDateCell(record.dueAt)} />
+            <CaseField label="Sched. End Date" value={formatDateCell(record.updatedAt)} />
+            <CaseField label="Score" value={record.score} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CaseComments({ comments }: { comments: Array<{ author: string; createdAt: string; body: string }> }) {
+  if (!comments.length) return <CaseEmptyTab title="Comments" message="No comments are recorded for this case yet." />;
+  return (
+    <div className="grid gap-3 p-4">
+      {comments.map((comment, index) => (
+        <div key={`${comment.createdAt}-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-wrap justify-between gap-3 text-xs font-black text-slate-500">
+            <span>{comment.author || "Bulk Upload"}</span>
+            <span>Created: {formatDateCell(comment.createdAt)}</span>
+          </div>
+          <p className="mt-3 whitespace-pre-wrap text-sm font-bold text-slate-700">{comment.body}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CaseEventLog({ record }: { record: any }) {
+  const events = [
+    { event: "Case created", user: record.createdBy, date: record.dueAt, details: record.title },
+    { event: `Status ${record.statusLabel}`, user: record.updatedBy, date: record.updatedAt, details: record.linkedRecord },
+  ];
+  return <div className="p-4"><DataTable rows={events} columns={[["event", "Event"], ["user", "User"], ["date", "Date"], ["details", "Details"]]} /></div>;
+}
+
+function CaseEmptyTab({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="p-4">
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-6 text-sm font-bold text-slate-500">
+        <p className="font-black text-ink">{title}</p>
+        <p className="mt-2">{message}</p>
+      </div>
+    </div>
   );
 }
 
@@ -7714,7 +7917,7 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
               <option value="omManuals">O&M Manual Index</option>
               <option value="jobPlans">Job Plans</option>
               <option value="locations">Locations</option>
-              <option value="inspections">Inspections</option>
+              <option value="inspections">Incident & Cases / Inspections</option>
               <option value="teams">Teams</option>
               <option value="services">Services</option>
               <option value="departments">Departments</option>
@@ -7773,7 +7976,7 @@ function Templates() {
     ["omManuals", "O&M Manual Index", "category,assetTag,sourcePath,fileName,manualCode,manualTitle,matchField,assetClass,assetCategory,assetPrimarySystem,department"],
     ["jobPlans", "Job Plans", "code,name,assetType,departmentCode,serviceCode,estimatedHours,priority,steps,safetyNotes"],
     ["locations", "Locations", "Location,Description,Class,Parent Location,Out of Service,Residential"],
-    ["inspections", "Inspections", "code,title,area,inspector,risk,score,status,dueAt,findings"],
+    ["inspections", "Incident & Cases / Inspections", "code,title,area,inspector,risk,score,status,dueAt,findings"],
   ];
 
   return (

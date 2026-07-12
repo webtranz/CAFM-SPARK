@@ -899,14 +899,14 @@ async function importInspection(row: Row, context: ImportContext = {}) {
   const existing = await prisma.inspection.findUnique({ where: { code } });
   if (existing && !shouldReplace(context)) return existingResult("inspection", existing, code, existing.title);
   const payload = {
-    title: required(row, "title"),
-    area: row.area || "General",
-    inspector: row.inspector || "Bulk Upload",
-    risk: risk(row.risk),
-    score: integer(row.score, 85),
-    status: workStatus(row.status, "NEW"),
-    dueAt: date(row.dueAt, addDays(new Date(), 7)),
-    findings: row.findings || "No findings recorded.",
+    title: required(row, "title", "Description", "Case Description"),
+    area: value(row, "area", "Location", "location") || "General",
+    inspector: value(row, "inspector", "Created By", "createdBy", "add_user") || "Bulk Upload",
+    risk: risk(value(row, "risk", "Priority")),
+    score: integer(value(row, "score"), 85),
+    status: workStatus(value(row, "status", "Status"), "NEW"),
+    dueAt: date(value(row, "dueAt", "Date Created", "dateCreated", "requestedAt"), addDays(new Date(), 7)),
+    findings: value(row, "findings", "Type", "type", "Case Type") || "Customer Complaint",
   };
   const inspection = await prisma.inspection.upsert({
     where: { code },
@@ -1337,6 +1337,9 @@ function assetStatusFromImport(value: string | undefined) {
 
 function workStatus(value: string | undefined, fallback: "NEW" | "ASSIGNED") {
   const normalized = String(value || fallback).trim().toUpperCase().replace(/[-_]+/g, " ");
+  if (["INITIATED", "INITIATE"].includes(normalized)) return "NEW";
+  if (["CONFIRMED", "CONFIRM"].includes(normalized)) return "ASSIGNED";
+  if (["CANCEL", "CANCELLED", "CANCELED"].includes(normalized)) return "REJECTED";
   if (["CLOSE CM", "CLOSED CM", "CLOSE", "CLOSED", "COMPLETED", "COMPLETE"].includes(normalized)) return "CLOSED";
   if (normalized.includes("PROGRESS")) return "IN_PROGRESS";
   if (normalized.includes("HOLD")) return "ON_HOLD";
