@@ -853,6 +853,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
       buildings: { path: "/api/buildings", key: "buildings" },
       spaces: { path: "/api/spaces", key: "spaces" },
       locations: { path: "/api/locations", key: "locations" },
+      requests: { path: "/api/service-requests", key: "requests" },
     };
     const endpoint = endpoints[module];
     if (!endpoint) return;
@@ -3222,6 +3223,12 @@ function Helpdesk({
   const [selectedRequestIds, setSelectedRequestIds] = useState<Set<string>>(new Set());
   const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
   const [requestAction, setRequestAction] = useState<string | null>(null);
+  const [requestRowsSource, setRequestRowsSource] = useState<any[]>(requests);
+  const [requestTotal, setRequestTotal] = useState(requests.length);
+  const [allRequestTotal, setAllRequestTotal] = useState(requests.length);
+  const [requestPage, setRequestPage] = useState(1);
+  const [requestLoading, setRequestLoading] = useState(false);
+  const requestScrollRef = useRef<HTMLDivElement | null>(null);
   const [assignments, setAssignments] = useState<Record<string, { assignedTeamCode: string; assignedToEmail: string; assetTag: string }>>({});
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -3230,24 +3237,11 @@ function Helpdesk({
   const [overdueOnly, setOverdueOnly] = useState(false);
   const isSupervisorView = roleKindLabel(role) === "admin" || roleKindLabel(role) === "supervisor";
   const isAdmin = roleKindLabel(role) === "admin";
-  const requestCategories = ["All", ...Array.from(new Set(requests.map((request) => request.category).filter(Boolean)))];
-  const filteredRequests = useMemo(() => {
-    return requests.filter((request) => {
-      const haystack = `${request.ticketNo} ${request.title} ${request.description} ${request.requester} ${request.location} ${request.category} ${request.departmentCode} ${request.serviceCode}`.toLowerCase();
-      const queryMatch = !search || haystack.includes(search.toLowerCase());
-      const statusMatch = statusFilter === "All" || request.status === statusFilter;
-      const priorityMatch = priorityFilter === "All" || request.priority === priorityFilter;
-      const categoryMatch = categoryFilter === "All" || request.category === categoryFilter;
-      const overdueMatch = !overdueOnly || (request.dueAt ? new Date(request.dueAt).getTime() < Date.now() && request.status !== "CLOSED" : false);
-      return queryMatch && statusMatch && priorityMatch && categoryMatch && overdueMatch;
-    });
-  }, [requests, search, statusFilter, priorityFilter, categoryFilter, overdueOnly]);
-  const selectedRequest = filteredRequests.find((request) => request.id === selectedRequestId) ?? filteredRequests[0] ?? requests[0];
-  const [page, setPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(filteredRequests.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const startIndex = (currentPage - 1) * PAGE_SIZE;
-  const visibleRequests = filteredRequests.slice(startIndex, startIndex + PAGE_SIZE);
+  const requestCategories = ["All", ...Array.from(new Set(requestRowsSource.map((request) => request.category).filter(Boolean)))];
+  const filteredRequests = requestRowsSource;
+  const selectedRequest = filteredRequests.find((request) => request.id === selectedRequestId) ?? filteredRequests[0] ?? requestRowsSource[0] ?? requests[0];
+  const visibleRequests = filteredRequests;
+  const hasMoreRequests = requestRowsSource.length < requestTotal;
   const selectedVisibleRequests = visibleRequests.filter((request) => selectedRequestIds.has(request.id));
   const allVisibleRequestsSelected = isAdmin && Boolean(visibleRequests.length) && selectedVisibleRequests.length === visibleRequests.length;
   const someVisibleRequestsSelected = isAdmin && selectedVisibleRequests.length > 0 && !allVisibleRequestsSelected;
@@ -3259,12 +3253,52 @@ function Helpdesk({
   }, [filteredRequests, selectedRequestId]);
 
   useEffect(() => {
-    setPage(1);
-  }, [search, statusFilter, priorityFilter, categoryFilter, overdueOnly, filteredRequests.length]);
+    setRequestRowsSource(requests);
+    setRequestTotal((current) => Math.max(current, requests.length));
+    setAllRequestTotal((current) => Math.max(current, requests.length));
+  }, [requests]);
 
   useEffect(() => {
-    setSelectedRequestIds((current) => new Set(Array.from(current).filter((id) => requests.some((request) => request.id === id))));
-  }, [requests]);
+    setRequestPage(1);
+    requestScrollRef.current?.scrollTo({ top: 0 });
+  }, [search, statusFilter, priorityFilter, categoryFilter, overdueOnly]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setRequestLoading(true);
+      try {
+        const params = new URLSearchParams({
+          page: String(requestPage),
+          pageSize: String(PAGE_SIZE),
+          query: search,
+          status: statusFilter,
+          priority: priorityFilter,
+          category: categoryFilter,
+          overdueOnly: overdueOnly ? "true" : "false",
+        });
+        const response = await fetch(`/api/service-requests?${params.toString()}`, { cache: "no-store", signal: controller.signal });
+        if (response.ok) {
+          const result = await response.json();
+          setRequestRowsSource((current) => requestPage === 1 ? result.requests ?? [] : [...current, ...(result.requests ?? [])]);
+          setRequestTotal(Number(result.total ?? result.requests?.length ?? 0));
+          setAllRequestTotal(Number(result.allTotal ?? result.total ?? result.requests?.length ?? 0));
+        }
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) console.error(error);
+      } finally {
+        if (!controller.signal.aborted) setRequestLoading(false);
+      }
+    }, 250);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [requestPage, search, statusFilter, priorityFilter, categoryFilter, overdueOnly]);
+
+  useEffect(() => {
+    setSelectedRequestIds((current) => new Set(Array.from(current).filter((id) => requestRowsSource.some((request) => request.id === id))));
+  }, [requestRowsSource]);
 
   function toggleRequestSelection(id: string, checked: boolean) {
     setSelectedRequestIds((current) => {
@@ -3286,9 +3320,48 @@ function Helpdesk({
     });
   }
 
-  function selectAllRequests(percent = 100) {
-    const target = Math.ceil((filteredRequests.length * percent) / 100);
-    setSelectedRequestIds(new Set(filteredRequests.slice(0, target).map((request) => request.id)));
+  async function selectAllRequests(percent = 100) {
+    if (bulkProgress) return;
+    const selected = new Set<string>();
+    const pageSize = 500;
+    let nextPage = 1;
+    let total = requestTotal || filteredRequests.length;
+    let target = Math.ceil((total * percent) / 100);
+    setBulkProgress({ total: target, done: 0, label: `Selecting ${percent}% service requests` });
+    try {
+      while (selected.size < target) {
+        const params = new URLSearchParams({
+          page: String(nextPage),
+          pageSize: String(pageSize),
+          query: search,
+          status: statusFilter,
+          priority: priorityFilter,
+          category: categoryFilter,
+          overdueOnly: overdueOnly ? "true" : "false",
+        });
+        const response = await fetch(`/api/service-requests?${params.toString()}`, { cache: "no-store" });
+        const result = await response.json();
+        const nextRows = result.requests ?? [];
+        total = Number(result.total ?? total ?? nextRows.length);
+        target = Math.ceil((total * percent) / 100);
+        nextRows.forEach((request: any) => { if (selected.size < target) selected.add(request.id); });
+        setBulkProgress({ total: target, done: selected.size, label: `Selecting ${percent}% service requests` });
+        if (!nextRows.length || nextRows.length < pageSize) break;
+        nextPage += 1;
+      }
+      setSelectedRequestIds(selected);
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 600);
+    }
+  }
+
+  function handleRequestScroll(event: UIEvent<HTMLDivElement>) {
+    const element = event.currentTarget;
+    const nearBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 180;
+    if (nearBottom && hasMoreRequests && !requestLoading) {
+      setRequestLoading(true);
+      setRequestPage((current) => current + 1);
+    }
   }
 
   async function bulkDeleteSelectedRequests() {
@@ -3379,6 +3452,11 @@ function Helpdesk({
           </div>
         </div>
 
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm font-black text-slate-600">
+          <span>Showing {visibleRequests.length.toLocaleString()} of {requestTotal.toLocaleString()} service requests / All {allRequestTotal.toLocaleString()}</span>
+          {requestLoading && <span className="text-lagoon">Loading service requests...</span>}
+        </div>
+
         {isAdmin && (
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm font-black text-slate-600">
             <span>Selected {selectedRequestIds.size.toLocaleString()} service requests</span>
@@ -3392,7 +3470,7 @@ function Helpdesk({
           </div>
         )}
         {bulkProgress && <div className="mb-3"><BulkActionProgress label={bulkProgress.label} done={bulkProgress.done} total={bulkProgress.total} /></div>}
-        <div className="cafm-scroll-x overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
+        <div ref={requestScrollRef} onScroll={handleRequestScroll} className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
           <table className="cafm-data-table min-w-[1680px] border-collapse bg-white text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
@@ -3444,7 +3522,7 @@ function Helpdesk({
                         />
                       </td>
                     )}
-                    <td className="whitespace-nowrap px-3 py-3 font-black text-slate-500">{startIndex + index + 1}</td>
+                    <td className="whitespace-nowrap px-3 py-3 font-black text-slate-500">{index + 1}</td>
                     <td className="max-w-[280px] px-3 py-3">
                       <div className="font-black text-slate-800">{request.title}</div>
                       <div className="mt-1 text-xs font-bold text-slate-500">{request.ticketNo}</div>
@@ -3496,8 +3574,8 @@ function Helpdesk({
             </tbody>
           </table>
         </div>
-        <div className="mt-3">
-          <PaginationControls page={currentPage} totalPages={totalPages} onPageChange={setPage} totalItems={filteredRequests.length} />
+        <div className="mt-3 text-center text-sm font-black text-slate-500">
+          {hasMoreRequests ? "Scroll down to load more service requests" : "All matching service requests loaded"}
         </div>
 
         {selectedRequest && (

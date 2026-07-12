@@ -32,6 +32,56 @@ const slaByPriority = {
   CRITICAL: 4,
 };
 
+
+export async function GET(request: Request) {
+  try {
+    await getCurrentUser();
+    const url = new URL(request.url);
+    const query = url.searchParams.get("query")?.trim() || "";
+    const status = url.searchParams.get("status")?.trim() || "All";
+    const priority = url.searchParams.get("priority")?.trim() || "All";
+    const category = url.searchParams.get("category")?.trim() || "All";
+    const overdueOnly = url.searchParams.get("overdueOnly") === "true";
+    const pageInput = Number(url.searchParams.get("page") || 1);
+    const pageSizeParam = url.searchParams.get("pageSize") || "100";
+    const pageSizeInput = pageSizeParam === "all" ? Number.MAX_SAFE_INTEGER : Number(pageSizeParam);
+    const page = Number.isFinite(pageInput) ? Math.max(1, Math.floor(pageInput)) : 1;
+    const pageSize = pageSizeParam === "all" ? 10000 : Number.isFinite(pageSizeInput) ? Math.min(500, Math.max(25, Math.floor(pageSizeInput))) : 100;
+    const where: any = {
+      ...(status !== "All" ? { status } : {}),
+      ...(priority !== "All" ? { priority } : {}),
+      ...(category !== "All" ? { category } : {}),
+      ...(overdueOnly ? { dueAt: { lt: new Date() }, status: { notIn: ["CLOSED", "REJECTED"] } } : {}),
+    };
+    if (query) {
+      where.OR = [
+        { ticketNo: { contains: query, mode: "insensitive" } },
+        { title: { contains: query, mode: "insensitive" } },
+        { description: { contains: query, mode: "insensitive" } },
+        { requester: { contains: query, mode: "insensitive" } },
+        { location: { contains: query, mode: "insensitive" } },
+        { category: { contains: query, mode: "insensitive" } },
+        { departmentCode: { contains: query, mode: "insensitive" } },
+        { serviceCode: { contains: query, mode: "insensitive" } },
+      ];
+    }
+    const [allTotal, total, requests] = await Promise.all([
+      prisma.serviceRequest.count(),
+      prisma.serviceRequest.count({ where }),
+      prisma.serviceRequest.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: { workOrder: { select: { id: true, woNo: true, status: true } } },
+      }),
+    ]);
+    return NextResponse.json({ requests, allTotal, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
+  } catch (error) {
+    return NextResponse.json({ message: "Unable to load service requests" }, { status: 500 });
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const input = schema.parse(await request.json());
