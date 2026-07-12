@@ -293,10 +293,10 @@ function serializeBulkUploadJob(job: {
 
 function detectBulkUploadModule(requestedModule: string, rows: Row[]) {
   const first = rows[0] || {};
-  const headers = new Set(Object.keys(first).map((key) => key.trim()));
-  if (headers.has("bookingNo") && (headers.has("occupancyStatus") || headers.has("checkIn") || headers.has("checkOut"))) return "housingOccupancy";
-  if (headers.has("residentNo") && (headers.has("guestId") || headers.has("companyName")) && !headers.has("bookingNo")) return "housingGuests";
-  if (headers.has("roomCode") && headers.has("roomNumber") && headers.has("roomType") && !headers.has("bookingNo")) return "housingRooms";
+  const headers = new Set(Object.keys(first).map(normalizeRowKey));
+  if (headers.has("bookingno") && (headers.has("occupancystatus") || headers.has("checkin") || headers.has("checkout"))) return "housingOccupancy";
+  if (headers.has("residentno") && (headers.has("guestid") || headers.has("companyname")) && !headers.has("bookingno")) return "housingGuests";
+  if (headers.has("roomcode") && headers.has("roomnumber") && headers.has("roomtype") && !headers.has("bookingno")) return "housingRooms";
   return requestedModule;
 }
 function bulkUploadPermissions(module: string) {
@@ -1545,9 +1545,18 @@ function value(row: Row, ...keys: string[]) {
     const found = row[key];
     if (found !== undefined && found !== null && String(found).trim() !== "") return String(found).trim();
   }
+
+  const normalized = new Map(Object.entries(row).map(([key, found]) => [normalizeRowKey(key), found]));
+  for (const key of keys) {
+    const found = normalized.get(normalizeRowKey(key));
+    if (found !== undefined && found !== null && String(found).trim() !== "") return String(found).trim();
+  }
   return "";
 }
 
+function normalizeRowKey(key: string) {
+  return key.replace(/^\uFEFF/, "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
 function uniquePpmCode(baseCode: string, targetKey: string) {
   const normalizedTarget = targetKey.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   const normalizedBase = baseCode.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");

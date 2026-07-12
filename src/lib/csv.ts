@@ -1,4 +1,4 @@
-export function parseCsv(text: string) {
+﻿export function parseCsv(text: string) {
   const rows: string[][] = [];
   let cell = "";
   let row: string[] = [];
@@ -31,7 +31,7 @@ export function parseCsv(text: string) {
   if (row.some(Boolean)) rows.push(row);
   if (rows.length < 2) return [];
 
-  const headers = rows[0].map((header) => header.trim());
+  const headers = rows[0].map((header) => header.trim().replace(/^\uFEFF/, ""));
   return rows.slice(1).map((values) =>
     Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""])),
   );
