@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+﻿import { createHash } from "crypto";
 import { copyFile, mkdir, readFile, stat, writeFile } from "fs/promises";
 import path from "path";
 import { NextResponse } from "next/server";
@@ -610,6 +610,268 @@ async function importAsset(row: Row, context: ImportContext = {}) {
   return importResult("asset", existing ? "UPDATE" : "CREATE", asset, tag, name);
 }
 
+async function ensureHousingProperty(row: Row) {
+  const code = value(row, "propertyCode", "Property Code", "property", "Property", "site", "Site") || "FBC";
+  const name = value(row, "propertyName", "Property Name", "siteName", "Site Name") || (code === "FBC" ? "Fadhili Base Camp" : code);
+  return prisma.housingProperty.upsert({
+    where: { code },
+    update: {
+      name,
+      site: value(row, "site", "Site") || name,
+      city: value(row, "city", "City") || "Fadhili",
+      manager: value(row, "manager", "Manager") || "Housing Operations",
+      active: true,
+    },
+    create: {
+      code,
+      name,
+      site: value(row, "site", "Site") || name,
+      city: value(row, "city", "City") || "Fadhili",
+      manager: value(row, "manager", "Manager") || "Housing Operations",
+      active: true,
+    },
+  });
+}
+
+async function ensureHousingBlock(row: Row, propertyId: string, propertyCode: string) {
+  const code = value(row, "blockCode", "Block Code", "buildingNumber", "Building Number", "building", "Building") || `${propertyCode}-BLOCK`;
+  const name = value(row, "blockName", "Block Name", "buildingName", "Building Name", "building", "Building") || code;
+  return prisma.housingBlock.upsert({
+    where: { code },
+    update: {
+      name,
+      propertyId,
+      floors: Math.max(1, integer(value(row, "floors", "Floors", "floorNumber", "Floor Number"), 1)),
+    },
+    create: {
+      code,
+      name,
+      propertyId,
+      floors: Math.max(1, integer(value(row, "floors", "Floors", "floorNumber", "Floor Number"), 1)),
+    },
+  });
+}
+
+async function ensureHousingBeds(roomId: string, roomCode: string, capacity: number) {
+  const target = Math.max(1, capacity);
+  const existing = await prisma.housingBed.findMany({ where: { roomId }, orderBy: { label: "asc" } });
+  for (let index = existing.length + 1; index <= target; index += 1) {
+    const code = `${roomCode}-B${index}`;
+    await prisma.housingBed.upsert({
+      where: { code },
+      update: { roomId, label: `Bed ${index}` },
+      create: { code, roomId, label: `Bed ${index}`, status: "AVAILABLE" },
+    });
+  }
+}
+
+async function refreshHousingPropertyRoomCount(propertyId: string) {
+  const totalRooms = await prisma.housingRoom.count({ where: { propertyId } });
+  await prisma.housingProperty.update({ where: { id: propertyId }, data: { totalRooms } });
+}
+
+async function refreshHousingRoomFromBookings(roomId: string) {
+  const room = await prisma.housingRoom.findUnique({ where: { id: roomId } });
+  if (!room) return;
+  if (["MAINTENANCE", "BLOCKED"].includes(room.status)) return;
+  const activeBookings = await prisma.housingBooking.count({ where: { roomId, status: "CHECKED_IN" } });
+  const reservedBookings = await prisma.housingBooking.count({ where: { roomId, status: "APPROVED" } });
+  const occupancy = Math.min(room.capacity, activeBookings);
+  const status = occupancy > 0 ? "OCCUPIED" : reservedBookings > 0 ? "RESERVED" : "AVAILABLE";
+  await prisma.housingRoom.update({ where: { id: roomId }, data: { occupancy, status } });
+}
+
+async function importHousingRoom(row: Row, context: ImportContext = {}) {
+  const code = required(row, "roomCode", "Room Code", "code", "Room", "roomNumber", "Room Number");
+  const existing = await prisma.housingRoom.findUnique({ where: { code } });
+  if (existing && !shouldReplace(context)) return existingResult("housing_room", existing, code, existing.roomNumber);
+
+  const property = await ensureHousingProperty(row);
+  const block = await ensureHousingBlock(row, property.id, property.code);
+  const capacity = Math.max(1, integer(value(row, "capacity", "Capacity"), 1));
+  const floor = value(row, "floor", "floorNumber", "Floor", "Floor Number") || "Ground";
+  const payload = {
+    roomNumber: value(row, "roomNumber", "Room Number", "Room") || code,
+    propertyId: property.id,
+    blockId: block.id,
+    floor,
+    roomType: value(row, "roomType", "Room Type", "type") || "Standard",
+    genderRestriction: value(row, "genderRestriction", "Gender Restriction") || "MIXED",
+    capacity,
+    status: housingRoomStatus(value(row, "status", "Status")),
+    qrCode: value(row, "qrCode", "QR Code") || `HOUSING-ROOM:${code}`,
+    remarks: value(row, "remarks", "Remarks", "sourceDescription", "Source Description") || null,
+  };
+  const room = await prisma.housingRoom.upsert({
+    where: { code },
+    update: payload,
+    create: { code, ...payload },
+  });
+  await ensureHousingBeds(room.id, code, capacity);
+  await refreshHousingPropertyRoomCount(property.id);
+  await prisma.housingHistory.create({
+    data: {
+      entity: "room",
+      entityId: room.id,
+      roomId: room.id,
+      actor: "Bulk Upload",
+      action: existing ? "Housing room bulk updated" : "Housing room bulk imported",
+      details: `${code} / ${room.roomNumber}`,
+    },
+  });
+  return importResult("housing_room", existing ? "UPDATE" : "CREATE", room, code, room.roomNumber);
+}
+
+async function importHousingGuest(row: Row, context: ImportContext = {}) {
+  const residentNo = required(row, "residentNo", "Resident No", "guestId", "Guest ID", "Budge No.", "Badge No.", "code");
+  const existing = await prisma.housingResident.findUnique({ where: { residentNo } });
+  if (existing && !shouldReplace(context)) return existingResult("housing_guest", existing, residentNo, existing.name);
+  const payload = {
+    name: value(row, "name", "guestName", "Guest Name", "residentName", "Resident Name") || residentNo,
+    email: value(row, "email", "Email") || null,
+    phone: value(row, "phone", "Phone", "contactNumber", "Contact Number") || null,
+    companyId: value(row, "companyId", "Company ID") || null,
+    companyName: value(row, "companyName", "Company Name") || null,
+    gender: value(row, "gender", "Gender") || null,
+    nationality: value(row, "nationality", "Nationality") || null,
+    departmentCode: value(row, "departmentCode", "Department Code", "department") || null,
+    status: value(row, "status", "Status") || "ACTIVE",
+  };
+  const guest = await prisma.housingResident.upsert({
+    where: { residentNo },
+    update: payload,
+    create: { residentNo, ...payload },
+  });
+  return importResult("housing_guest", existing ? "UPDATE" : "CREATE", guest, residentNo, guest.name);
+}
+
+async function importHousingOccupancy(row: Row, context: ImportContext = {}) {
+  const bookingNo = required(row, "bookingNo", "Booking No", "reservationNumber", "Reservation Number", "Confirmation Number", "code");
+  const existing = await prisma.housingBooking.findUnique({ where: { bookingNo } });
+  if (existing && !shouldReplace(context)) return existingResult("housing_booking", existing, bookingNo, existing.residentName);
+
+  const room = await housingRoomForOccupancy(row);
+  const residentNo = value(row, "residentNo", "Resident No", "guestId", "Guest ID", "Agreement/ Budge No.", "Budge No.", "Badge No.");
+  const resident = residentNo ? await findOrCreateHousingResident(row, residentNo) : null;
+  const checkIn = optionalDate(value(row, "checkIn", "Check-In Date", "Arrival Date", "arrivalDate")) || new Date();
+  const checkOut = optionalDate(value(row, "checkOut", "Check-Out Date", "Departure Date", "departureDate")) || undefined;
+  const status = housingBookingStatus(value(row, "bookingStatus", "occupancyStatus", "sourceStatus", "Status"));
+  const residentName = value(row, "residentName", "guestName", "Guest Name", "Resident Name") || resident?.name || residentNo || "Guest";
+  const payload = {
+    residentId: resident?.id,
+    residentName,
+    departmentCode: value(row, "departmentCode", "Department Code") || resident?.departmentCode || null,
+    employeeId: residentNo || null,
+    companyName: value(row, "companyName", "Company Name") || resident?.companyName || null,
+    nationality: value(row, "nationality", "Nationality") || resident?.nationality || null,
+    contactNumber: value(row, "contactNumber", "phone", "Phone") || resident?.phone || null,
+    gender: value(row, "gender", "Gender") || resident?.gender || null,
+    buildingNumber: value(row, "buildingNumber", "Building Number") || room.block?.name || room.property.name,
+    floorNumber: value(row, "floorNumber", "Floor Number", "floor") || room.floor,
+    roomNumber: value(row, "roomNumber", "Room Number", "scheduledRoom", "Scheduled Room") || room.roomNumber,
+    bedNumber: value(row, "bedNumber", "Bed Number") || null,
+    bookingType: value(row, "bookingType", "Booking Type") || "TEMPORARY",
+    allocationType: value(row, "allocationType", "Allocation Type") || value(row, "ratePlan", "Rate Plan") || "STANDARD",
+    roomId: room.id,
+    checkIn,
+    checkOut,
+    status,
+    priority: priority(value(row, "priority", "Priority")),
+    requestedBy: value(row, "requestedBy", "Requested By") || "Bulk Upload",
+    notes: [value(row, "notes", "Notes"), value(row, "sourceStatus", "Source Status") ? `Source status: ${value(row, "sourceStatus", "Source Status")}` : ""].filter(Boolean).join("\n") || null,
+  };
+  const booking = await prisma.housingBooking.upsert({
+    where: { bookingNo },
+    update: payload,
+    create: { bookingNo, ...payload },
+  });
+  await refreshHousingRoomFromBookings(room.id);
+  await prisma.housingHistory.create({
+    data: {
+      entity: "booking",
+      entityId: booking.id,
+      bookingId: booking.id,
+      roomId: room.id,
+      actor: "Bulk Upload",
+      action: existing ? "Housing occupancy bulk updated" : "Housing occupancy bulk imported",
+      details: `${bookingNo} / ${residentName} / ${room.code}`,
+    },
+  });
+  return importResult("housing_booking", existing ? "UPDATE" : "CREATE", booking, bookingNo, residentName);
+}
+
+async function housingRoomForOccupancy(row: Row) {
+  const requestedCode = value(row, "roomCode", "Room Code", "roomNumber", "Room Number", "Room");
+  const fallbackCode = value(row, "scheduledRoom", "Scheduled Room") || "UNASSIGNED-HOUSING";
+  const code = requestedCode || fallbackCode;
+  const existing = await prisma.housingRoom.findUnique({ where: { code }, include: { property: true, block: true } });
+  if (existing) return existing;
+
+  const property = await ensureHousingProperty(row);
+  const block = await ensureHousingBlock(row, property.id, property.code);
+  const capacity = Math.max(1, integer(value(row, "capacity", "Capacity"), 1));
+  const room = await prisma.housingRoom.upsert({
+    where: { code },
+    update: {},
+    create: {
+      code,
+      roomNumber: requestedCode || value(row, "roomNumber", "Room Number", "scheduledRoom", "Scheduled Room") || code,
+      propertyId: property.id,
+      blockId: block.id,
+      floor: value(row, "floorNumber", "Floor Number", "floor") || "Ground",
+      roomType: value(row, "roomType", "Room Type") || "Standard",
+      genderRestriction: "MIXED",
+      capacity,
+      status: "AVAILABLE",
+      qrCode: `HOUSING-ROOM:${code}`,
+      remarks: requestedCode ? "Created automatically from occupancy bulk upload" : "Placeholder for occupancy rows without a room in the source file",
+    },
+    include: { property: true, block: true },
+  });
+  await ensureHousingBeds(room.id, code, capacity);
+  await refreshHousingPropertyRoomCount(property.id);
+  return room;
+}
+
+async function findOrCreateHousingResident(row: Row, residentNo: string) {
+  const existing = await prisma.housingResident.findUnique({ where: { residentNo } });
+  if (existing) return existing;
+  return prisma.housingResident.create({
+    data: {
+      residentNo,
+      name: value(row, "residentName", "guestName", "Guest Name", "Resident Name") || residentNo,
+      email: value(row, "email", "Email") || null,
+      phone: value(row, "phone", "Phone", "contactNumber", "Contact Number") || null,
+      companyId: value(row, "companyId", "Company ID") || null,
+      companyName: value(row, "companyName", "Company Name") || null,
+      gender: value(row, "gender", "Gender") || null,
+      nationality: value(row, "nationality", "Nationality") || null,
+      departmentCode: value(row, "departmentCode", "Department Code") || null,
+      status: "ACTIVE",
+    },
+  });
+}
+
+function housingRoomStatus(input: string | undefined) {
+  const normalized = String(input || "AVAILABLE").trim().toUpperCase().replace(/[-_]+/g, " ");
+  if (["OCCUPIED", "ON HOUSE", "IN HOUSE", "CHECKED IN"].includes(normalized)) return "OCCUPIED" as const;
+  if (["RESERVED", "RESERVE", "HOLD", "HELD", "BOOKED"].includes(normalized)) return "RESERVED" as const;
+  if (["MAINTENANCE", "UNDER MAINTENANCE"].includes(normalized)) return "MAINTENANCE" as const;
+  if (["BLOCKED", "BLOCK"].includes(normalized)) return "BLOCKED" as const;
+  return "AVAILABLE" as const;
+}
+
+function housingBookingStatus(input: string | undefined) {
+  const normalized = String(input || "REQUESTED").trim().toUpperCase().replace(/[-_]+/g, " ");
+  if (["ON HOUSE", "IN HOUSE", "CHECKED IN", "CHECK IN"].includes(normalized)) return "CHECKED_IN" as const;
+  if (["CHECK OUT", "CHECKED OUT", "DEPARTED"].includes(normalized)) return "CHECKED_OUT" as const;
+  if (["NO SHOW", "NOSHOW"].includes(normalized)) return "NO_SHOW" as const;
+  if (["CANCEL", "CANCELLED", "CANCELED"].includes(normalized)) return "CANCELLED" as const;
+  if (["RESERVED", "RESERVE", "APPROVED"].includes(normalized)) return "APPROVED" as const;
+  if (["PENDING", "PENDING APPROVAL"].includes(normalized)) return "PENDING_APPROVAL" as const;
+  if (["REJECTED", "TRANSFERRED", "REQUESTED"].includes(normalized)) return normalized.replace(/ /g, "_") as "REJECTED" | "TRANSFERRED" | "REQUESTED";
+  return "REQUESTED" as const;
+}
 async function importHousingAsset(row: Row, context: ImportContext = {}) {
   const tag = value(row, "tag", "code", "Asset Code", "Housing Asset Code", "assetCode");
   if (!tag) throw new Error("Asset Code is required");

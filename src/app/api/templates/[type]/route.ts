@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 
 const templates: Record<string, string> = {
@@ -7,6 +7,9 @@ const templates: Record<string, string> = {
   spaces: "code,name,site,city,country,buildingCode,floor,type,capacity,areaSqm,occupancy\n",
   assets: "EQUIPMENTNO,EQUIPMENTDESC,ASSETSTATUS,EQTYPE,ORGANIZATION,COMMISSIONDATE,DEPARTMENT,DEPARTMENT_DESC,CLASS,CLASS_DESC,CATEGORY,CATEGORY_DESC,SERIALNUMBER,MODEL,MANUFACTURER,GSRC,ENDOFUSEFULLIFE,ATTRIBUTE,ENVIRONMENT,PRESSURE_BAR,FLOW_LPS,SUPPLY_VOLTAGE_Volt,OUTOFSERVICE,SERVICELIFE,LOCATION,LOCATION_DESC,POSITION,CLASSORGANIZATION,EQUIPMENTVALUE,PRIMARYSYSTEM,ADDITIONAL_NOTE\n",
   housingAssets: "Asset Code,Asset Name,Category,Description,Brand,Model,Serial Number,Status,Room Code,Room Number,Building Location,Room Location,Custodian Name,Custodian Contact,Issued To,Issued At,Transferred From,Transferred To,Transferred At,Replacement Of,Replaced At,PM Schedule,Next PM Due,Purchase Date,Supplier Name,Asset Value,Depreciation Rate,Current Value,Last Inspection At,Warranty Expiry,QR Code,Photo URLs,Movement Action,Notes\n",
+  housingRooms: "type,code,roomCode,roomNumber,propertyCode,propertyName,blockCode,blockName,buildingNumber,floor,floorNumber,roomType,capacity,genderRestriction,status,sourceDescription,remarks\n",
+  housingGuests: "type,residentNo,guestId,name,email,phone,companyId,companyName,gender,nationality,departmentCode,status,source\n",
+  housingOccupancy: "type,bookingNo,reservationNumber,leaseNo,residentNo,guestId,residentName,guestName,roomCode,roomNumber,scheduledRoom,buildingNumber,floorNumber,roomType,checkIn,checkOut,sourceStatus,occupancyStatus,bookingStatus,ratePlan,bookingType,allocationType,requestedBy,priority,notes\n",
   departments: "code,name,siteLocation,description\n",
   employees: "name,email,companyId,nationalityType,departmentCode,siteLocation\n",
   teams: "name,companyIdNumber,departmentCode,service,email,phone\n",
