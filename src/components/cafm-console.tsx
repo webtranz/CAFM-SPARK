@@ -1853,6 +1853,8 @@ function Assets({
   const [page, setPage] = useState(1);
   const [assetRowsSource, setAssetRowsSource] = useState<any[]>(assets);
   const [assetTotal, setAssetTotal] = useState(assets.length);
+  const [allAssetTotal, setAllAssetTotal] = useState(assets.length);
+  const [assetLocationCounts, setAssetLocationCounts] = useState<Record<string, number>>({});
   const [assetLoading, setAssetLoading] = useState(false);
   const assetScrollRef = useRef<HTMLDivElement | null>(null);
   const assetRows = assetRowsSource.map((asset) => ({
@@ -1876,31 +1878,49 @@ function Assets({
   const selectedVisibleAssets = visibleAssets.filter((asset) => selectedAssetIds.has(asset.id));
   const allVisibleSelected = Boolean(visibleAssets.length) && selectedVisibleAssets.length === visibleAssets.length;
   const someVisibleSelected = selectedVisibleAssets.length > 0 && !allVisibleSelected;
-  const locationOptionEntries: [string, { value: string; label: string }][] = [
+  const locationOptionEntries: [string, { value: string; label: string; count: number; description: string }][] = [
     ...locations
       .filter((location) => Boolean(location.code))
-      .map((location) => [
-        String(location.code),
-        {
-          value: String(location.code),
-          label: `${location.code} - ${location.description || location.parentLocation || location.site || location.building || "Location"}`,
-        },
-      ] as [string, { value: string; label: string }]),
+      .map((location) => {
+        const code = String(location.code);
+        const count = assetLocationCounts[code] ?? 0;
+        const description = location.description || location.parentLocation || location.site || location.building || "Location";
+        return [
+          code,
+          {
+            value: code,
+            label: `${code} - ${description}${count ? ` (${count.toLocaleString()})` : ""}`,
+            count,
+            description,
+          },
+        ] as [string, { value: string; label: string; count: number; description: string }];
+      }),
     ...assetRows
       .map((asset) => {
         const value = asset.locationCode || [asset.buildingCode, asset.floor, asset.room].filter(Boolean).join(" / ");
         if (!value || value === "Unassigned") return null;
+        const code = String(value);
+        const count = assetLocationCounts[code] ?? 0;
         return [
-          String(value),
+          code,
           {
-            value: String(value),
-            label: [asset.locationCode, asset.locationDesc, asset.buildingCode, asset.floor, asset.room].filter(Boolean).join(" - "),
+            value: code,
+            label: [asset.locationCode, asset.locationDesc, asset.buildingCode, asset.floor, asset.room].filter(Boolean).join(" - ") + (count ? ` (${count.toLocaleString()})` : ""),
+            count,
+            description: asset.locationDesc || asset.buildingCode || asset.floor || asset.room || "Asset location",
           },
-        ] as [string, { value: string; label: string }];
+        ] as [string, { value: string; label: string; count: number; description: string }];
       })
-      .filter((entry): entry is [string, { value: string; label: string }] => Boolean(entry)),
+      .filter((entry): entry is [string, { value: string; label: string; count: number; description: string }] => Boolean(entry)),
   ];
-  const locationOptions = Array.from(new Map(locationOptionEntries).values());
+  Object.entries(assetLocationCounts).forEach(([code, count]) => {
+    if (code && code !== "Unassigned" && !locationOptionEntries.some(([value]) => value === code)) {
+      locationOptionEntries.push([code, { value: code, label: `${code} (${count.toLocaleString()})`, count, description: "Asset location" }]);
+    }
+  });
+  const locationOptions = Array.from(new Map(locationOptionEntries).values()).sort((left, right) => right.count - left.count || left.value.localeCompare(right.value, undefined, { numeric: true }));
+  const selectedLocationSummary = locationFilter ? locationOptions.find((location) => location.value === locationFilter) : null;
+  const topLocationRows = locationOptions.filter((location) => location.count > 0).slice(0, 12);
   const classOptions = Array.from(new Set([...assetRows.map((asset) => asset.classCode || asset.category).filter(Boolean)]));
   const statusOptions = Array.from(new Set(assetRows.map((asset) => asset.assetStatusText).filter(Boolean)));
 
@@ -1912,6 +1932,15 @@ function Assets({
   useEffect(() => {
     setAssetRowsSource(assets);
     setAssetTotal((current) => Math.max(current, assets.length));
+    setAllAssetTotal((current) => Math.max(current, assets.length));
+    setAssetLocationCounts((current) => {
+      if (Object.keys(current).length) return current;
+      return assets.reduce((counts: Record<string, number>, asset) => {
+        const code = asset.locationCode || asset.room || "Unassigned";
+        counts[code] = (counts[code] ?? 0) + 1;
+        return counts;
+      }, {});
+    });
   }, [assets]);
 
   useEffect(() => {
@@ -1943,6 +1972,8 @@ function Assets({
           const result = await response.json();
           setAssetRowsSource((current) => page === 1 ? result.assets ?? [] : [...current, ...(result.assets ?? [])]);
           setAssetTotal(Number(result.total ?? result.assets?.length ?? 0));
+          setAllAssetTotal(Number(result.allTotal ?? result.total ?? result.assets?.length ?? 0));
+          setAssetLocationCounts(result.locationCounts ?? {});
         }
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -2129,6 +2160,37 @@ function Assets({
             {statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
           </select>
           <button type="button" onClick={() => { setLocationFilter(""); setLocationSearch(""); setClassFilter(""); setStatusFilter(""); setColumnFilters({}); setFilterValue(""); }} className="h-11 rounded-lg bg-white px-3 text-sm font-black text-lagoon">Clear Filters</button>
+        </div>
+        <div className="mb-4 grid gap-3 md:grid-cols-[1fr_1fr_1fr]">
+          <div className="rounded-lg bg-lagoon/10 p-3">
+            <p className="text-xs font-black uppercase text-lagoon">All Assets</p>
+            <p className="text-2xl font-black">{allAssetTotal.toLocaleString()}</p>
+          </div>
+          <div className="rounded-lg bg-emerald-50 p-3">
+            <p className="text-xs font-black uppercase text-emerald-700">Selected Location</p>
+            <p className="truncate text-lg font-black">{selectedLocationSummary ? selectedLocationSummary.value : "All Locations"}</p>
+            <p className="text-xs font-bold text-slate-500">{selectedLocationSummary ? `${selectedLocationSummary.count.toLocaleString()} assets in this location` : `${locationOptions.filter((location) => location.count > 0).length.toLocaleString()} locations with assets`}</p>
+          </div>
+          <div className="rounded-lg bg-amber-50 p-3">
+            <p className="text-xs font-black uppercase text-amber-700">Matching Assets</p>
+            <p className="text-2xl font-black">{assetTotal.toLocaleString()}</p>
+          </div>
+        </div>
+        <div className="mb-4 rounded-lg border border-slate-200 bg-white p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-sm font-black text-ink">Assets by Individual Location</p>
+            <button type="button" onClick={() => setLocationFilter("")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-lagoon">Show All</button>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+            {topLocationRows.map((location) => (
+              <button key={location.value} type="button" onClick={() => setLocationFilter(location.value)} className={`min-w-[220px] rounded-lg border px-3 py-2 text-left text-xs font-bold ${locationFilter === location.value ? "border-lagoon bg-lagoon/10 text-lagoon" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
+                <span className="block truncate font-black">{location.value}</span>
+                <span className="block truncate">{location.description}</span>
+                <span className="mt-1 block text-sm font-black">{location.count.toLocaleString()} assets</span>
+              </button>
+            ))}
+            {!topLocationRows.length && <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-bold text-slate-500">No asset locations loaded yet.</p>}
+          </div>
         </div>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm font-black text-slate-600">
           <span>Showing {visibleAssets.length.toLocaleString()} of {assetTotal.toLocaleString()} assets / Selected {selectedAssetIds.size.toLocaleString()} / Column filters {activeColumnFilterCount}</span>

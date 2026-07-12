@@ -184,13 +184,22 @@ export async function GET(request: Request) {
     andFilters.push({ OR: [{ classCode: classValue }, { category: classValue }, { assetGroup: classValue }] });
   }
   if (andFilters.length) where.AND = andFilters;
-  const [total, assets] = await Promise.all([
+  const locationCountWhere: any = {
+    ...(role === "supervisor" || role === "technician" ? { departmentCode: user?.department || "__none__" } : {}),
+  };
+  const [allTotal, total, locationGroups, assets] = await Promise.all([
+    prisma.asset.count({ where: locationCountWhere }),
     prisma.asset.count({ where }),
+    prisma.asset.groupBy({
+      by: ["locationCode"],
+      where: locationCountWhere,
+      _count: { _all: true },
+    }),
     prisma.asset.findMany({
       where,
       skip: (page - 1) * pageSize,
       take: pageSize,
-      orderBy: [{ tag: "asc" }],
+      orderBy: [{ locationCode: "asc" }, { tag: "asc" }],
       include: {
         site: { select: { name: true } },
         building: { select: { name: true, code: true } },
@@ -199,7 +208,11 @@ export async function GET(request: Request) {
       },
     }),
   ]);
-  return NextResponse.json({ assets, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
+  const locationCounts = locationGroups.reduce((counts: Record<string, number>, item) => {
+    counts[item.locationCode || "Unassigned"] = item._count._all;
+    return counts;
+  }, {});
+  return NextResponse.json({ assets, allTotal, total, locationCounts, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
 }
 
 export async function HEAD() {
