@@ -1229,6 +1229,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
             <IncidentCaseManagement
               requests={records.requests}
               workOrders={records.workOrders}
+              inspections={records.inspections}
               navigate={navigate}
             />
           )}
@@ -6010,9 +6011,10 @@ function LinkedTicketsTable({ rows, navigate }: { rows: any[]; navigate: (module
   );
 }
 
-function IncidentCaseManagement({ requests, workOrders, navigate }: { requests: any[]; workOrders: any[]; navigate: (moduleId: string, menuKey: string, view?: string) => void }) {
+function IncidentCaseManagement({ requests, workOrders, inspections, navigate }: { requests: any[]; workOrders: any[]; inspections: any[]; navigate: (moduleId: string, menuKey: string, view?: string) => void }) {
   const incidentRequests = requests.filter((request) => request.isIncidentCase);
   const incidentWorkOrders = workOrders.filter((work) => work.isIncidentCase);
+  const uploadedCases = inspections.filter((inspection) => inspection.code || inspection.findings || inspection.title);
   const rows = [
     ...incidentRequests.map((request) => ({
       id: request.id,
@@ -6042,6 +6044,20 @@ function IncidentCaseManagement({ requests, workOrders, navigate }: { requests: 
       moduleId: "work",
       menuKey: "Tickets-Work Orders",
     })),
+    ...uploadedCases.map((inspection) => ({
+      id: inspection.id,
+      source: "Inspection / Case",
+      reference: inspection.code,
+      title: inspection.title,
+      priority: inspection.risk === "EXTREME" ? "CRITICAL" : inspection.risk === "HIGH" ? "HIGH" : "MEDIUM",
+      status: inspection.status,
+      owner: inspection.inspector || "Bulk Upload",
+      linkedRecord: inspection.findings || "Uploaded case record",
+      location: inspection.area,
+      updatedAt: inspection.dueAt,
+      moduleId: "hse",
+      menuKey: "Safety-HSE",
+    })),
   ].sort((left, right) => new Date(right.updatedAt || 0).getTime() - new Date(left.updatedAt || 0).getTime());
   const openRows = rows.filter((row) => !["CLOSED", "COMPLETED", "VERIFIED", "REJECTED", "CANCELLED"].includes(String(row.status || "").toUpperCase()));
   const criticalRows = rows.filter((row) => row.priority === "CRITICAL" || row.priority === "HIGH");
@@ -6053,7 +6069,7 @@ function IncidentCaseManagement({ requests, workOrders, navigate }: { requests: 
           {[
             ["Total Cases", rows.length],
             ["Open Cases", openRows.length],
-            ["Service Requests", incidentRequests.length],
+            ["Uploaded Cases", uploadedCases.length],
             ["Work Orders", incidentWorkOrders.length],
           ].map(([label, value]) => (
             <div key={label} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">

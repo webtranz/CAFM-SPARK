@@ -325,7 +325,7 @@ async function importRow(module: string, row: Row, context: ImportContext = {}) 
   if (module === "departments") return importDepartment(row, context);
   if (module === "employees") return importEmployee(row, context);
   if (module === "categories") return importCategory(row, context);
-  if (module === "inspections") return importInspection(row);
+  if (module === "inspections") return importInspection(row, context);
   if (module === "locations") return importLocation(row, context);
   if (module === "jobPlans") return importJobPlan(row, context);
   if (module === "ppm") return importPpm(row, context);
@@ -893,22 +893,27 @@ async function importCategory(row: Row, context: ImportContext = {}) {
   return importResult("asset_category", existing ? "UPDATE" : "CREATE", category, code, category.name);
 }
 
-async function importInspection(row: Row) {
+async function importInspection(row: Row, context: ImportContext = {}) {
   const count = await prisma.inspection.count();
-  const inspection = await prisma.inspection.create({
-    data: {
-      code: row.code || `INS-${String(count + 1001).padStart(5, "0")}`,
-      title: required(row, "title"),
-      area: row.area || "General",
-      inspector: row.inspector || "Bulk Upload",
-      risk: risk(row.risk),
-      score: integer(row.score, 85),
-      status: workStatus(row.status, "NEW"),
-      dueAt: date(row.dueAt, addDays(new Date(), 7)),
-      findings: row.findings || "No findings recorded.",
-    },
+  const code = row.code || `INS-${String(count + 1001).padStart(5, "0")}`;
+  const existing = await prisma.inspection.findUnique({ where: { code } });
+  if (existing && !shouldReplace(context)) return existingResult("inspection", existing, code, existing.title);
+  const payload = {
+    title: required(row, "title"),
+    area: row.area || "General",
+    inspector: row.inspector || "Bulk Upload",
+    risk: risk(row.risk),
+    score: integer(row.score, 85),
+    status: workStatus(row.status, "NEW"),
+    dueAt: date(row.dueAt, addDays(new Date(), 7)),
+    findings: row.findings || "No findings recorded.",
+  };
+  const inspection = await prisma.inspection.upsert({
+    where: { code },
+    update: payload,
+    create: { code, ...payload },
   });
-  return importResult("inspection", "CREATE", inspection, inspection.code, inspection.title);
+  return importResult("inspection", existing ? "UPDATE" : "CREATE", inspection, inspection.code, inspection.title);
 }
 
 async function importLocation(row: Row, context: ImportContext = {}) {
