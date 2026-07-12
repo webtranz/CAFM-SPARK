@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
+import { ACTION_PERMISSION_SEED, DEFAULT_ROLE_NAMES, defaultPermissionCodesForRole } from "../src/lib/default-role-permissions";
 
 const prisma = new PrismaClient();
 
@@ -65,6 +66,30 @@ async function clearSeedData() {
   await prisma.team.deleteMany({});
 }
 
+async function seedRolesAndPermissions() {
+  for (const permission of ACTION_PERMISSION_SEED) {
+    await prisma.permission.upsert({
+      where: { code: permission.code },
+      update: { name: permission.name, module: permission.module, description: permission.description },
+      create: { code: permission.code, name: permission.name, module: permission.module, description: permission.description },
+    });
+  }
+
+  for (const roleName of DEFAULT_ROLE_NAMES) {
+    await prisma.role.upsert({
+      where: { name: roleName },
+      update: { standard: true },
+      create: { name: roleName, description: `${roleName} standard CAFM role`, standard: true },
+    });
+
+    const defaultCodes = defaultPermissionCodesForRole(roleName).filter((code) => roleName === "Admin" || code !== "documents.upload");
+    const permissions = await prisma.permission.findMany({ where: { code: { in: defaultCodes } } });
+    await prisma.rolePermission.createMany({
+      data: permissions.map((permission) => ({ role: roleName, permissionId: permission.id })),
+      skipDuplicates: true,
+    });
+  }
+}
 async function main() {
   await clearSeedData();
 
@@ -90,6 +115,8 @@ async function main() {
       },
     });
   }
+
+  await seedRolesAndPermissions();
 
   console.log(`Database seed complete. Admin logins: ${defaultAdmins.map((admin) => admin.email).join(", ")}`);
 }

@@ -46,6 +46,7 @@ import {
   YAxis,
 } from "recharts";
 import { moduleStats } from "@/lib/demo-data";
+import { DEFAULT_ROLE_NAMES, defaultPermissionCodesForRole } from "@/lib/default-role-permissions";
 
 type ConsoleData = {
   live: boolean;
@@ -8291,16 +8292,20 @@ function UsersRoles({
   const selectedRoleRecord = roles.find((item) => item.name === role);
   const roleAssignedUsers = users.filter((user) => user.role === role).length;
   const canDeleteRole = !defaultRoleNames.includes(role) && !selectedRoleRecord?.standard && roleAssignedUsers === 0;
-  const [selectedPermissions, setSelectedPermissions] = useState<string[]>(
-    rolePermissions.filter((item) => item.role === "Admin").map((item) => item.permission.code),
-  );
+  const assignedPermissionCodesForRole = (nextRole: string) => {
+    const assignedCodes = rolePermissions.filter((item) => item.role === nextRole).map((item) => item.permission.code);
+    if (assignedCodes.length) return nextRole === "Admin" ? assignedCodes : assignedCodes.filter((code) => code !== "documents.upload");
+    const defaultCodes = defaultPermissionCodesForRole(nextRole);
+    return nextRole === "Admin" ? defaultCodes : defaultCodes.filter((code) => code !== "documents.upload");
+  };
+  const defaultCodesForSelectedRole = role === "Admin" ? defaultPermissionCodesForRole(role) : defaultPermissionCodesForRole(role).filter((code) => code !== "documents.upload");
+  const usingDefaultBaseline = rolePermissions.filter((item) => item.role === role).length === 0;
+  const [selectedPermissions, setSelectedPermissions] = useState<string[]>(() => assignedPermissionCodesForRole("Admin"));
 
   function changeRole(nextRole: string) {
     setRole(nextRole);
-    const nextPermissions = rolePermissions.filter((item) => item.role === nextRole).map((item) => item.permission.code);
-    setSelectedPermissions(nextRole === "Admin" ? nextPermissions : nextPermissions.filter((code) => code !== "documents.upload"));
+    setSelectedPermissions(assignedPermissionCodesForRole(nextRole));
   }
-
   useEffect(() => {
     setUserRows(users);
     setUserTotal((current) => Math.max(current, users.length));
@@ -8382,6 +8387,10 @@ function UsersRoles({
     await refreshUserRows();
   }
 
+  function applyDefaultPermissions() {
+    setSelectedPermissions(defaultCodesForSelectedRole);
+    setToast(`Default permissions applied for ${role}. Save to keep them.`);
+  }
   function togglePermission(code: string) {
     setSelectedPermissions((current) => current.includes(code) ? current.filter((item) => item !== code) : [...current, code]);
   }
@@ -8464,6 +8473,8 @@ function UsersRoles({
               {roleOptions(roles).map((item) => <option key={item}>{item}</option>)}
             </select>
             <button onClick={saveVisiblePermissions} className="rounded-lg bg-ink px-4 py-2 text-sm font-black text-white">Save Permissions</button>
+            <button type="button" onClick={applyDefaultPermissions} className="rounded-lg border border-lagoon px-4 py-2 text-sm font-black text-lagoon">Apply Standard Default</button>
+            <span className="rounded-lg bg-slate-50 px-3 py-2 text-xs font-black text-slate-600">{usingDefaultBaseline ? "Using default baseline" : "Custom permissions enabled"} / Default: {defaultCodesForSelectedRole.length}</span>
             {isAdmin && (
               <button
                 type="button"
@@ -8543,7 +8554,7 @@ function RoleForm({ onSubmit, saving }: { onSubmit: (formData: FormData) => void
   );
 }
 
-const defaultRoleNames = ["Admin", "Department Supervisor", "Supervisor", "Service Team", "Technician", "Helpdesk", "Reception", "Resident", "Requester", "Read-only"];
+const defaultRoleNames: string[] = [...DEFAULT_ROLE_NAMES];
 
 function roleOptions(roles: any[]) {
   return Array.from(new Set([...defaultRoleNames, ...roles.map((role) => role.name)]));

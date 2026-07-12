@@ -4,6 +4,7 @@ import { apiError } from "@/lib/api-response";
 import { requireAdmin, requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
+import { defaultPermissionCodesForRole } from "@/lib/default-role-permissions";
 
 const schema = z.object({
   name: z.string().min(2),
@@ -26,6 +27,15 @@ export async function POST(request: Request) {
       update: { description: input.description || "" },
       create: { name: input.name, description: input.description || "", standard: false },
     });
+    const existingPermissions = await prisma.rolePermission.count({ where: { role: role.name } });
+    if (existingPermissions === 0) {
+      const defaultCodes = defaultPermissionCodesForRole(role.name).filter((code) => role.name === "Admin" || code !== "documents.upload");
+      const permissions = await prisma.permission.findMany({ where: { code: { in: defaultCodes } } });
+      await prisma.rolePermission.createMany({
+        data: permissions.map((permission) => ({ role: role.name, permissionId: permission.id })),
+        skipDuplicates: true,
+      });
+    }
     await auditAction({ user, action: "ROLE_SAVE", entity: "role", entityId: role.id, details: { input, savedRecord: role } });
     return NextResponse.json(role, { status: 201 });
   } catch (error) {
