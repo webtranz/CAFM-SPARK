@@ -101,6 +101,7 @@ type ConsoleData = {
     inventory: any[];
     approvals: any[];
     notifications: any[];
+    holds: any[];
     notificationSettings: any[];
     history: any[];
   };
@@ -188,6 +189,8 @@ const moduleGroups: ModuleGroup[] = [
     items: [
       { id: "housing", label: "Housing Dashboard", icon: LayoutDashboard, view: "housing-dashboard" },
       { id: "housing", label: "Accommodation & Bookings", icon: CalendarCheck, view: "housing-bookings" },
+      { id: "housing", label: "Check-In / Check-Out", icon: Clock, view: "housing-check-movements" },
+      { id: "housing", label: "Room Hold / Reserve", icon: ShieldCheck, view: "housing-room-holds" },
       { id: "housing", label: "Room Inspections", icon: ClipboardCheck, view: "housing-inspections" },
       { id: "housing", label: "Housing Assets", icon: Building2, view: "housing-assets" },
       { id: "housing", label: "Housing Inventory", icon: Boxes, view: "housing-inventory" },
@@ -9291,9 +9294,12 @@ function HousingOperations({
   const inventory = housing?.inventory ?? [];
   const approvals = housing?.approvals ?? [];
   const notifications = housing?.notifications ?? [];
+  const holds = housing?.holds ?? [];
   const notificationSettings = housing?.notificationSettings ?? [];
   const history = housing?.history ?? [];
   const todayKey = new Date().toISOString().slice(0, 10);
+  const [movementDate, setMovementDate] = useState(todayKey);
+  const [movementTab, setMovementTab] = useState<"checkins" | "checkouts" | "combined">("combined");
   const roomBuilding = (room: any) => room?.block?.name || room?.property?.name || "Unassigned";
   const roomMatchesLocationFilters = (room: any) => {
     if (buildingFilter !== "All" && roomBuilding(room) !== buildingFilter) return false;
@@ -9327,7 +9333,9 @@ function HousingOperations({
   const dashboardApprovals = approvals.filter((approval) => inDashboardDateRange(approval.createdAt || approval.updatedAt));
   const occupancy = dashboardRooms.reduce((sum, room) => sum + Number(room.occupancy || 0), 0);
   const capacity = dashboardRooms.reduce((sum, room) => sum + Number(room.capacity || 0), 0);
-  const availableRooms = dashboardRooms.filter((room) => room.status === "AVAILABLE").length;
+  const activeHoldForDate = (hold: any, dateKey = todayKey) => hold.status === "ACTIVE" && String(hold.startDate || "").slice(0, 10) <= dateKey && String(hold.endDate || "").slice(0, 10) >= dateKey;
+  const activeHeldRoomIds = new Set(holds.filter((hold) => activeHoldForDate(hold)).map((hold) => hold.roomId));
+  const availableRooms = dashboardRooms.filter((room) => room.status === "AVAILABLE" && !activeHeldRoomIds.has(room.id)).length;
   const occupiedRooms = dashboardRooms.filter((room) => room.status === "OCCUPIED" || Number(room.occupancy || 0) >= Number(room.capacity || 0)).length;
   const vacantRooms = dashboardRooms.filter((room) => room.status === "AVAILABLE" && Number(room.occupancy || 0) === 0).length;
   const blockedRooms = dashboardRooms.filter((room) => room.status === "BLOCKED").length;
@@ -9405,12 +9413,30 @@ function HousingOperations({
     const haystack = `${approval.entity} ${approval.level} ${approval.approver} ${approval.status} ${approval.remarks}`.toLowerCase();
     return (!search || haystack.includes(filterText)) && (status === "All" || approval.status === status);
   });
+  const visibleHolds = holds.map((hold) => ({ ...hold, roomNumber: hold.room?.roomNumber || hold.roomNumber, roomType: hold.room?.roomType || hold.roomType })).filter((hold) => {
+    const haystack = `${hold.room?.roomNumber} ${hold.reason} ${hold.remarks} ${hold.createdBy} ${hold.status}`.toLowerCase();
+    return (!search || haystack.includes(filterText)) && (status === "All" || hold.status === status);
+  });
+  const movementRows = bookings
+    .flatMap((booking) => [
+      { ...booking, movement: "Check-In", movementDate: booking.checkIn, roomNumber: booking.roomNumber || booking.room?.roomNumber, roomType: booking.room?.roomType || booking.roomType },
+      booking.checkOut ? { ...booking, movement: "Check-Out", movementDate: booking.checkOut, roomNumber: booking.roomNumber || booking.room?.roomNumber, roomType: booking.room?.roomType || booking.roomType } : null,
+    ].filter(Boolean) as any[])
+    .filter((booking) => String(booking.movementDate || "").slice(0, 10) === movementDate)
+    .filter((booking) => movementTab === "combined" || (movementTab === "checkins" ? booking.movement === "Check-In" : booking.movement === "Check-Out"))
+    .filter((booking) => {
+      const haystack = `${booking.bookingNo} ${booking.residentName} ${booking.roomNumber} ${booking.room?.roomNumber} ${booking.room?.roomType} ${booking.status}`.toLowerCase();
+      return !search || haystack.includes(filterText);
+    })
+    .sort((left, right) => String(left.movementDate || "").localeCompare(String(right.movementDate || "")));
   const visibleHistory = history.filter((item) => {
     const haystack = `${item.entity} ${item.action} ${item.actor} ${item.details}`.toLowerCase();
     return !search || haystack.includes(filterText);
   });
   const activePanel =
     view === "housing-bookings" ? "bookings" :
+    view === "housing-check-movements" ? "check-movements" :
+    view === "housing-room-holds" ? "holds" :
     view === "housing-inspections" ? "inspections" :
     view === "housing-assets" ? "assets" :
     view === "housing-inventory" ? "inventory" :
@@ -9566,10 +9592,53 @@ function HousingOperations({
               )}
             />
           </div>
-          {canManage && <HousingBookingForm rooms={rooms} beds={housing.beds ?? []} residents={housing.residents ?? []} saving={saving} onSubmit={submitHousing} />}
+          {canManage && <HousingBookingForm rooms={rooms} beds={housing.beds ?? []} residents={housing.residents ?? []} holds={holds} saving={saving} onSubmit={submitHousing} />}
         </section>
       )}
 
+      {activePanel === "check-movements" && (
+        <section className="grid gap-5">
+          <Panel title="Check-In / Check-Out Filter" icon={Clock}>
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <input value={movementDate} onChange={(event) => setMovementDate(event.target.value)} type="date" className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold" />
+              <div className="flex flex-wrap gap-2 rounded-lg bg-slate-50 p-1">
+                <button type="button" onClick={() => setMovementTab("checkins")} className={`rounded-lg px-3 py-2 text-xs font-black ${movementTab === "checkins" ? "bg-lagoon text-white" : "text-slate-600"}`}>Check-Ins</button>
+                <button type="button" onClick={() => setMovementTab("checkouts")} className={`rounded-lg px-3 py-2 text-xs font-black ${movementTab === "checkouts" ? "bg-lagoon text-white" : "text-slate-600"}`}>Check-Outs</button>
+                <button type="button" onClick={() => setMovementTab("combined")} className={`rounded-lg px-3 py-2 text-xs font-black ${movementTab === "combined" ? "bg-lagoon text-white" : "text-slate-600"}`}>Combined</button>
+              </div>
+              <span className="rounded-lg bg-slate-50 px-3 py-2 text-xs font-black text-slate-600">{movementRows.length.toLocaleString()} records</span>
+            </div>
+            <HousingTable
+              title="Scheduled Guest Movements"
+              rows={movementRows}
+              columns={[["movement", "Type"], ["residentName", "Guest Name"], ["bookingNo", "Booking / Reservation"], ["roomNumber", "Room Number"], ["roomType", "Room Type"], ["checkIn", "Check-In Date"], ["checkOut", "Check-Out Date"], ["status", "Booking Status"]]}
+              onSelect={(record) => setSelected({ type: "booking", record })}
+              reportType="housing-bookings"
+            />
+          </Panel>
+        </section>
+      )}
+
+      {activePanel === "holds" && (
+        <section className="grid gap-5 xl:grid-cols-[1fr_380px]">
+          <HousingTable
+            title="Room Hold / Reservation Management"
+            rows={visibleHolds}
+            columns={[["roomNumber", "Room Number"], ["startDate", "Hold Start Date"], ["endDate", "Hold End Date"], ["reason", "Reason"], ["remarks", "Remarks / Notes"], ["createdBy", "Created By"], ["createdAt", "Created Date"], ["status", "Hold Status"]]}
+            onSelect={(record) => setSelected({ type: "hold", record })}
+            reportType="housing-room-holds"
+            bulkSelectable={isAdmin}
+            onBulkDelete={async (rows) => { await Promise.all(rows.map((row) => deleteHousing("hold", row.id))); }}
+            actions={(record) => canManage && (
+              <div className="flex flex-wrap gap-2">
+                {record.status === "ACTIVE" && <button type="button" onClick={(event) => { event.stopPropagation(); updateHousing("hold", record.id, { status: "RELEASED", remarks: "Released manually" }); }} className="rounded-lg bg-leaf px-3 py-2 text-xs font-black text-white">Release</button>}
+                <button type="button" onClick={(event) => { event.stopPropagation(); const reason = window.prompt("Update hold reason", record.reason || ""); if (reason !== null) updateHousing("hold", record.id, { reason }); }} className="rounded-lg bg-lagoon px-3 py-2 text-xs font-black text-white">Edit</button>
+              </div>
+            )}
+          />
+          {canManage && <HousingHoldForm rooms={rooms} saving={saving} onSubmit={submitHousing} />}
+        </section>
+      )}
       {activePanel === "inspections" && (
         <section className="grid gap-5 xl:grid-cols-[1fr_380px]">
           <HousingTable
@@ -10168,8 +10237,10 @@ function HousingSetupForms({ properties, blocks, rooms, saving, onSubmit }: { pr
   );
 }
 
-function HousingBookingForm({ rooms, beds, residents, saving, onSubmit }: { rooms: any[]; beds: any[]; residents: any[]; saving: boolean; onSubmit: (formData: FormData) => void }) {
-  const allocatableRooms = rooms.filter((room) => !["BLOCKED", "MAINTENANCE"].includes(room.status));
+function HousingBookingForm({ rooms, beds, residents, holds, saving, onSubmit }: { rooms: any[]; beds: any[]; residents: any[]; holds: any[]; saving: boolean; onSubmit: (formData: FormData) => void }) {
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const activeHeldRoomIds = new Set(holds.filter((hold) => hold.status === "ACTIVE" && String(hold.startDate || "").slice(0, 10) <= todayKey && String(hold.endDate || "").slice(0, 10) >= todayKey).map((hold) => hold.roomId));
+  const allocatableRooms = rooms.filter((room) => !["BLOCKED", "MAINTENANCE"].includes(room.status) && !activeHeldRoomIds.has(room.id));
   const allocatableBeds = beds.filter((bed) => bed.status === "AVAILABLE");
   return (
     <HousingForm title="Accommodation & Booking Management" type="booking" saving={saving} onSubmit={onSubmit}>
@@ -10236,6 +10307,26 @@ function HousingBookingForm({ rooms, beds, residents, saving, onSubmit }: { room
   );
 }
 
+function HousingHoldForm({ rooms, saving, onSubmit }: { rooms: any[]; saving: boolean; onSubmit: (formData: FormData) => void }) {
+  return (
+    <HousingForm title="Room Hold / Reserve" type="hold" saving={saving} onSubmit={onSubmit}>
+      <select name="roomId" className={HOUSING_FIELD_CLASS}>
+        <option value="">Select room to hold</option>
+        {rooms.map((room) => <option key={room.id} value={room.id}>{room.property?.name} / {room.block?.name} / Floor {room.floor} / Room {room.roomNumber} / {room.roomType} / {room.status}</option>)}
+      </select>
+      <div className="grid gap-3 md:grid-cols-2">
+        <input name="holdStartDate" type="datetime-local" className={HOUSING_FIELD_CLASS} />
+        <input name="holdEndDate" type="datetime-local" className={HOUSING_FIELD_CLASS} />
+      </div>
+      <input name="reason" placeholder="Reason for hold" className={HOUSING_FIELD_CLASS} />
+      <select name="holdStatus" className={HOUSING_FIELD_CLASS}>
+        <option value="ACTIVE">Active</option>
+        <option value="RELEASED">Released</option>
+      </select>
+      <textarea name="remarks" placeholder="Remarks / notes" className="min-h-24 rounded-lg border border-slate-200 p-3 outline-none focus:border-lagoon" />
+    </HousingForm>
+  );
+}
 function HousingInspectionForm({ rooms, beds, bookings, assets, saving, onSubmit }: { rooms: any[]; beds: any[]; bookings: any[]; assets: any[]; saving: boolean; onSubmit: (formData: FormData) => void }) {
   const conditionOptions = ["Good", "Fair", "Damaged", "Missing", "Needs Repair", "Not Applicable"];
   const checklistFields = [

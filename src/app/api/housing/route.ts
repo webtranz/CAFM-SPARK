@@ -168,9 +168,14 @@ const housingSchema = z.object({
   leadDays: z.coerce.number().int().min(0).optional(),
   thresholdDays: z.coerce.number().int().min(0).optional(),
   label: z.string().optional(),
+  holdStartDate: z.string().optional(),
+  holdEndDate: z.string().optional(),
+  reason: z.string().optional(),
+  holdStatus: z.string().optional(),
 });
 
 export async function GET() {
+  await expireRoomHolds();
   const [
     properties,
     blocks,
@@ -185,6 +190,7 @@ export async function GET() {
     notifications,
     notificationSettings,
     history,
+    holds,
   ] = await Promise.all([
     prisma.housingProperty.findMany({ orderBy: { name: "asc" } }),
     prisma.housingBlock.findMany({ include: { property: true }, orderBy: { code: "asc" } }),
@@ -199,9 +205,10 @@ export async function GET() {
     prisma.housingNotification.findMany({ orderBy: { createdAt: "desc" }, take: 100 }),
     ensureHousingNotificationSettings(),
     prisma.housingHistory.findMany({ orderBy: { createdAt: "desc" }, take: 300 }),
+    prisma.housingRoomHold.findMany({ include: { room: { include: { property: true, block: true } } }, orderBy: [{ status: "asc" }, { startDate: "desc" }] }),
   ]);
 
-  return NextResponse.json({ properties, blocks, rooms, beds, residents, bookings, inspections, assets, inventory, approvals, notifications, notificationSettings, history });
+  return NextResponse.json({ properties, blocks, rooms, beds, residents, bookings, inspections, assets, inventory, approvals, notifications, notificationSettings, history, holds });
 }
 
 export async function POST(request: Request) {
@@ -327,6 +334,10 @@ async function createHousingRecord(input: z.infer<typeof housingSchema>, actor: 
 
   if (input.type === "booking") {
     return createBooking(input, actor);
+  }
+
+  if (input.type === "hold") {
+    return createRoomHold(input, actor);
   }
 
   if (input.type === "inspection") {
@@ -522,6 +533,33 @@ async function handleInspectionOutputs(inspection: any, input: z.infer<typeof ho
   }
 }
 
+async function createRoomHold(input: z.infer<typeof housingSchema>, actor: string) {
+  const room = await firstRoom(input.roomId);
+  const startDate = input.holdStartDate || input.checkIn;
+  const endDate = input.holdEndDate || input.checkOut;
+  if (!startDate || !endDate) throw new Error("Hold start date and hold end date are required.");
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) throw new Error("Valid hold dates are required.");
+  if (end < start) throw new Error("Hold end date cannot be before hold start date.");
+  await expireRoomHolds();
+  await assertNoOverlappingHold(room.id, start, end);
+  await assertNoOverlappingBooking(room.id, start, end);
+  const hold = await prisma.housingRoomHold.create({
+    data: {
+      roomId: room.id,
+      startDate: start,
+      endDate: end,
+      reason: input.reason || input.name || "Room reserved",
+      remarks: input.remarks || input.notes || "",
+      createdBy: actor,
+      status: (input.holdStatus || input.status || "ACTIVE").toUpperCase(),
+    },
+    include: { room: { include: { property: true, block: true } } },
+  });
+  await housingHistory("hold", hold.id, actor, "Room hold created", `${hold.reason} / ${hold.status}`, { roomId: room.id });
+  return hold;
+}
 async function createBooking(input: z.infer<typeof housingSchema>, actor: string) {
   const room = await firstRoom(input.roomId);
   if (["BLOCKED", "MAINTENANCE"].includes(room.status)) {
@@ -535,6 +573,10 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
   if (room.genderRestriction && room.genderRestriction !== "MIXED" && occupantGender && occupantGender !== room.genderRestriction.toUpperCase()) {
     throw new Error("Male and female occupants cannot be assigned to this gender-restricted room.");
   }
+  const bookingStart = input.checkIn ? new Date(input.checkIn) : new Date();
+  const bookingEnd = input.checkOut ? new Date(input.checkOut) : bookingStart;
+  await expireRoomHolds();
+  await assertNoOverlappingHold(room.id, bookingStart, bookingEnd);
   const bed = input.bedId ? await prisma.housingBed.findUnique({ where: { id: input.bedId } }) : await prisma.housingBed.findFirst({ where: { roomId: room.id, status: "AVAILABLE" } });
   if (!bed && room.capacity > 1) throw new Error("No available bed found for this room.");
   if (bed && bed.roomId !== room.id) throw new Error("Selected bed does not belong to the selected room.");
@@ -573,8 +615,8 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
         allocationType: input.allocationType || "STANDARD",
         roomId: room.id,
         bedId: bed?.id,
-        checkIn: input.checkIn ? new Date(input.checkIn) : new Date(),
-        checkOut: input.checkOut ? new Date(input.checkOut) : undefined,
+        checkIn: bookingStart,
+        checkOut: input.checkOut ? bookingEnd : undefined,
         status: requestedStatus,
         priority: (input.priority as any) || "MEDIUM",
         requestedBy: input.requestedBy || actor,
@@ -806,4 +848,36 @@ async function housingHistory(entity: string, entityId: string, actor: string, a
   await prisma.housingHistory.create({
     data: { entity, entityId, actor, action, details: details || "", ...links },
   });
+}
+async function expireRoomHolds() {
+  await prisma.housingRoomHold.updateMany({
+    where: { status: "ACTIVE", endDate: { lt: new Date() } },
+    data: { status: "EXPIRED" },
+  });
+}
+
+async function assertNoOverlappingHold(roomId: string, start: Date, end: Date, excludeId?: string) {
+  const overlap = await prisma.housingRoomHold.findFirst({
+    where: {
+      roomId,
+      status: "ACTIVE",
+      id: excludeId ? { not: excludeId } : undefined,
+      startDate: { lte: end },
+      endDate: { gte: start },
+    },
+    include: { room: true },
+  });
+  if (overlap) throw new Error(`Room ${overlap.room.roomNumber} is already on hold from ${overlap.startDate.toISOString().slice(0, 10)} to ${overlap.endDate.toISOString().slice(0, 10)}.`);
+}
+
+async function assertNoOverlappingBooking(roomId: string, start: Date, end: Date) {
+  const overlap = await prisma.housingBooking.findFirst({
+    where: {
+      roomId,
+      status: { in: activeBookingStatuses as any },
+      checkIn: { lte: end },
+      OR: [{ checkOut: null }, { checkOut: { gte: start } }],
+    },
+  });
+  if (overlap) throw new Error(`Room already has booking ${overlap.bookingNo} overlapping this hold period.`);
 }

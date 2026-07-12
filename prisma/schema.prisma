@@ -735,6 +735,7 @@ model HousingRoom {
   assets            HousingAsset[]
   inventories       HousingInventory[]
   histories         HousingHistory[]
+  holds             HousingRoomHold[]
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
 }
@@ -967,6 +968,24 @@ model HousingInventory {
   @@index([createdAt])
 }
 
+
+model HousingRoomHold {
+  id        String      @id @default(cuid())
+  roomId    String
+  startDate DateTime
+  endDate   DateTime
+  reason    String
+  remarks   String?
+  createdBy String
+  status    String      @default("ACTIVE")
+  room      HousingRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([roomId, status, startDate, endDate])
+  @@index([status, endDate])
+  @@index([createdAt])
+}
 model HousingApproval {
   id           String                @id @default(cuid())
   entity       String

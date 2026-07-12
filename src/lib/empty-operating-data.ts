@@ -44,6 +44,7 @@ export const emptyOperatingData = {
     inventory: [],
     approvals: [],
     notifications: [],
+    holds: [],
     notificationSettings: [],
     history: [],
   },

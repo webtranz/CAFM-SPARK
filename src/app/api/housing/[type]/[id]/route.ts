@@ -55,12 +55,14 @@ async function findHousingRecord(type: string, id: string) {
   if (type === "inventory") return prisma.housingInventory.findUnique({ where: { id } });
   if (type === "notification-setting") return prisma.housingNotificationSetting.findUnique({ where: { id } });
   if (type === "notification") return prisma.housingNotification.findUnique({ where: { id } });
+  if (type === "hold") return prisma.housingRoomHold.findUnique({ where: { id } });
   throw new Error("Unsupported housing type.");
 }
 
 async function updateHousingRecord(type: string, id: string, input: Record<string, unknown>, user: Awaited<ReturnType<typeof getCurrentUser>>) {
   const actor = user?.name || user?.email || "System";
   if (type === "booking") {
+    await expireRoomHolds();
     const status = text(input.status);
     const current = await prisma.housingBooking.findUnique({ where: { id }, include: { bed: true, room: true } });
     if (!current) throw new Error("Booking not found.");
@@ -72,8 +74,13 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     const nextRoomId = text(input.roomId) || current.roomId;
     const nextRoom = nextRoomId !== current.roomId ? await prisma.housingRoom.findUnique({ where: { id: nextRoomId } }) : current.room;
     if (!nextRoom) throw new Error("Selected room does not exist.");
+    const nextCheckIn = input.checkIn ? new Date(String(input.checkIn)) : current.checkIn;
+    const nextCheckOut = input.checkOut ? new Date(String(input.checkOut)) : current.checkOut || nextCheckIn;
     if (["CHECKED_IN", "APPROVED", "PENDING_APPROVAL"].includes(status || current.status) && ["BLOCKED", "MAINTENANCE"].includes(nextRoom.status)) {
       throw new Error("Blocked or under-maintenance rooms cannot be allocated.");
+    }
+    if (["CHECKED_IN", "APPROVED", "PENDING_APPROVAL", "REQUESTED"].includes(status || current.status)) {
+      await assertNoOverlappingHold(nextRoom.id, nextCheckIn, nextCheckOut);
     }
     const nextBedId = text(input.bedId) || current.bedId || undefined;
     const nextBed = nextBedId ? await prisma.housingBed.findUnique({ where: { id: nextBedId } }) : null;
@@ -88,7 +95,8 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
         approvedBy: text(input.approvedBy) || undefined,
         notes: text(input.notes) || undefined,
         attachmentUrls: text(input.attachmentUrls) || undefined,
-        checkOut: input.checkOut ? new Date(String(input.checkOut)) : undefined,
+        checkIn: input.checkIn ? nextCheckIn : undefined,
+        checkOut: input.checkOut ? nextCheckOut : undefined,
         employeeId: text(input.employeeId) || undefined,
         companyName: text(input.companyName) || undefined,
         nationality: text(input.nationality) || undefined,
@@ -130,6 +138,36 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     return booking;
   }
 
+
+  if (type === "hold") {
+    const current = await prisma.housingRoomHold.findUnique({ where: { id }, include: { room: true } });
+    if (!current) throw new Error("Room hold not found.");
+    await expireRoomHolds();
+    const roomId = text(input.roomId) || current.roomId;
+    const start = input.holdStartDate || input.startDate ? new Date(String(input.holdStartDate || input.startDate)) : current.startDate;
+    const end = input.holdEndDate || input.endDate ? new Date(String(input.holdEndDate || input.endDate)) : current.endDate;
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) throw new Error("Valid hold dates are required.");
+    if (end < start) throw new Error("Hold end date cannot be before hold start date.");
+    const nextStatus = (text(input.holdStatus) || text(input.status) || current.status).toUpperCase();
+    if (nextStatus === "ACTIVE") {
+      await assertNoOverlappingHold(roomId, start, end, id);
+      await assertNoOverlappingBooking(roomId, start, end);
+    }
+    const hold = await prisma.housingRoomHold.update({
+      where: { id },
+      data: {
+        roomId,
+        startDate: start,
+        endDate: end,
+        reason: text(input.reason) || undefined,
+        remarks: text(input.remarks) || text(input.notes) || undefined,
+        status: nextStatus,
+      },
+      include: { room: { include: { property: true, block: true } } },
+    });
+    await prisma.housingHistory.create({ data: { entity: "hold", entityId: id, roomId: hold.roomId, actor, action: nextStatus === "RELEASED" ? "Room hold released" : "Room hold updated", details: `${hold.reason} / ${hold.status}` } });
+    return hold;
+  }
   if (type === "room") {
     const room = await prisma.housingRoom.update({
       where: { id },
@@ -355,6 +393,7 @@ function canActApproval(role: string, level: string) {
 
 async function deleteHousingRecord(type: string, id: string) {
   if (type === "booking") {
+    await expireRoomHolds();
     const booking = await prisma.housingBooking.delete({ where: { id } });
     if (booking.bedId) await prisma.housingBed.update({ where: { id: booking.bedId }, data: { status: "AVAILABLE", occupant: "", occupantId: "" } });
     await refreshRoomOccupancy(booking.roomId);
@@ -367,6 +406,7 @@ async function deleteHousingRecord(type: string, id: string) {
   if (type === "approval") return void await prisma.housingApproval.delete({ where: { id } });
   if (type === "notification") return void await prisma.housingNotification.delete({ where: { id } });
   if (type === "notification-setting") return void await prisma.housingNotificationSetting.delete({ where: { id } });
+  if (type === "hold") return void await prisma.housingRoomHold.delete({ where: { id } });
   if (type === "property") return void await prisma.housingProperty.delete({ where: { id } });
   if (type === "block") return void await prisma.housingBlock.delete({ where: { id } });
   throw new Error(`Unsupported housing record type: ${type}`);
@@ -504,4 +544,33 @@ async function handleInspectionOutputs(inspection: any, input: Record<string, un
     await prisma.housingInspection.update({ where: { id: inspection.id }, data: { maintenanceTicketNo: request.ticketNo } });
     await prisma.housingHistory.create({ data: { entity: "inspection", entityId: inspection.id, inspectionId: inspection.id, roomId: inspection.roomId, actor, action: "Converted to maintenance ticket", details: request.ticketNo } });
   }
+}
+async function expireRoomHolds() {
+  await prisma.housingRoomHold.updateMany({ where: { status: "ACTIVE", endDate: { lt: new Date() } }, data: { status: "EXPIRED" } });
+}
+
+async function assertNoOverlappingHold(roomId: string, start: Date, end: Date, excludeId?: string) {
+  const overlap = await prisma.housingRoomHold.findFirst({
+    where: {
+      roomId,
+      status: "ACTIVE",
+      id: excludeId ? { not: excludeId } : undefined,
+      startDate: { lte: end },
+      endDate: { gte: start },
+    },
+    include: { room: true },
+  });
+  if (overlap) throw new Error(`Room ${overlap.room.roomNumber} is already on hold from ${overlap.startDate.toISOString().slice(0, 10)} to ${overlap.endDate.toISOString().slice(0, 10)}.`);
+}
+
+async function assertNoOverlappingBooking(roomId: string, start: Date, end: Date) {
+  const overlap = await prisma.housingBooking.findFirst({
+    where: {
+      roomId,
+      status: { in: ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHECKED_IN"] as any },
+      checkIn: { lte: end },
+      OR: [{ checkOut: null }, { checkOut: { gte: start } }],
+    },
+  });
+  if (overlap) throw new Error(`Room already has booking ${overlap.bookingNo} overlapping this hold period.`);
 }

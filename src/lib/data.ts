@@ -62,7 +62,7 @@ export async function getOperatingData(user: OperatingUser = null) {
     const visibleJobPlanWhere = kind === "admin" || kind === "readonly" ? {} : kind === "supervisor" || kind === "technician" ? { departmentCode: { in: departmentsForUser } } : {};
     const visibleUsersWhere = kind === "admin" ? {} : { OR: [{ department: { in: departmentsForUser } }, { id: user?.id || "" }] };
 
-    const [sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, shifts, rotations, roster, housingProperties, housingBlocks, housingRooms, housingBeds, housingResidents, housingBookings, housingInspections, housingAssets, housingInventory, housingApprovals, housingNotifications, housingNotificationSettings, housingHistory] = await Promise.all([
+    const [sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, shifts, rotations, roster, housingProperties, housingBlocks, housingRooms, housingBeds, housingResidents, housingBookings, housingInspections, housingAssets, housingInventory, housingApprovals, housingNotifications, housingNotificationSettings, housingHistory, housingRoomHolds] = await Promise.all([
       prisma.site.findMany({ include: { buildings: { take: 10, orderBy: { code: "asc" } } }, orderBy: { name: "asc" }, take: INITIAL_REFERENCE_LIMIT }),
       prisma.building.findMany({ include: { site: true }, orderBy: { code: "asc" }, take: INITIAL_REFERENCE_LIMIT }),
       prisma.space.findMany({ include: { building: { include: { site: true } } }, orderBy: [{ building: { code: "asc" } }, { floor: "asc" }, { name: "asc" }], take: INITIAL_REFERENCE_LIMIT }),
@@ -135,6 +135,7 @@ export async function getOperatingData(user: OperatingUser = null) {
       prisma.housingNotification.findMany({ orderBy: { createdAt: "desc" }, take: INITIAL_LOAD_LIMIT }),
       prisma.housingNotificationSetting.findMany({ orderBy: { label: "asc" } }),
       prisma.housingHistory.findMany({ orderBy: { createdAt: "desc" }, take: INITIAL_LOAD_LIMIT }),
+      prisma.housingRoomHold.findMany({ include: { room: { include: { property: true, block: true } } }, orderBy: [{ status: "asc" }, { startDate: "desc" }], take: INITIAL_LOAD_LIMIT }),
     ]);
 
     const visibleAssetTags = new Set(assets.map((asset) => asset.tag));
@@ -143,7 +144,7 @@ export async function getOperatingData(user: OperatingUser = null) {
 
     const housing =
       kind === "admin" || kind === "readonly"
-        ? { properties: housingProperties, blocks: housingBlocks, rooms: housingRooms, beds: housingBeds, residents: housingResidents, bookings: housingBookings, inspections: housingInspections, assets: housingAssets, inventory: housingInventory, approvals: housingApprovals, notifications: housingNotifications, notificationSettings: housingNotificationSettings, history: housingHistory }
+        ? { properties: housingProperties, blocks: housingBlocks, rooms: housingRooms, beds: housingBeds, residents: housingResidents, bookings: housingBookings, inspections: housingInspections, assets: housingAssets, inventory: housingInventory, approvals: housingApprovals, notifications: housingNotifications, notificationSettings: housingNotificationSettings, history: housingHistory, holds: housingRoomHolds }
         : {
             properties: housingProperties,
             blocks: housingBlocks,
@@ -158,6 +159,7 @@ export async function getOperatingData(user: OperatingUser = null) {
             notifications: housingNotifications.filter((notification) => notification.recipient === user?.name || notification.recipient === user?.email || notification.recipient.includes("Supervisor")),
             notificationSettings: housingNotificationSettings,
             history: housingHistory,
+            holds: housingRoomHolds,
           };
 
     return { sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms: scopedPpms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, shiftRotation: { shifts, rotations, roster }, housing, live: true };

@@ -116,6 +116,7 @@ export const fallbackData = {
     approvals: [],
     notifications: [{ id: "hn1", alertType: "MAINTENANCE_DUE", channel: "SYSTEM", role: "Housing Supervisor", title: "Inspection due", message: "Room A102 inspection is due.", severity: "MEDIUM", recipient: "Housing Supervisor", status: "SENT", read: false, sentAt: new Date(), createdAt: new Date() }],
     notificationSettings: [{ id: "hns1", alertType: "UPCOMING_CHECKOUT", label: "Upcoming check-out", enabled: true, roles: "Housing Supervisor,Reception Team", channels: "SYSTEM,EMAIL", leadDays: 3, thresholdDays: 0, severity: "MEDIUM", description: "Residents scheduled to check out soon." }],
+    holds: [],
     history: [],
   },
   auditLogs: [],

@@ -283,6 +283,30 @@ async function housingReportRows(type: string, filters: ReturnType<typeof report
     const mapped = rows.map((row) => ({ code: row.code, property: row.property.name, building: row.block?.name ?? row.property.name, block: row.block?.name ?? "", floor: row.floor, room: row.roomNumber, roomNumber: row.roomNumber, roomType: row.roomType, genderRestriction: row.genderRestriction, capacity: row.capacity, occupancy: row.occupancy, utilizationPercent: row.capacity ? Math.round((row.occupancy / row.capacity) * 100) : 0, vacantBeds: Math.max(0, row.capacity - row.occupancy), status: row.status, readiness: row.status === "AVAILABLE" && row.occupancy === 0 ? "READY" : row.status, qrCode: row.qrCode, remarks: row.remarks, createdAt: dateValue(row.createdAt) }));
     return applyHousingFilters(type === "housing-room-readiness" ? mapped.filter((row) => ["READY", "AVAILABLE", "MAINTENANCE", "BLOCKED"].includes(String(row.readiness))) : mapped, filters);
   }
+  if (type === "housing-room-holds") {
+    const rows = await prisma.housingRoomHold.findMany({ include: { room: { include: { property: true, block: true } } }, orderBy: [{ status: "asc" }, { startDate: "desc" }] });
+    return applyHousingFilters(rows.map((row) => ({
+      roomNumber: row.room.roomNumber,
+      roomType: row.room.roomType,
+      property: row.room.property.name,
+      building: row.room.block?.name ?? "",
+      floor: row.room.floor,
+      holdStartDate: dateValue(row.startDate),
+      holdEndDate: dateValue(row.endDate),
+      reason: row.reason,
+      remarks: row.remarks ?? "",
+      createdBy: row.createdBy,
+      createdDate: dateValue(row.createdAt),
+      status: row.status,
+    })), filters);
+  }
+  if (type === "housing-check-movements") {
+    const rows = await prisma.housingBooking.findMany({ include: { room: { include: { property: true, block: true } }, bed: true, resident: true }, orderBy: [{ checkIn: "asc" }, { checkOut: "asc" }] });
+    return applyHousingFilters(rows.flatMap((row) => [
+      { movement: "Check-In", guestName: row.residentName, bookingNo: row.bookingNo, roomNumber: row.roomNumber ?? row.room.roomNumber, roomType: row.room.roomType, checkInDate: dateValue(row.checkIn), checkOutDate: dateValue(row.checkOut), status: row.status },
+      row.checkOut ? { movement: "Check-Out", guestName: row.residentName, bookingNo: row.bookingNo, roomNumber: row.roomNumber ?? row.room.roomNumber, roomType: row.room.roomType, checkInDate: dateValue(row.checkIn), checkOutDate: dateValue(row.checkOut), status: row.status } : null,
+    ].filter(Boolean) as ReportRow[]), filters);
+  }
   if (["housing-bookings", "housing-occupancy-daily", "housing-occupancy-weekly", "housing-occupancy-monthly", "housing-company-occupancy", "housing-building-occupancy", "housing-bed-occupancy"].includes(type)) {
     const rows = await prisma.housingBooking.findMany({ include: { room: { include: { property: true, block: true } }, bed: true, resident: true }, orderBy: { createdAt: "desc" } });
     const mapped = rows.map((row) => ({ reportPeriod: periodLabel(type, row.checkIn), bookingNo: row.bookingNo, employeeId: row.employeeId ?? row.resident?.residentNo ?? "", employeeName: row.residentName, companyName: row.companyName ?? row.resident?.companyName ?? "", company: row.companyName ?? row.resident?.companyName ?? "", department: row.departmentCode, nationality: row.nationality ?? row.resident?.nationality ?? "", contactNumber: row.contactNumber ?? row.resident?.phone ?? "", gender: row.gender ?? row.resident?.gender ?? "", building: row.buildingNumber ?? row.room.block?.name ?? "", buildingNumber: row.buildingNumber ?? row.room.block?.name ?? "", floor: row.floorNumber ?? row.room.floor, floorNumber: row.floorNumber ?? row.room.floor, room: row.roomNumber ?? row.room.roomNumber, roomNumber: row.roomNumber ?? row.room.roomNumber, bedNumber: row.bedNumber ?? row.bed?.label ?? "", bookingType: row.bookingType, allocationType: row.allocationType, property: row.room.property.name, block: row.room.block?.name ?? "", checkIn: dateValue(row.checkIn), checkOut: dateValue(row.checkOut), status: row.status, priority: row.priority, requestedBy: row.requestedBy, approvedBy: row.approvedBy, approvalLevel: row.approvalLevel, keyHandoverBy: row.keyHandoverBy, keyHandoverAt: dateValue(row.keyHandoverAt), campIdNumber: row.campIdNumber, campIdIssuedAt: dateValue(row.campIdIssuedAt), cancellationReason: row.cancellationReason, transferReason: row.transferReason, blacklistReason: row.blacklistReason, noShowAt: dateValue(row.noShowAt), notes: row.notes }));
