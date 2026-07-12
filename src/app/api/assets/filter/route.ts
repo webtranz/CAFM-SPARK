@@ -197,12 +197,6 @@ export async function GET(request: Request) {
       skip: (page - 1) * pageSize,
       take: pageSize,
       orderBy: [{ locationCode: "asc" }, { tag: "asc" }],
-      include: {
-        site: { select: { name: true } },
-        building: { select: { name: true, code: true } },
-        workOrders: { take: 8, orderBy: { updatedAt: "desc" }, select: { woNo: true, title: true, status: true, updatedAt: true, inventoryUsed: true, workNotes: true } },
-        history: { take: 8, orderBy: { createdAt: "desc" } },
-      },
     }),
   ]);
   const locationCounts = locationGroups.reduce((counts: Record<string, number>, item) => {

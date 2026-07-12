@@ -621,7 +621,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
       }
       setInitialDataLoading(true);
       try {
-        await loadDashboardData();
+        await Promise.all([loadDashboardData(), checkHealth()]);
       } finally {
         if (!cancelled) setInitialDataLoading(false);
       }
@@ -721,7 +721,6 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
       setRecords(await response.json());
       setFullDataLoaded(true);
     }
-    await checkHealth();
   }
 
   async function loadDashboardData() {
@@ -730,9 +729,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
       setRecords(await response.json());
       setFullDataLoaded(false);
     }
-    await checkHealth();
   }
-
   async function submitRequest(formData: FormData) {
     setSaving(true);
     const payload = Object.fromEntries(formData.entries());
@@ -864,7 +861,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
     };
     const endpoint = endpoints[module];
     if (!endpoint) return;
-    const response = await fetch(`${endpoint.path}?page=1&pageSize=all`, { cache: "no-store" });
+    const response = await fetch(`${endpoint.path}?page=1&pageSize=200`, { cache: "no-store" });
     if (!response.ok) return;
     const result = await response.json();
     const nextRows = result[endpoint.key] ?? [];
@@ -2018,6 +2015,18 @@ function Assets({
     };
   }, [page, query, filterField, filterValue, locationFilter, locationSearch, classFilter, statusFilter, columnFilters]);
 
+  async function openAssetPreview(asset: any) {
+    setSelectedAssetId(asset.id);
+    setPreviewAsset(asset);
+    try {
+      const response = await fetch(`/api/assets/${asset.id}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const detail = await response.json();
+      setPreviewAsset((current: any | null) => current?.id === asset.id ? { ...current, ...detail } : current);
+    } catch (error) {
+      console.error(error);
+    }
+  }
   function handleAssetScroll(event: UIEvent<HTMLDivElement>) {
     const element = event.currentTarget;
     const nearBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 240;
@@ -2262,7 +2271,7 @@ function Assets({
             </thead>
             <tbody>
               {visibleAssets.map((asset) => (
-                <tr key={asset.id} onClick={() => { setSelectedAssetId(asset.id); setPreviewAsset(asset); }} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50">
+                <tr key={asset.id} onClick={() => void openAssetPreview(asset)} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-3 py-3">
                     <input
                       type="checkbox"

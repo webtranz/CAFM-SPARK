@@ -127,7 +127,7 @@ export async function GET(request: Request) {
       include: {
         assignedTo: { select: { name: true, email: true } },
         asset: { select: { tag: true, name: true, assetDescription: true, buildingCode: true, floor: true, room: true } },
-        inventoryIssues: { include: { item: { select: { sku: true, name: true, unit: true } } }, orderBy: { issuedAt: "desc" } },
+        inventoryIssues: { take: 5, include: { item: { select: { sku: true, name: true, unit: true } } }, orderBy: { issuedAt: "desc" } },
         request: { select: { ticketNo: true, title: true, description: true, requester: true, attachmentUrls: true, location: true, category: true, createdAt: true } },
       },
     }),

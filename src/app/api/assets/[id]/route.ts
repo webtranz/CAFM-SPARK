@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api-response";
-import { requireAdmin, requirePermission } from "@/lib/api-auth";
+import { requireAdmin, requirePermission, requireUser } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 
@@ -74,6 +74,30 @@ const schema = z.object({
   conditionScore: z.coerce.number().min(0).max(100).optional(),
 });
 
+export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { error } = await requireUser();
+    if (error) return error;
+    const { id } = await params;
+    const asset = await prisma.asset.findUnique({
+      where: { id },
+      include: {
+        site: { select: { name: true } },
+        building: { select: { name: true, code: true } },
+        workOrders: {
+          take: 12,
+          orderBy: { updatedAt: "desc" },
+          select: { woNo: true, title: true, status: true, updatedAt: true, inventoryUsed: true, workNotes: true },
+        },
+        history: { take: 20, orderBy: { createdAt: "desc" } },
+      },
+    });
+    if (!asset) return NextResponse.json({ message: "Asset not found" }, { status: 404 });
+    return NextResponse.json(asset);
+  } catch (error) {
+    return apiError(error, "Unable to load asset");
+  }
+}
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { error, user } = await requirePermission("assets.manage");

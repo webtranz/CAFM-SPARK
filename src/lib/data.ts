@@ -23,8 +23,8 @@ function departmentValues(user: OperatingUser) {
   return [user?.department, user?.department?.trim()].filter(Boolean) as string[];
 }
 
-const INITIAL_LOAD_LIMIT = 100;
-const INITIAL_REFERENCE_LIMIT = 200;
+const INITIAL_LOAD_LIMIT = 50;
+const INITIAL_REFERENCE_LIMIT = 150;
 
 export async function getOperatingData(user: OperatingUser = null) {
   if (!process.env.DATABASE_URL) {
@@ -73,8 +73,8 @@ export async function getOperatingData(user: OperatingUser = null) {
         include: {
           site: { select: { name: true } },
           building: { select: { name: true, code: true } },
-          workOrders: { take: 8, orderBy: { updatedAt: "desc" }, select: { woNo: true, title: true, status: true, updatedAt: true, inventoryUsed: true, workNotes: true } },
-          history: { take: 8, orderBy: { createdAt: "desc" } },
+          workOrders: { take: 2, orderBy: { updatedAt: "desc" }, select: { woNo: true, title: true, status: true, updatedAt: true } },
+          history: { take: 2, orderBy: { createdAt: "desc" }, select: { id: true, eventType: true, title: true, actor: true, createdAt: true } },
         },
       }),
       prisma.serviceRequest.findMany({
@@ -90,7 +90,7 @@ export async function getOperatingData(user: OperatingUser = null) {
         include: {
           assignedTo: { select: { name: true, email: true } },
           asset: { select: { tag: true, name: true, assetDescription: true, buildingCode: true, floor: true, room: true } },
-          inventoryIssues: { include: { item: { select: { sku: true, name: true, unit: true } } }, orderBy: { issuedAt: "desc" } },
+          inventoryIssues: { take: 3, include: { item: { select: { sku: true, name: true, unit: true } } }, orderBy: { issuedAt: "desc" } },
           request: { select: { ticketNo: true, title: true, description: true, requester: true, attachmentUrls: true, location: true, category: true, createdAt: true } },
         },
       }),
