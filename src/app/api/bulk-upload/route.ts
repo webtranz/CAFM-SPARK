@@ -48,7 +48,7 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const jobId = searchParams.get("jobId");
-    const { error } = await requireAnyPermission(["assets.manage", "work.manage", "requests.manage", "users.manage", "documents.upload"]);
+    const { error } = await requireAnyPermission(["assets.manage", "work.manage", "requests.manage", "users.manage", "documents.upload", "housing.manage"]);
     if (error) return error;
 
     const job = jobId
@@ -67,9 +67,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const formData = await request.formData();
-    const module = String(formData.get("module") || "");
-    const { error, user } = await requireAnyPermission(bulkUploadPermissions(module));
-    if (error) return error;
+    const requestedModule = String(formData.get("module") || "");
     const file = formData.get("file");
 
     if (!(file instanceof File)) {
@@ -77,7 +75,11 @@ export async function POST(request: Request) {
     }
 
     const rows = parseCsv(await file.text());
+    const module = detectBulkUploadModule(requestedModule, rows);
+    const { error, user } = await requireAnyPermission(bulkUploadPermissions(module));
+    if (error) return error;
     const context = buildImportContext(module, formData);
+
 
     if (rows.length > BACKGROUND_ROW_THRESHOLD) {
       const job = await prisma.bulkUploadJob.create({
@@ -289,6 +291,14 @@ function serializeBulkUploadJob(job: {
   };
 }
 
+function detectBulkUploadModule(requestedModule: string, rows: Row[]) {
+  const first = rows[0] || {};
+  const headers = new Set(Object.keys(first).map((key) => key.trim()));
+  if (headers.has("bookingNo") && (headers.has("occupancyStatus") || headers.has("checkIn") || headers.has("checkOut"))) return "housingOccupancy";
+  if (headers.has("residentNo") && (headers.has("guestId") || headers.has("companyName")) && !headers.has("bookingNo")) return "housingGuests";
+  if (headers.has("roomCode") && headers.has("roomNumber") && headers.has("roomType") && !headers.has("bookingNo")) return "housingRooms";
+  return requestedModule;
+}
 function bulkUploadPermissions(module: string) {
   if (module === "omManuals") return ["documents.upload"];
   if (module === "ppm") return ["ppm.manage", "assets.manage"];
