@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 import { emptyOperatingData } from "@/lib/empty-operating-data";
 import { prisma } from "@/lib/prisma";
+import { ensureDefaultRbac } from "@/lib/rbac-seed";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,8 @@ export async function GET() {
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
   try {
+    await ensureDefaultRbac();
+
     const [
       requests,
       workOrders,

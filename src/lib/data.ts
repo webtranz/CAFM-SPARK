@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { fallbackData } from "@/lib/demo-data";
+import { ensureDefaultRbac } from "@/lib/rbac-seed";
 
 type OperatingUser = {
   id?: string;
@@ -32,6 +33,8 @@ export async function getOperatingData(user: OperatingUser = null) {
   }
 
   try {
+    await ensureDefaultRbac();
+
     const kind = roleKind(user);
     const departmentsForUser = departmentValues(user);
     const teamCode = user?.team?.code;

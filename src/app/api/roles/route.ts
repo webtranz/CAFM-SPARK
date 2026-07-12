@@ -4,7 +4,7 @@ import { apiError } from "@/lib/api-response";
 import { requireAdmin, requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
-import { defaultPermissionGrantsForRole } from "@/lib/default-role-permissions";
+import { ensureDefaultRbac, ensureRoleDefaultPermissions } from "@/lib/rbac-seed";
 
 const schema = z.object({
   name: z.string().min(2),
@@ -12,6 +12,7 @@ const schema = z.object({
 });
 
 export async function GET() {
+  await ensureDefaultRbac();
   const { error } = await requirePermission("roles.manage");
   if (error) return error;
   return NextResponse.json(await prisma.role.findMany({ orderBy: { name: "asc" } }));
@@ -19,6 +20,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    await ensureDefaultRbac();
     const { error, user } = await requirePermission("roles.manage");
     if (error) return error;
     const input = schema.parse(await request.json());
@@ -27,16 +29,7 @@ export async function POST(request: Request) {
       update: { description: input.description || "" },
       create: { name: input.name, description: input.description || "", standard: false },
     });
-    const existingPermissions = await prisma.rolePermission.count({ where: { role: role.name } });
-    if (existingPermissions === 0) {
-      const defaultGrants = defaultPermissionGrantsForRole(role.name);
-      const permissions = await prisma.permission.findMany({ where: { code: { in: defaultGrants.map((grant) => grant.code) } } });
-      const grantByCode = new Map(defaultGrants.map((grant) => [grant.code, grant]));
-      await prisma.rolePermission.createMany({
-        data: permissions.map((permission) => ({ role: role.name, permissionId: permission.id, scope: grantByCode.get(permission.code)?.scope || "Department" })),
-        skipDuplicates: true,
-      });
-    }
+    await ensureRoleDefaultPermissions(role.name);
     await auditAction({ user, action: "ROLE_SAVE", entity: "role", entityId: role.id, details: { input, savedRecord: role } });
     return NextResponse.json(role, { status: 201 });
   } catch (error) {
