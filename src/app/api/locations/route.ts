@@ -40,9 +40,10 @@ export async function GET(request: Request) {
   const locationClass = url.searchParams.get("locationClass")?.trim() || "";
   const residential = url.searchParams.get("residential")?.trim() || "";
   const pageInput = Number(url.searchParams.get("page") || 1);
-  const pageSizeInput = Number(url.searchParams.get("pageSize") || 100);
+  const pageSizeParam = url.searchParams.get("pageSize") || "100";
+  const pageSizeInput = pageSizeParam === "all" ? Number.MAX_SAFE_INTEGER : Number(pageSizeParam);
   const page = Number.isFinite(pageInput) ? Math.max(1, Math.floor(pageInput)) : 1;
-  const pageSize = Number.isFinite(pageSizeInput) ? Math.min(200, Math.max(25, Math.floor(pageSizeInput))) : 100;
+  const pageSize = pageSizeParam === "all" ? 10000 : Number.isFinite(pageSizeInput) ? Math.min(500, Math.max(25, Math.floor(pageSizeInput))) : 100;
   const where: any = {
     ...(parentLocation ? { parentLocation } : {}),
     ...(locationClass ? { locationClass } : {}),
@@ -61,7 +62,8 @@ export async function GET(request: Request) {
       { room: { contains: query, mode: "insensitive" } },
     ];
   }
-  const [total, locations] = await Promise.all([
+  const [allTotal, total, locations] = await Promise.all([
+    prisma.location.count(),
     prisma.location.count({ where }),
     prisma.location.findMany({
       where,
@@ -70,7 +72,7 @@ export async function GET(request: Request) {
       orderBy: [{ code: "asc" }],
     }),
   ]);
-  return NextResponse.json({ locations, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
+  return NextResponse.json({ locations, allTotal, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
 }
 
 export async function POST(request: Request) {

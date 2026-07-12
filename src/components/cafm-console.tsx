@@ -7360,6 +7360,7 @@ function Locations({ locations, submitLocation, deleteLocation, isAdmin, saving 
   const [page, setPage] = useState(1);
   const [locationRowsSource, setLocationRowsSource] = useState<any[]>(locations);
   const [locationTotal, setLocationTotal] = useState(locations.length);
+  const [allLocationTotal, setAllLocationTotal] = useState(locations.length);
   const [locationLoading, setLocationLoading] = useState(false);
   const [selectedLocationIds, setSelectedLocationIds] = useState<Set<string>>(new Set());
   const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
@@ -7398,6 +7399,7 @@ function Locations({ locations, submitLocation, deleteLocation, isAdmin, saving 
   useEffect(() => {
     setLocationRowsSource(locations);
     setLocationTotal((current) => Math.max(current, locations.length));
+    setAllLocationTotal((current) => Math.max(current, locations.length));
   }, [locations]);
 
   useEffect(() => {
@@ -7422,6 +7424,7 @@ function Locations({ locations, submitLocation, deleteLocation, isAdmin, saving 
           const result = await response.json();
           setLocationRowsSource((current) => page === 1 ? result.locations ?? [] : [...current, ...(result.locations ?? [])]);
           setLocationTotal(Number(result.total ?? result.locations?.length ?? 0));
+          setAllLocationTotal(Number(result.allTotal ?? result.total ?? result.locations?.length ?? 0));
         }
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -7537,10 +7540,10 @@ function Locations({ locations, submitLocation, deleteLocation, isAdmin, saving 
           <button type="button" onClick={() => { setQuery(""); setParentFilter(""); setClassFilter(""); setResidentialFilter(""); }} className="h-11 rounded-lg bg-white px-3 text-sm font-black text-lagoon">Clear</button>
         </div>
         <div className="mb-4 grid gap-3 md:grid-cols-4">
-          <div className="rounded-lg bg-lagoon/10 p-3"><p className="text-xs font-black uppercase text-lagoon">Locations</p><p className="text-2xl font-black">{locationTotal}</p></div>
-          <div className="rounded-lg bg-emerald-50 p-3"><p className="text-xs font-black uppercase text-emerald-700">Parents</p><p className="text-2xl font-black">{parentOptions.length}</p></div>
-          <div className="rounded-lg bg-amber-50 p-3"><p className="text-xs font-black uppercase text-amber-700">Classes</p><p className="text-2xl font-black">{classOptions.length}</p></div>
-          <div className="rounded-lg bg-rose-50 p-3"><p className="text-xs font-black uppercase text-rose-700">Out of Service</p><p className="text-2xl font-black">{locationRows.filter((location) => location.outOfService).length}</p></div>
+          <div className="rounded-lg bg-lagoon/10 p-3"><p className="text-xs font-black uppercase text-lagoon">All Locations</p><p className="text-2xl font-black">{allLocationTotal.toLocaleString()}</p></div>
+          <div className="rounded-lg bg-emerald-50 p-3"><p className="text-xs font-black uppercase text-emerald-700">Matching Filter</p><p className="text-2xl font-black">{locationTotal.toLocaleString()}</p></div>
+          <div className="rounded-lg bg-amber-50 p-3"><p className="text-xs font-black uppercase text-amber-700">Loaded</p><p className="text-2xl font-black">{locationRows.length.toLocaleString()}</p></div>
+          <div className="rounded-lg bg-rose-50 p-3"><p className="text-xs font-black uppercase text-rose-700">Out of Service</p><p className="text-2xl font-black">{locationRows.filter((location) => location.outOfService).length.toLocaleString()}</p></div>
         </div>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm font-black text-slate-600">
           <span>Showing {locationRows.length.toLocaleString()} of {locationTotal.toLocaleString()} locations{isAdmin ? ` / Selected ${selectedLocationIds.size.toLocaleString()}` : ""}</span>
