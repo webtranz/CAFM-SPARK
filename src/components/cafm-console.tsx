@@ -188,6 +188,8 @@ const moduleGroups: ModuleGroup[] = [
     icon: Building2,
     items: [
       { id: "housing", label: "Housing Dashboard", icon: LayoutDashboard, view: "housing-dashboard" },
+      { id: "housing", label: "Rooms", icon: Building2, view: "housing-rooms" },
+      { id: "housing", label: "Guests", icon: Users, view: "housing-guests" },
       { id: "housing", label: "Accommodation & Bookings", icon: CalendarCheck, view: "housing-bookings" },
       { id: "housing", label: "Check-In / Check-Out", icon: Clock, view: "housing-check-movements" },
       { id: "housing", label: "Room Hold / Reserve", icon: ShieldCheck, view: "housing-room-holds" },
@@ -9397,6 +9399,10 @@ function HousingOperations({
     const haystack = `${room.code} ${room.roomNumber} ${room.property?.name} ${room.block?.name} ${room.floor} ${room.roomType} ${room.status}`.toLowerCase();
     return (!search || haystack.includes(filterText)) && (status === "All" || room.status === status);
   });
+  const visibleResidents = (housing?.residents ?? []).filter((resident: any) => {
+    const haystack = `${resident.residentNo} ${resident.name} ${resident.companyName} ${resident.companyId} ${resident.phone} ${resident.status}`.toLowerCase();
+    return (!search || haystack.includes(filterText)) && (status === "All" || resident.status === status);
+  });
   const visibleInspections = inspections.filter((inspection) => {
     const haystack = `${inspection.inspectionNo} ${inspection.inspectionType} ${inspection.inspector} ${inspection.status} ${inspection.findings} ${inspection.room?.roomNumber}`.toLowerCase();
     return (!search || haystack.includes(filterText)) && (status === "All" || inspection.status === status);
@@ -9434,6 +9440,8 @@ function HousingOperations({
     return !search || haystack.includes(filterText);
   });
   const activePanel =
+    view === "housing-rooms" ? "rooms" :
+    view === "housing-guests" ? "guests" :
     view === "housing-bookings" ? "bookings" :
     view === "housing-check-movements" ? "check-movements" :
     view === "housing-room-holds" ? "holds" :
@@ -9563,6 +9571,35 @@ function HousingOperations({
         </section>
       )}
 
+
+      {activePanel === "rooms" && (
+        <section className="grid gap-5">
+          <HousingTable
+            title="Housing Rooms"
+            rows={visibleRooms}
+            columns={[["code", "Room Code"], ["roomNumber", "Room Number"], ["property.name", "Property"], ["block.name", "Building / Block"], ["floor", "Floor"], ["roomType", "Room Type"], ["capacity", "Capacity"], ["occupancy", "Occupancy"], ["status", "Status"], ["qrCode", "QR Code"]]}
+            onSelect={(record) => setSelected({ type: "room", record })}
+            reportType="housing-rooms"
+            bulkSelectable={isAdmin}
+            onBulkDelete={async (rows) => { await Promise.all(rows.map((row) => deleteHousing("room", row.id))); }}
+          />
+          {canManage && <HousingSetupForms properties={housing.properties ?? []} blocks={housing.blocks ?? []} rooms={rooms} saving={saving} onSubmit={submitHousing} />}
+        </section>
+      )}
+
+      {activePanel === "guests" && (
+        <section className="grid gap-5">
+          <HousingTable
+            title="Housing Guests"
+            rows={visibleResidents}
+            columns={[["residentNo", "Guest ID"], ["name", "Guest Name"], ["companyId", "Company ID"], ["companyName", "Company"], ["phone", "Phone"], ["email", "Email"], ["departmentCode", "Department"], ["status", "Status"]]}
+            onSelect={(record) => setSelected({ type: "resident", record })}
+            reportType="housing-guests"
+            bulkSelectable={isAdmin}
+            onBulkDelete={async (rows) => { await Promise.all(rows.map((row) => deleteHousing("resident", row.id))); }}
+          />
+        </section>
+      )}
       {activePanel === "bookings" && (
         <section className="grid gap-5 xl:grid-cols-[1fr_380px]">
           <div className="grid gap-3">
