@@ -4,11 +4,12 @@ import { apiError } from "@/lib/api-response";
 import { requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
-import { defaultPermissionCodesForRole } from "@/lib/default-role-permissions";
+import { defaultPermissionCodesForRole, defaultPermissionScopeForRole } from "@/lib/default-role-permissions";
 
 const schema = z.object({
   role: z.string().min(2),
   permissionCodes: z.array(z.string()),
+  permissionScopes: z.record(z.string()).optional(),
 });
 
 export async function POST(request: Request) {
@@ -17,11 +18,11 @@ export async function POST(request: Request) {
     if (error) return error;
     const input = schema.parse(await request.json());
     const requestedCodes = input.permissionCodes.length ? input.permissionCodes : defaultPermissionCodesForRole(input.role);
-    const permissionCodes = input.role === "Admin" ? requestedCodes : requestedCodes.filter((code) => code !== "documents.upload");
+    const permissionCodes = requestedCodes;
     const permissions = await prisma.permission.findMany({ where: { code: { in: permissionCodes } } });
     await prisma.rolePermission.deleteMany({ where: { role: input.role } });
     await prisma.rolePermission.createMany({
-      data: permissions.map((permission) => ({ role: input.role, permissionId: permission.id })),
+      data: permissions.map((permission) => ({ role: input.role, permissionId: permission.id, scope: input.permissionScopes?.[permission.code] || defaultPermissionScopeForRole(input.role, permission.code) })),
       skipDuplicates: true,
     });
     await auditAction({

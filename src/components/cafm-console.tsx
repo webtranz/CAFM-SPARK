@@ -46,7 +46,14 @@ import {
   YAxis,
 } from "recharts";
 import { moduleStats } from "@/lib/demo-data";
-import { DEFAULT_ROLE_NAMES, defaultPermissionCodesForRole } from "@/lib/default-role-permissions";
+import {
+  ACTION_PERMISSION_SEED,
+  DEFAULT_ROLE_NAMES,
+  PERMISSION_SCOPES,
+  defaultPermissionCodesForRole,
+  defaultPermissionScopeForRole,
+  hasPermissionCode,
+} from "@/lib/default-role-permissions";
 
 type ConsoleData = {
   live: boolean;
@@ -380,30 +387,7 @@ const modulePermissions: Record<string, string> = {
   housing: "housing.view",
   compliance: "compliance.view",
 };
-const actionPermissionCatalog = [
-  { code: "assets.manage", name: "Manage Assets", module: "Assets Management", description: "Create, edit, import and view asset history" },
-  { code: "work.manage", name: "Manage Work Orders", module: "Tickets", description: "Create and update work orders" },
-  { code: "work.execute", name: "Execute Work Orders", module: "Tickets", description: "Update work order status, time, photos, assets and inventory used" },
-  { code: "work.assign", name: "Assign Work Orders", module: "Tickets", description: "Assign work orders to technicians or teams" },
-  { code: "work.verify", name: "Verify Completed Work", module: "Tickets", description: "Approve, reject, reopen or close completed work" },
-  { code: "requests.manage", name: "Manage Service Requests", module: "Tickets", description: "Create, edit, assign and convert requests to work orders" },
-  { code: "requests.approve", name: "Approve or Reject Requests", module: "Tickets", description: "Review, validate, approve or reject service requests" },
-  { code: "requests.view", name: "View Service Requests", module: "Tickets", description: "View assigned service requests" },
-  { code: "work.view", name: "View Work Orders", module: "Tickets", description: "View work order panels and completion history" },
-  { code: "ppm.manage", name: "Manage PPM", module: "Tickets", description: "Create planned preventive maintenance schedules" },
-  { code: "assets.view", name: "View Assets", module: "Assets Management", description: "View asset register, history and location drill-down" },
-  { code: "documents.upload", name: "Upload Document Files", module: "Document Management", description: "Upload files to document management folders. Admin only.", adminOnly: true },
-  { code: "users.manage", name: "Manage Users", module: "Users Management", description: "Create users and assign roles" },
-  { code: "roles.manage", name: "Manage Roles", module: "Users Management", description: "Create custom roles and permission sets" },
-  { code: "reports.view", name: "View Reports", module: "Utilities", description: "Preview and download reports" },
-  { code: "reception.manage", name: "Reception Desk", module: "Reception", description: "Create resident requests and view front-desk queue" },
-  { code: "resident.portal", name: "Resident Portal", module: "Resident", description: "Create and track own requests" },
-  { code: "housing.manage", name: "Manage Housing Operations", module: "Housing Operations", description: "Create and manage accommodation, bookings, inspections, assets and inventory" },
-  { code: "housing.approve", name: "Approve Housing Requests", module: "Housing Operations", description: "Approve or reject housing bookings and escalations" },
-  { code: "housing.view", name: "View Housing", module: "Housing Operations", description: "View housing dashboards, room history, reports and alerts" },
-  { code: "compliance.manage", name: "Manage Compliance & Certification", module: "Compliance & Certification", description: "Create and renew statutory certificates, permits and regulatory audits" },
-  { code: "compliance.view", name: "View Compliance & Certification", module: "Compliance & Certification", description: "View compliance dashboard, certificate register, expiry alerts and reports" },
-];
+const actionPermissionCatalog = ACTION_PERMISSION_SEED;
 function permissionSlug(value: string) {
   return value.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, ".").replace(/^\.+|\.+$/g, "");
 }
@@ -684,7 +668,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
   }, [records.rolePermissions, user.role]);
   const isReadOnlyUser = roleKindLabel(user.role) === "readonly";
   const readOnlyModules = new Set(["command", "dashboard", "assets", "work", "ppm", "requests", "reports", "housing", "compliance", "documents", "incidents"]);
-  const can = (permission?: string) => user.role === "Admin" || !permission || (!isReadOnlyUser && permissionCodes.has(permission));
+  const can = (permission?: string) => user.role === "Admin" || !permission || (!isReadOnlyUser && hasPermissionCode(permissionCodes, permission));
   const canOpenModule = (moduleId: string) => (isReadOnlyUser && readOnlyModules.has(moduleId)) || can(modulePermissions[moduleId]);
   const canViewActive = canOpenModule(active);
   const isAdmin = roleKindLabel(user.role) === "admin";
@@ -1289,12 +1273,12 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
               isAdmin={isAdmin}
               refreshData={refreshData}
               setToast={(message) => setToast(cleanMessage(message))}
-              saveRolePermissions={async (role, permissionCodes) => {
+              saveRolePermissions={async (role, permissionCodes, permissionScopes) => {
                 setSaving(true);
                 const response = await fetch("/api/role-permissions", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ role, permissionCodes }),
+                  body: JSON.stringify({ role, permissionCodes, permissionScopes }),
                 });
                 const result = await response.json();
                 setToast(response.ok ? "Role permissions updated." : cleanMessage(result.message ?? "Permission update failed."));
@@ -8263,7 +8247,7 @@ function UsersRoles({
   deleteUser: (id: string) => Promise<void> | void;
   deleteRole: (role: string) => void;
   isAdmin: boolean;
-  saveRolePermissions: (role: string, permissionCodes: string[]) => void;
+  saveRolePermissions: (role: string, permissionCodes: string[], permissionScopes?: Record<string, string>) => void;
   refreshData: () => void;
   saving: boolean;
   setToast: (message: string) => void;
@@ -8294,17 +8278,22 @@ function UsersRoles({
   const canDeleteRole = !defaultRoleNames.includes(role) && !selectedRoleRecord?.standard && roleAssignedUsers === 0;
   const assignedPermissionCodesForRole = (nextRole: string) => {
     const assignedCodes = rolePermissions.filter((item) => item.role === nextRole).map((item) => item.permission.code);
-    if (assignedCodes.length) return nextRole === "Admin" ? assignedCodes : assignedCodes.filter((code) => code !== "documents.upload");
-    const defaultCodes = defaultPermissionCodesForRole(nextRole);
-    return nextRole === "Admin" ? defaultCodes : defaultCodes.filter((code) => code !== "documents.upload");
+    return assignedCodes.length ? assignedCodes : defaultPermissionCodesForRole(nextRole);
   };
-  const defaultCodesForSelectedRole = role === "Admin" ? defaultPermissionCodesForRole(role) : defaultPermissionCodesForRole(role).filter((code) => code !== "documents.upload");
+  const assignedPermissionScopesForRole = (nextRole: string, codes = assignedPermissionCodesForRole(nextRole)) => {
+    const assignedScopes = new Map(rolePermissions.filter((item) => item.role === nextRole).map((item) => [item.permission.code, item.scope || defaultPermissionScopeForRole(nextRole, item.permission.code)]));
+    return Object.fromEntries(codes.map((code) => [code, assignedScopes.get(code) || defaultPermissionScopeForRole(nextRole, code)]));
+  };
+  const defaultCodesForSelectedRole = defaultPermissionCodesForRole(role);
   const usingDefaultBaseline = rolePermissions.filter((item) => item.role === role).length === 0;
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>(() => assignedPermissionCodesForRole("Admin"));
+  const [permissionScopes, setPermissionScopes] = useState<Record<string, string>>(() => assignedPermissionScopesForRole("Admin"));
 
   function changeRole(nextRole: string) {
+    const nextCodes = assignedPermissionCodesForRole(nextRole);
     setRole(nextRole);
-    setSelectedPermissions(assignedPermissionCodesForRole(nextRole));
+    setSelectedPermissions(nextCodes);
+    setPermissionScopes(assignedPermissionScopesForRole(nextRole, nextCodes));
   }
   useEffect(() => {
     setUserRows(users);
@@ -8389,10 +8378,19 @@ function UsersRoles({
 
   function applyDefaultPermissions() {
     setSelectedPermissions(defaultCodesForSelectedRole);
+    setPermissionScopes(Object.fromEntries(defaultCodesForSelectedRole.map((code) => [code, defaultPermissionScopeForRole(role, code)])));
     setToast(`Default permissions applied for ${role}. Save to keep them.`);
   }
   function togglePermission(code: string) {
     setSelectedPermissions((current) => current.includes(code) ? current.filter((item) => item !== code) : [...current, code]);
+    setPermissionScopes((current) => {
+      if (selectedPermissions.includes(code)) {
+        const next = { ...current };
+        delete next[code];
+        return next;
+      }
+      return { ...current, [code]: current[code] || defaultPermissionScopeForRole(role, code) };
+    });
   }
 
   function toggleModulePermissions(codes: string[], checked: boolean) {
@@ -8400,11 +8398,24 @@ function UsersRoles({
       if (!checked) return current.filter((code) => !codes.includes(code));
       return Array.from(new Set([...current, ...codes]));
     });
+    setPermissionScopes((current) => {
+      if (!checked) {
+        const next = { ...current };
+        codes.forEach((code) => delete next[code]);
+        return next;
+      }
+      return { ...current, ...Object.fromEntries(codes.map((code) => [code, current[code] || defaultPermissionScopeForRole(role, code)])) };
+    });
+  }
+
+  function updatePermissionScope(code: string, scope: string) {
+    setPermissionScopes((current) => ({ ...current, [code]: scope }));
   }
 
   function saveVisiblePermissions() {
-    const allowedPermissions = role === "Admin" ? selectedPermissions : selectedPermissions.filter((code) => code !== "documents.upload");
-    saveRolePermissions(role, allowedPermissions);
+    const allowedPermissions = selectedPermissions;
+    const allowedScopes = Object.fromEntries(allowedPermissions.map((code) => [code, permissionScopes[code] || defaultPermissionScopeForRole(role, code)]));
+    saveRolePermissions(role, allowedPermissions, allowedScopes);
   }
 
   function deleteSelectedRole() {
@@ -8509,16 +8520,28 @@ function UsersRoles({
                   </label>
                 </div>
                 <div className="mt-3 grid gap-2 md:grid-cols-2">
-                  {modulePermissions.map((permission) => (
-                    <label key={permission.code} className="flex items-start gap-3 rounded-lg bg-slate-50 p-3 text-sm">
-                      <input type="checkbox" checked={selectedPermissions.includes(permission.code)} onChange={() => togglePermission(permission.code)} className="mt-1" />
-                      <span>
-                        <span className="block font-black">{permission.name}</span>
-                        <span className="block text-slate-500">{permission.code}</span>
-                        <span className="mt-1 block text-xs text-slate-500">{permission.description}</span>
-                      </span>
-                    </label>
-                  ))}
+                  {modulePermissions.map((permission) => {
+                    const checked = selectedPermissions.includes(permission.code);
+                    const currentScope = permissionScopes[permission.code] || defaultPermissionScopeForRole(role, permission.code);
+                    return (
+                    <div key={permission.code} className="grid gap-3 rounded-lg bg-slate-50 p-3 text-sm sm:grid-cols-[1fr_150px]">
+                      <label className="flex items-start gap-3">
+                        <input type="checkbox" checked={checked} onChange={() => togglePermission(permission.code)} className="mt-1" />
+                        <span>
+                          <span className="block font-black">{permission.name}</span>
+                          <span className="block text-slate-500">{permission.code}</span>
+                          <span className="mt-1 block text-xs text-slate-500">{permission.description}</span>
+                        </span>
+                      </label>
+                      <label className="grid gap-1 text-xs font-black text-slate-500">
+                        Scope
+                        <select disabled={!checked} value={currentScope} onChange={(event) => updatePermissionScope(permission.code, event.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm font-bold text-ink disabled:bg-slate-100 disabled:text-slate-400">
+                          {PERMISSION_SCOPES.map((scope) => <option key={scope} value={scope}>{scope}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                    );
+                  })}
                 </div>
               </div>
               );

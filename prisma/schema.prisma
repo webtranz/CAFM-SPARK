@@ -152,9 +152,11 @@ model RolePermission {
   id           String     @id @default(cuid())
   role         String
   permissionId String
+  scope        String     @default("Company")
   permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
   @@unique([role, permissionId])
+  @@index([role, scope])
 }
 
 model Team {

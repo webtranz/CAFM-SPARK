@@ -1,27 +1,79 @@
-export const ACTION_PERMISSION_SEED = [
-  { code: "assets.manage", name: "Manage Assets", module: "Assets Management", description: "Create, edit, import and view asset history" },
-  { code: "work.manage", name: "Manage Work Orders", module: "Tickets", description: "Create and update work orders" },
-  { code: "work.execute", name: "Execute Work Orders", module: "Tickets", description: "Update work order status, time, photos, assets and inventory used" },
-  { code: "work.assign", name: "Assign Work Orders", module: "Tickets", description: "Assign work orders to technicians or teams" },
-  { code: "work.verify", name: "Verify Completed Work", module: "Tickets", description: "Approve, reject, reopen or close completed work" },
-  { code: "requests.manage", name: "Manage Service Requests", module: "Tickets", description: "Create, edit, assign and convert requests to work orders" },
-  { code: "requests.approve", name: "Approve or Reject Requests", module: "Tickets", description: "Review, validate, approve or reject service requests" },
-  { code: "requests.view", name: "View Service Requests", module: "Tickets", description: "View assigned service requests" },
-  { code: "work.view", name: "View Work Orders", module: "Tickets", description: "View work order panels and completion history" },
-  { code: "ppm.manage", name: "Manage PPM", module: "Tickets", description: "Create planned preventive maintenance schedules" },
-  { code: "assets.view", name: "View Assets", module: "Assets Management", description: "View asset register, history and location drill-down" },
-  { code: "documents.upload", name: "Upload Document Files", module: "Document Management", description: "Upload files to document management folders. Admin only." },
-  { code: "users.manage", name: "Manage Users", module: "Users Management", description: "Create users and assign roles" },
-  { code: "roles.manage", name: "Manage Roles", module: "Users Management", description: "Create custom roles and permission sets" },
-  { code: "reports.view", name: "View Reports", module: "Utilities", description: "Preview and download reports" },
-  { code: "reception.manage", name: "Reception Desk", module: "Reception", description: "Create resident requests and view front-desk queue" },
-  { code: "resident.portal", name: "Resident Portal", module: "Resident", description: "Create and track own requests" },
-  { code: "housing.manage", name: "Manage Housing Operations", module: "Housing Operations", description: "Create and manage accommodation, bookings, inspections, assets and inventory" },
-  { code: "housing.approve", name: "Approve Housing Requests", module: "Housing Operations", description: "Approve or reject housing bookings and escalations" },
-  { code: "housing.view", name: "View Housing", module: "Housing Operations", description: "View housing dashboards, room history, reports and alerts" },
-  { code: "compliance.manage", name: "Manage Compliance & Certification", module: "Compliance & Certification", description: "Create and renew statutory certificates, permits and regulatory audits" },
-  { code: "compliance.view", name: "View Compliance & Certification", module: "Compliance & Certification", description: "View compliance dashboard, certificate register, expiry alerts and reports" },
+export const PERMISSION_SCOPES = ["Own", "Department", "Facility", "Company", "Global"] as const;
+export type PermissionScope = typeof PERMISSION_SCOPES[number];
+
+const modules = [
+  ["dashboard", "Dashboard"],
+  ["assets", "Assets"],
+  ["locations", "Locations"],
+  ["workorders", "Work Orders"],
+  ["servicerequests", "Service Requests"],
+  ["ppm", "PPM"],
+  ["inventory", "Inventory"],
+  ["safety", "Safety"],
+  ["incidents", "Incidents"],
+  ["compliance", "Compliance"],
+  ["certifications", "Certifications"],
+  ["documents", "Documents"],
+  ["housing", "Housing"],
+  ["residents", "Residents"],
+  ["reports", "Reports"],
+  ["users", "Users"],
+  ["roles", "Roles"],
+  ["settings", "Settings"],
 ] as const;
+
+const actions = ["view", "create", "edit", "delete", "approve", "assign", "import", "export", "report", "settings", "dashboard"] as const;
+
+const actionNames: Record<string, string> = {
+  view: "View",
+  create: "Create",
+  edit: "Edit",
+  delete: "Delete",
+  approve: "Approve",
+  assign: "Assign",
+  import: "Import",
+  export: "Export",
+  report: "Report",
+  settings: "Settings",
+  dashboard: "Dashboard",
+};
+
+export const ENTERPRISE_PERMISSION_SEED = modules.flatMap(([moduleCode, moduleName]) => {
+  return actions.map((action) => ({
+    code: `${moduleCode}.${action}`,
+    name: `${actionNames[action]} ${moduleName}`,
+    module: moduleName,
+    action,
+    description: `${actionNames[action]} access for ${moduleName}.`,
+  }));
+});
+
+export const LEGACY_PERMISSION_ALIASES: Record<string, string[]> = {
+  "assets.manage": ["assets.view", "assets.create", "assets.edit", "assets.delete", "assets.import", "assets.report"],
+  "assets.view": ["assets.view"],
+  "work.manage": ["workorders.create", "workorders.edit", "workorders.view"],
+  "work.execute": ["workorders.edit", "workorders.view"],
+  "work.assign": ["workorders.assign", "workorders.view"],
+  "work.verify": ["workorders.approve", "workorders.view"],
+  "work.view": ["workorders.view"],
+  "requests.manage": ["servicerequests.create", "servicerequests.edit", "servicerequests.assign", "servicerequests.view"],
+  "requests.approve": ["servicerequests.approve", "servicerequests.view"],
+  "requests.view": ["servicerequests.view"],
+  "ppm.manage": ["ppm.view", "ppm.create", "ppm.edit", "ppm.delete", "ppm.import", "ppm.report"],
+  "users.manage": ["users.view", "users.create", "users.edit", "users.delete"],
+  "roles.manage": ["roles.view", "roles.create", "roles.edit", "roles.delete", "roles.settings"],
+  "reports.view": ["reports.view", "reports.export", "reports.report", "dashboard.view"],
+  "documents.upload": ["documents.create", "documents.import", "documents.view"],
+  "reception.manage": ["servicerequests.create", "servicerequests.view", "residents.view"],
+  "resident.portal": ["servicerequests.create", "servicerequests.view"],
+  "housing.manage": ["housing.view", "housing.create", "housing.edit", "housing.delete", "residents.view", "residents.create", "residents.edit"],
+  "housing.approve": ["housing.approve", "housing.view"],
+  "housing.view": ["housing.view", "residents.view"],
+  "compliance.manage": ["compliance.view", "compliance.create", "compliance.edit", "compliance.delete", "certifications.view", "certifications.create", "certifications.edit"],
+  "compliance.view": ["compliance.view", "certifications.view"],
+};
+
+export const ACTION_PERMISSION_SEED = ENTERPRISE_PERMISSION_SEED;
 
 export const DEFAULT_ROLE_NAMES = [
   "Admin",
@@ -42,27 +94,69 @@ export const DEFAULT_ROLE_NAMES = [
   "Read-only",
 ] as const;
 
-export const DEFAULT_CUSTOM_ROLE_PERMISSIONS = ["requests.view", "work.view", "assets.view", "reports.view"];
+export type RolePermissionGrant = { code: string; scope: PermissionScope };
 
-export const DEFAULT_ROLE_PERMISSION_PROFILES: Record<string, string[]> = {
-  Admin: ACTION_PERMISSION_SEED.map((permission) => permission.code),
-  "Facility Manager": ["assets.manage", "work.manage", "work.assign", "work.verify", "requests.manage", "requests.approve", "ppm.manage", "reports.view", "housing.view", "compliance.view", "assets.view", "work.view", "requests.view"],
-  "Maintenance Manager": ["assets.manage", "work.manage", "work.assign", "work.verify", "work.execute", "requests.manage", "requests.approve", "ppm.manage", "reports.view", "assets.view", "work.view", "requests.view"],
-  "Department Supervisor": ["requests.manage", "requests.approve", "work.manage", "work.assign", "work.verify", "ppm.manage", "reports.view", "assets.view", "work.view", "requests.view"],
-  Supervisor: ["requests.manage", "requests.approve", "work.manage", "work.assign", "work.verify", "reports.view", "assets.view", "work.view", "requests.view"],
-  "Service Team": ["work.execute", "work.view", "requests.view", "assets.view"],
-  Technician: ["work.execute", "work.view", "requests.view", "assets.view"],
-  Helpdesk: ["requests.manage", "requests.approve", "work.view", "assets.view", "reports.view", "requests.view"],
-  Reception: ["reception.manage", "requests.manage", "requests.view", "housing.view", "resident.portal"],
-  Storekeeper: ["assets.manage", "assets.view", "work.view", "reports.view"],
-  "HSE Officer": ["reports.view", "work.view", "requests.view", "compliance.view"],
-  "Compliance Officer": ["compliance.manage", "compliance.view", "reports.view", "work.view", "requests.view"],
-  "Housing Manager": ["housing.manage", "housing.approve", "housing.view", "requests.manage", "requests.approve", "reports.view"],
-  Resident: ["resident.portal", "requests.view"],
-  Requester: ["resident.portal", "requests.view"],
-  "Read-only": ["requests.view", "work.view", "assets.view", "reports.view", "housing.view", "compliance.view"],
+function grant(codes: string[], scope: PermissionScope): RolePermissionGrant[] {
+  return codes.map((code) => ({ code, scope }));
+}
+
+const viewOnly = ["dashboard.view", "assets.view", "locations.view", "workorders.view", "servicerequests.view", "ppm.view", "inventory.view", "safety.view", "incidents.view", "compliance.view", "certifications.view", "documents.view", "housing.view", "residents.view", "reports.view"];
+const requestOwn = ["servicerequests.view", "servicerequests.create"];
+
+export const DEFAULT_ROLE_PERMISSION_GRANTS: Record<string, RolePermissionGrant[]> = {
+  Admin: grant(ENTERPRISE_PERMISSION_SEED.map((permission) => permission.code), "Global"),
+  "Facility Manager": grant(["dashboard.view", "assets.view", "assets.create", "assets.edit", "assets.import", "assets.export", "assets.report", "locations.view", "locations.create", "locations.edit", "workorders.view", "workorders.create", "workorders.edit", "workorders.assign", "workorders.approve", "workorders.report", "servicerequests.view", "servicerequests.create", "servicerequests.edit", "servicerequests.assign", "servicerequests.approve", "ppm.view", "ppm.create", "ppm.edit", "ppm.report", "inventory.view", "safety.view", "incidents.view", "compliance.view", "certifications.view", "housing.view", "reports.view", "reports.export"], "Company"),
+  "Maintenance Manager": grant(["dashboard.view", "assets.view", "assets.create", "assets.edit", "assets.import", "workorders.view", "workorders.create", "workorders.edit", "workorders.assign", "workorders.approve", "ppm.view", "ppm.create", "ppm.edit", "inventory.view", "reports.view", "reports.export"], "Facility"),
+  "Department Supervisor": grant(["dashboard.view", "assets.view", "workorders.view", "workorders.create", "workorders.edit", "workorders.assign", "workorders.approve", "servicerequests.view", "servicerequests.create", "servicerequests.edit", "servicerequests.assign", "servicerequests.approve", "ppm.view", "reports.view"], "Department"),
+  Supervisor: grant(["dashboard.view", "assets.view", "workorders.view", "workorders.create", "workorders.edit", "workorders.assign", "workorders.approve", "servicerequests.view", "servicerequests.edit", "servicerequests.assign", "servicerequests.approve", "reports.view"], "Department"),
+  "Service Team": grant(["assets.view", "workorders.view", "workorders.edit", "servicerequests.view"], "Own"),
+  Technician: grant(["assets.view", "workorders.view", "workorders.edit", "servicerequests.view"], "Own"),
+  Helpdesk: grant(["dashboard.view", "servicerequests.view", "servicerequests.create", "servicerequests.edit", "servicerequests.assign", "workorders.view", "assets.view"], "Company"),
+  Reception: grant(["servicerequests.view", "servicerequests.create", "residents.view", "housing.view"], "Facility"),
+  Storekeeper: grant(["inventory.view", "inventory.create", "inventory.edit", "inventory.import", "inventory.export", "inventory.report", "workorders.view", "assets.view"], "Facility"),
+  "HSE Officer": grant(["safety.view", "safety.create", "safety.edit", "safety.report", "incidents.view", "incidents.create", "incidents.edit", "incidents.approve", "reports.view"], "Company"),
+  "Compliance Officer": grant(["compliance.view", "compliance.create", "compliance.edit", "compliance.delete", "compliance.report", "certifications.view", "certifications.create", "certifications.edit", "certifications.report", "reports.view"], "Company"),
+  "Housing Manager": grant(["housing.view", "housing.create", "housing.edit", "housing.delete", "housing.approve", "housing.report", "residents.view", "residents.create", "residents.edit", "servicerequests.view", "reports.view"], "Facility"),
+  Resident: grant(requestOwn, "Own"),
+  Requester: grant(requestOwn, "Own"),
+  "Read-only": grant(viewOnly, "Company"),
 };
 
-export function defaultPermissionCodesForRole(role: string) {
-  return DEFAULT_ROLE_PERMISSION_PROFILES[role] ?? DEFAULT_CUSTOM_ROLE_PERMISSIONS;
+export const DEFAULT_CUSTOM_ROLE_PERMISSIONS = ["dashboard.view", "servicerequests.view", "workorders.view", "assets.view", "reports.view"];
+
+export function defaultPermissionGrantsForRole(role: string): RolePermissionGrant[] {
+  return DEFAULT_ROLE_PERMISSION_GRANTS[role] ?? grant(DEFAULT_CUSTOM_ROLE_PERMISSIONS, "Department");
 }
+
+export function defaultPermissionCodesForRole(role: string) {
+  return defaultPermissionGrantsForRole(role).map((grant) => grant.code);
+}
+
+export function defaultPermissionScopeForRole(role: string, code: string): PermissionScope {
+  return defaultPermissionGrantsForRole(role).find((grant) => grant.code === code)?.scope ?? "Department";
+}
+
+export function expandPermissionCode(code: string) {
+  return Array.from(new Set([code, ...(LEGACY_PERMISSION_ALIASES[code] ?? [])]));
+}
+
+export function hasPermissionCode(assignedCodes: Set<string>, code?: string) {
+  if (!code) return true;
+  return expandPermissionCode(code).some((candidate) => assignedCodes.has(candidate));
+}
+const rolePermissionProfile = {
+  ACTION_PERMISSION_SEED,
+  DEFAULT_CUSTOM_ROLE_PERMISSIONS,
+  DEFAULT_ROLE_NAMES,
+  DEFAULT_ROLE_PERMISSION_GRANTS,
+  ENTERPRISE_PERMISSION_SEED,
+  LEGACY_PERMISSION_ALIASES,
+  PERMISSION_SCOPES,
+  defaultPermissionCodesForRole,
+  defaultPermissionGrantsForRole,
+  defaultPermissionScopeForRole,
+  expandPermissionCode,
+  hasPermissionCode,
+};
+
+export default rolePermissionProfile;

@@ -4,7 +4,7 @@ import { apiError } from "@/lib/api-response";
 import { requireAdmin, requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
-import { defaultPermissionCodesForRole } from "@/lib/default-role-permissions";
+import { defaultPermissionGrantsForRole } from "@/lib/default-role-permissions";
 
 const schema = z.object({
   name: z.string().min(2),
@@ -29,10 +29,11 @@ export async function POST(request: Request) {
     });
     const existingPermissions = await prisma.rolePermission.count({ where: { role: role.name } });
     if (existingPermissions === 0) {
-      const defaultCodes = defaultPermissionCodesForRole(role.name).filter((code) => role.name === "Admin" || code !== "documents.upload");
-      const permissions = await prisma.permission.findMany({ where: { code: { in: defaultCodes } } });
+      const defaultGrants = defaultPermissionGrantsForRole(role.name);
+      const permissions = await prisma.permission.findMany({ where: { code: { in: defaultGrants.map((grant) => grant.code) } } });
+      const grantByCode = new Map(defaultGrants.map((grant) => [grant.code, grant]));
       await prisma.rolePermission.createMany({
-        data: permissions.map((permission) => ({ role: role.name, permissionId: permission.id })),
+        data: permissions.map((permission) => ({ role: role.name, permissionId: permission.id, scope: grantByCode.get(permission.code)?.scope || "Department" })),
         skipDuplicates: true,
       });
     }

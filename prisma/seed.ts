@@ -1,6 +1,8 @@
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
-import { ACTION_PERMISSION_SEED, DEFAULT_ROLE_NAMES, defaultPermissionCodesForRole } from "../src/lib/default-role-permissions";
+import rolePermissionProfile from "../src/lib/default-role-permissions";
+
+const { ACTION_PERMISSION_SEED, DEFAULT_ROLE_NAMES, defaultPermissionGrantsForRole } = rolePermissionProfile;
 
 const prisma = new PrismaClient();
 
@@ -82,10 +84,11 @@ async function seedRolesAndPermissions() {
       create: { name: roleName, description: `${roleName} standard CAFM role`, standard: true },
     });
 
-    const defaultCodes = defaultPermissionCodesForRole(roleName).filter((code) => roleName === "Admin" || code !== "documents.upload");
-    const permissions = await prisma.permission.findMany({ where: { code: { in: defaultCodes } } });
+    const defaultGrants = defaultPermissionGrantsForRole(roleName);
+    const permissions = await prisma.permission.findMany({ where: { code: { in: defaultGrants.map((grant) => grant.code) } } });
+    const grantByCode = new Map(defaultGrants.map((grant) => [grant.code, grant]));
     await prisma.rolePermission.createMany({
-      data: permissions.map((permission) => ({ role: roleName, permissionId: permission.id })),
+      data: permissions.map((permission) => ({ role: roleName, permissionId: permission.id, scope: grantByCode.get(permission.code)?.scope || "Department" })),
       skipDuplicates: true,
     });
   }

@@ -109,7 +109,7 @@ async function reportRows(type: string, filters: ReturnType<typeof reportFilters
   }
   if (type === "permissions") {
     const rows = await prisma.rolePermission.findMany({ include: { permission: true }, orderBy: [{ role: "asc" }] });
-    return rows.map((row) => ({ role: row.role, permissionCode: row.permission.code, permission: row.permission.name, module: row.permission.module, description: row.permission.description }));
+    return rows.map((row) => ({ role: row.role, permissionCode: row.permission.code, permission: row.permission.name, module: row.permission.module, scope: row.scope, description: row.permission.description }));
   }
   if (type === "departments") {
     const rows = await prisma.department.findMany({ orderBy: { code: "asc" } });

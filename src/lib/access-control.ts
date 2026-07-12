@@ -28,3 +28,20 @@ export function canExecuteAssignedRecord(user: AccessUser | null, assignedToId?:
   const role = accessRole(user);
   return role === "admin" || role === "supervisor" || (role === "technician" && assignedToId === user?.id);
 }
+
+export type PermissionScope = "Own" | "Department" | "Facility" | "Company" | "Global";
+
+const scopeRank: Record<PermissionScope, number> = { Own: 1, Department: 2, Facility: 3, Company: 4, Global: 5 };
+
+export function scopeAllows(actual: string | null | undefined, required: PermissionScope) {
+  const actualScope = (actual || "Own") as PermissionScope;
+  return (scopeRank[actualScope] ?? 0) >= scopeRank[required];
+}
+
+export function recordScopeForUser(user: AccessUser | null, record: { requester?: string | null; assignedToId?: string | null; departmentCode?: string | null }) {
+  if (!user) return "Own" as PermissionScope;
+  if (record.assignedToId && record.assignedToId === user.id) return "Own";
+  if (record.requester && (record.requester === user.email || record.requester === user.id)) return "Own";
+  if (record.departmentCode && sameDepartment(user, record.departmentCode)) return "Department";
+  return "Company";
+}
