@@ -134,10 +134,7 @@ export async function GET(request: Request) {
     andFilters.push({
       OR: [
         { locationCode: { equals: locationCode, mode: "insensitive" } },
-        { locationDesc: { contains: locationCode, mode: "insensitive" } },
-        { buildingCode: { contains: locationCode, mode: "insensitive" } },
-        { floor: { contains: locationCode, mode: "insensitive" } },
-        { room: { contains: locationCode, mode: "insensitive" } },
+        { room: { equals: locationCode, mode: "insensitive" } },
       ],
     });
   }

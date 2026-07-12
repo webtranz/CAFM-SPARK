@@ -146,7 +146,7 @@ export async function POST(request: Request) {
         depreciationRate: input.depreciationRate ?? 10,
         conditionScore: input.conditionScore ?? 85,
         floor: input.floor || location?.floor || "Unassigned",
-        room: input.locationCode || input.room || location?.code || "Unassigned",
+        room: input.room || location?.room || location?.code || input.locationCode || "Unassigned",
         qrCode: input.qrCode || `CAFM-ASSET:${tag}`,
         siteId: site.id,
         buildingId: site.buildings[0]?.id,

@@ -344,6 +344,13 @@ const assetRegisterColumns: [string, string][] = [
   ["primarySystem", "PRIMARYSYSTEM"],
   ["additionalNote", "ADDITIONAL_NOTE"],
 ];
+const assetHierarchyColumns: [string, string][] = [
+  ["siteHierarchy", "SITE"],
+  ["buildingHierarchy", "BUILDING"],
+  ["floorHierarchy", "FLOOR"],
+  ["roomHierarchy", "ROOM"],
+  ["locationHierarchy", "ROOM HIERARCHY"],
+];
 const assetTemplateHeader = assetRegisterColumns.map(([, label]) => label).join(",");
 const housingAssetTemplateHeader = "Asset Code,Asset Name,Category,Description,Brand,Model,Serial Number,Status,Room Code,Room Number,Building Location,Room Location,Custodian Name,Custodian Contact,Issued To,Issued At,Transferred From,Transferred To,Transferred At,Replacement Of,Replaced At,PM Schedule,Next PM Due,Purchase Date,Supplier Name,Asset Value,Depreciation Rate,Current Value,Last Inspection At,Warranty Expiry,QR Code,Photo URLs,Movement Action,Notes";
 const SHIFT_ELIGIBILITY_OPTIONS = ["Day only", "Night only", "Day & Night", "Not eligible"];
@@ -1857,23 +1864,45 @@ function Assets({
   const [assetLocationCounts, setAssetLocationCounts] = useState<Record<string, number>>({});
   const [assetLoading, setAssetLoading] = useState(false);
   const assetScrollRef = useRef<HTMLDivElement | null>(null);
-  const assetRows = assetRowsSource.map((asset) => ({
-    ...asset,
-    equipmentNo: asset.tag,
-    equipmentDesc: asset.assetDescription ?? asset.name,
-    assetStatusText: asset.assetStatusText ?? (asset.status === "ACTIVE" ? "INSTALLED" : asset.status),
-    commissionDate: formatDateCell(asset.installDate),
-    endOfUsefulLife: formatDateCell(asset.replacementDate),
-    outOfServiceDisplay: asset.outOfService ? "YES" : "NO",
-    locationCode: asset.locationCode || asset.room || "Unassigned",
-    locationDesc: asset.locationDesc ?? asset.location?.description ?? "",
-    equipmentValue: asset.equipmentValue ?? asset.purchaseCost,
-    primarySystem: asset.primarySystem ?? asset.system,
-    additionalNote: asset.additionalNote ?? asset.remarks,
-  }));
+  const locationsByCode = useMemo(() => new Map(locations.filter((location) => location.code).map((location) => [String(location.code), location])), [locations]);
+  const assetRows = assetRowsSource.map((asset) => {
+    const lookupCode = String(asset.locationCode || asset.room || "");
+    const location = locationsByCode.get(lookupCode);
+    const siteHierarchy = asset.siteCode || location?.site || "";
+    const buildingHierarchy = asset.buildingCode || location?.building || "";
+    const floorHierarchy = asset.floor || location?.floor || "";
+    const roomHierarchy = asset.room && asset.room !== asset.locationCode ? asset.room : location?.room || asset.room || "";
+    const locationCode = asset.locationCode || location?.code || asset.room || "Unassigned";
+    const locationDesc = asset.locationDesc ?? location?.description ?? "";
+    const locationHierarchy = [siteHierarchy, buildingHierarchy, floorHierarchy, roomHierarchy, locationCode]
+      .filter((part) => part && part !== "Unassigned")
+      .join(" > ");
+
+    return {
+      ...asset,
+      equipmentNo: asset.tag,
+      equipmentDesc: asset.assetDescription ?? asset.name,
+      assetStatusText: asset.assetStatusText ?? (asset.status === "ACTIVE" ? "INSTALLED" : asset.status),
+      commissionDate: formatDateCell(asset.installDate),
+      endOfUsefulLife: formatDateCell(asset.replacementDate),
+      outOfServiceDisplay: asset.outOfService ? "YES" : "NO",
+      siteHierarchy,
+      buildingHierarchy,
+      floorHierarchy,
+      roomHierarchy,
+      locationHierarchy,
+      locationCode,
+      locationDesc,
+      equipmentValue: asset.equipmentValue ?? asset.purchaseCost,
+      primarySystem: asset.primarySystem ?? asset.system,
+      additionalNote: asset.additionalNote ?? asset.remarks,
+    };
+  });
   const hasMoreAssets = assetRowsSource.length < assetTotal;
   const visibleAssets = assetRows;
   const filterOptions = assetRegisterColumns;
+  const assetDisplayColumns = [...assetHierarchyColumns, ...assetRegisterColumns];
+  const selectedAssetRow = selectedAssetId ? assetRows.find((asset) => asset.id === selectedAssetId) : null;
   const activeColumnFilterCount = Object.values(columnFilters).filter((value) => value.trim()).length;
   const selectedVisibleAssets = visibleAssets.filter((asset) => selectedAssetIds.has(asset.id));
   const allVisibleSelected = Boolean(visibleAssets.length) && selectedVisibleAssets.length === visibleAssets.length;
@@ -2192,12 +2221,29 @@ function Assets({
             {!topLocationRows.length && <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm font-bold text-slate-500">No asset locations loaded yet.</p>}
           </div>
         </div>
+        {selectedAssetRow && (
+          <div className="mb-4 rounded-lg border border-lagoon/30 bg-lagoon/5 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase text-lagoon">Selected Asset</p>
+                <p className="text-lg font-black text-ink">{selectedAssetRow.equipmentNo || selectedAssetRow.tag} - {selectedAssetRow.equipmentDesc || selectedAssetRow.name}</p>
+                <p className="text-sm font-bold text-slate-600">{selectedAssetRow.locationHierarchy || selectedAssetRow.locationCode || "Unassigned location"}</p>
+              </div>
+              <div className="grid gap-2 text-sm font-bold text-slate-700 sm:grid-cols-2 lg:grid-cols-4">
+                <span>DEPARTMENT: <b>{selectedAssetRow.departmentCode || "-"}</b></span>
+                <span>DEPARTMENT_DESC: <b>{selectedAssetRow.departmentDesc || "-"}</b></span>
+                <span>CATEGORY: <b>{selectedAssetRow.category || "-"}</b></span>
+                <span>CATEGORY_DESC: <b>{selectedAssetRow.categoryDesc || "-"}</b></span>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm font-black text-slate-600">
           <span>Showing {visibleAssets.length.toLocaleString()} of {assetTotal.toLocaleString()} assets / Selected {selectedAssetIds.size.toLocaleString()} / Column filters {activeColumnFilterCount}</span>
           {assetLoading && <span className="text-lagoon">Loading assets...</span>}
         </div>
         <div ref={assetScrollRef} onScroll={handleAssetScroll} className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
-          <table className="cafm-data-table cafm-asset-table min-w-[3600px] border-collapse bg-white text-sm">
+          <table className="cafm-data-table cafm-asset-table min-w-[4300px] border-collapse bg-white text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
                 <th className="px-3 py-3">
@@ -2210,7 +2256,7 @@ function Assets({
                     onChange={(event) => toggleVisibleAssets(event.target.checked)}
                   />
                 </th>
-                {assetRegisterColumns.map(([, label]) => <th key={label} className="px-3 py-3">{label}</th>)}
+                {assetDisplayColumns.map(([, label]) => <th key={label} className="px-3 py-3">{label}</th>)}
                 {isAdmin && <th className="px-3 py-3">Actions</th>}
               </tr>
             </thead>
@@ -2225,8 +2271,8 @@ function Assets({
                       onChange={(event) => toggleAssetSelection(asset.id, event.target.checked)}
                     />
                   </td>
-                  {assetRegisterColumns.map(([key, label]) => (
-                    <td key={`${asset.id}-${key}`} className={`px-3 py-3 ${label === "LOCATION" ? "font-black text-lagoon" : ""}`}>
+                  {assetDisplayColumns.map(([key, label]) => (
+                    <td key={`${asset.id}-${key}`} className={`px-3 py-3 ${label === "LOCATION" || label === "ROOM HIERARCHY" ? "font-black text-lagoon" : ""}`}>
                       {label === "EQUIPMENTVALUE" ? <CurrencyAmount value={asset[key]} /> : displayValue(asset[key])}
                     </td>
                   ))}
@@ -2324,7 +2370,7 @@ function AssetCreateForm({ teams, users, locations, onSubmit, saving }: { teams:
     formData.set("system", primarySystem || classCode || category || "General");
     formData.set("criticality", "MEDIUM");
     formData.set("conditionScore", "85");
-    formData.set("room", locationCode);
+    enrichAssetLocationFormData(formData, locations, locationCode);
     formData.set("purchaseCost", String(formData.get("equipmentValue") || ""));
     formData.set("remarks", String(formData.get("additionalNote") || ""));
 
@@ -2383,6 +2429,12 @@ function AssetCreateForm({ teams, users, locations, onSubmit, saving }: { teams:
         </div>
         <AssetOutOfServiceSelect />
         <AssetLocationCodeSelect locations={locations} />
+        <div className="grid gap-3 rounded-lg bg-slate-50 p-3 sm:grid-cols-4">
+          <AssetTextField label="SITE" name="siteCode" />
+          <AssetTextField label="BUILDING" name="buildingCode" />
+          <AssetTextField label="FLOOR" name="floor" />
+          <AssetTextField label="ROOM" name="room" />
+        </div>
         <AssetTextField label="LOCATION_DESC" name="locationDesc" />
         <AssetTextField label="POSITION" name="position" />
         <AssetTextField label="CLASSORGANIZATION" name="classOrganization" />
@@ -2399,6 +2451,20 @@ function AssetCreateForm({ teams, users, locations, onSubmit, saving }: { teams:
   );
 }
 
+function enrichAssetLocationFormData(formData: FormData, locations: any[], locationCode: string) {
+  const selectedLocation = locations.find((location) => String(location.code ?? "") === locationCode);
+  const setIfEmpty = (key: string, value: unknown) => {
+    if (!String(formData.get(key) ?? "").trim() && value !== null && value !== undefined && String(value).trim()) {
+      formData.set(key, String(value));
+    }
+  };
+
+  setIfEmpty("siteCode", selectedLocation?.site);
+  setIfEmpty("buildingCode", selectedLocation?.building);
+  setIfEmpty("floor", selectedLocation?.floor);
+  setIfEmpty("room", selectedLocation?.room || selectedLocation?.code || locationCode);
+  setIfEmpty("locationDesc", selectedLocation?.description);
+}
 function AssetTextField({ label, name, required = false, defaultValue = "", type = "text" }: { label: string; name: string; required?: boolean; defaultValue?: string; type?: string }) {
   return (
     <label className="grid gap-1 text-sm font-bold text-slate-600">
@@ -2441,7 +2507,7 @@ function AssetLocationCodeSelect({
       LOCATION
       <input name="locationCode" defaultValue={defaultValue} list="asset-location-codes" placeholder="Type or select LOCATION code" className={fieldClass} />
       <datalist id="asset-location-codes">
-        {options.map((location) => <option key={location.id ?? location.code} value={location.code}>{location.description || location.code}</option>)}
+        {options.map((location) => <option key={location.id ?? location.code} value={location.code}>{[location.site, location.building, location.floor, location.room, location.description || location.code].filter(Boolean).join(" > ")}</option>)}
       </datalist>
     </label>
   );
@@ -2511,6 +2577,7 @@ function AssetIdentity({ asset }: { asset: any }) {
   const annualRate = Number(asset.depreciationRate ?? 0) / 100;
   const ageYears = Math.max(0, (Date.now() - new Date(asset.installDate ?? Date.now()).getTime()) / (365 * 24 * 60 * 60 * 1000));
   const bookValue = Math.max(salvage, purchase - purchase * annualRate * ageYears);
+  const hierarchy = [asset.siteCode, asset.buildingCode, asset.floor, asset.room, asset.locationCode].filter(Boolean).join(" > ");
 
   return (
     <Panel title="Asset Identification" icon={ClipboardCheck}>
@@ -2536,6 +2603,11 @@ function AssetIdentity({ asset }: { asset: any }) {
           <span>CATEGORY_DESC: {asset.categoryDesc ?? "-"}</span>
           <span>SERIALNUMBER: {asset.serialNumber ?? "-"}</span>
           <span>MODEL / MANUFACTURER: {asset.model ?? "-"} / {asset.manufacturer ?? "-"}</span>
+          <span>SITE: {asset.siteCode ?? "-"}</span>
+          <span>BUILDING: {asset.buildingCode ?? "-"}</span>
+          <span>FLOOR: {asset.floor ?? "-"}</span>
+          <span>ROOM: {asset.room ?? "-"}</span>
+          <span>ROOM HIERARCHY: {hierarchy || "-"}</span>
           <span>LOCATION: {asset.locationCode ?? asset.room ?? "-"}</span>
           <span>LOCATION_DESC: {asset.locationDesc ?? "-"}</span>
           <span>PRIMARYSYSTEM: {asset.primarySystem ?? asset.system ?? "-"}</span>
@@ -2564,7 +2636,7 @@ function AssetEditForm({ asset, teams, users, locations, saving, onSubmit }: { a
     formData.set("assetGroup", classCode || category || "General");
     formData.set("category", category || String(formData.get("categoryDesc") || classCode || "General"));
     formData.set("system", primarySystem || classCode || category || "General");
-    formData.set("room", locationCode);
+    enrichAssetLocationFormData(formData, locations, locationCode);
     formData.set("purchaseCost", String(formData.get("equipmentValue") || ""));
     formData.set("remarks", String(formData.get("additionalNote") || ""));
     await onSubmit(formData);
@@ -2620,6 +2692,12 @@ function AssetEditForm({ asset, teams, users, locations, saving, onSubmit }: { a
             </div>
             <AssetOutOfServiceSelect defaultValue={asset.outOfService ? "YES" : "NO"} />
             <AssetLocationCodeSelect locations={locations} defaultValue={textValue(asset.locationCode ?? asset.room)} />
+            <div className="grid gap-3 rounded-lg bg-slate-50 p-3 sm:grid-cols-4">
+              <EditField label="SITE" name="siteCode" defaultValue={textValue(asset.siteCode)} />
+              <EditField label="BUILDING" name="buildingCode" defaultValue={textValue(asset.buildingCode)} />
+              <EditField label="FLOOR" name="floor" defaultValue={textValue(asset.floor)} />
+              <EditField label="ROOM" name="room" defaultValue={textValue(asset.room)} />
+            </div>
             <EditField label="LOCATION_DESC" name="locationDesc" defaultValue={textValue(asset.locationDesc)} />
             <EditField label="POSITION" name="position" defaultValue={textValue(asset.position)} />
             <EditField label="CLASSORGANIZATION" name="classOrganization" defaultValue={textValue(asset.classOrganization)} />

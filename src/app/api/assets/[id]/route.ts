@@ -135,7 +135,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         installDate: input.installDate ? new Date(input.installDate) : current.installDate,
         replacementDate: input.replacementDate ? new Date(input.replacementDate) : current.replacementDate,
         floor: input.floor || location?.floor || null,
-        room: input.locationCode || input.room || location?.code || null,
+        room: input.room || location?.room || location?.code || input.locationCode || null,
         warrantyExpiry: input.warrantyExpiry ? new Date(input.warrantyExpiry) : current.warrantyExpiry,
         contractRef: input.contractRef || current.contractRef,
         documentationUrl: input.documentationUrl || current.documentationUrl,
