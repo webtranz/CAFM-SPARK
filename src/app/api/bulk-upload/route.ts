@@ -302,6 +302,7 @@ function detectBulkUploadModule(requestedModule: string, rows: Row[]) {
 function bulkUploadPermissions(module: string) {
   if (module === "omManuals") return ["documents.upload"];
   if (module === "ppm") return ["ppm.manage", "assets.manage"];
+  if (["housingAssets", "housingRooms", "housingGuests", "housingOccupancy"].includes(module)) return ["housing.manage", "assets.manage"];
   if (["workOrders", "workOrderComments"].includes(module)) return ["work.manage", "assets.manage"];
   if (module === "requests") return ["requests.manage"];
   if (["teams", "services", "departments", "employees"].includes(module)) return ["users.manage", "requests.manage"];
@@ -326,6 +327,9 @@ async function importRow(module: string, row: Row, context: ImportContext = {}) 
   if (module === "spaces") return importSpace(row, context);
   if (module === "assets") return importAsset(row, context);
   if (module === "housingAssets") return importHousingAsset(row, context);
+  if (module === "housingRooms") return importHousingRoom(row, context);
+  if (module === "housingGuests") return importHousingGuest(row, context);
+  if (module === "housingOccupancy") return importHousingOccupancy(row, context);
   if (module === "inventory") return importInventory(row, context);
   if (module === "requests") return importRequest(row);
   if (module === "workOrders") return importWorkOrder(row, context);
