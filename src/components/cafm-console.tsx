@@ -1905,9 +1905,11 @@ function Assets({
     };
   });
   const hasMoreAssets = assetRowsSource.length < assetTotal;
-  const visibleAssets = assetRows;
   const filterOptions = assetRegisterColumns;
   const assetDisplayColumns = [...assetHierarchyColumns, ...assetRegisterColumns];
+  const [assetExcelFilters, setAssetExcelFilters] = useState<ExcelFilterConfig>({});
+  const [assetExcelSort, setAssetExcelSort] = useState<ExcelSort>(null);
+  const visibleAssets = useMemo(() => applyExcelTableFilters(assetRows, assetDisplayColumns, assetExcelFilters, assetExcelSort), [assetRows, assetDisplayColumns, assetExcelFilters, assetExcelSort]);
   const selectedAssetRow = selectedAssetId ? assetRows.find((asset) => asset.id === selectedAssetId) : null;
   const activeColumnFilterCount = Object.values(columnFilters).filter((value) => value.trim()).length;
   const selectedVisibleAssets = visibleAssets.filter((asset) => selectedAssetIds.has(asset.id));
@@ -2274,7 +2276,11 @@ function Assets({
                     onChange={(event) => toggleVisibleAssets(event.target.checked)}
                   />
                 </th>
-                {assetDisplayColumns.map(([, label]) => <th key={label} className="px-3 py-3">{label}</th>)}
+                {assetDisplayColumns.map(([key, label]) => (
+                  <th key={label} className="px-3 py-3">
+                    <ExcelFilterHeader label={label} columnKey={key} rows={assetRows} filters={assetExcelFilters} sort={assetExcelSort} onFilterChange={(filterKey, values) => setAssetExcelFilters((current) => ({ ...current, [filterKey]: values }))} onSortChange={setAssetExcelSort} />
+                  </th>
+                ))}
                 {isAdmin && <th className="px-3 py-3">Actions</th>}
               </tr>
             </thead>
@@ -2804,7 +2810,19 @@ function WorkOrders({
   const departments = ["All", ...Array.from(new Set(workRowsSource.map((work) => work.departmentCode).filter(Boolean)))];
   const types = ["All", ...Array.from(new Set(workRowsSource.map((work) => work.type).filter(Boolean)))];
   const teams = ["All", ...Array.from(new Set(workRowsSource.map((work) => work.assignedTeamCode).filter(Boolean)))];
-  const visibleWorks = useMemo(() => showTimeMetrics ? workMetricRows(workRowsSource, showOnlyDelayed) : workRowsSource, [workRowsSource, showTimeMetrics, showOnlyDelayed]);
+  const workExcelColumns: ExcelColumn[] = [["title", "Title"], ["status", "Status"], ["priority", "Priority"], ["assetType", "Category"], ["departmentCode", "DPT"], ["dueAt", "Due Date"], ["asset", "Asset"], ["location", "Location"], ["type", "Work Type"], ["description", "Description"], ["createdAt", "Created when"], ["assignedTo", "Assigned To"], ["updatedAt", "Updated when"], ["plannedStart", "Schedule"], ["isIncidentCase", "Incident / Case"]];
+  const [workExcelFilters, setWorkExcelFilters] = useState<ExcelFilterConfig>({});
+  const [workExcelSort, setWorkExcelSort] = useState<ExcelSort>(null);
+  const rawVisibleWorks = useMemo(() => showTimeMetrics ? workMetricRows(workRowsSource, showOnlyDelayed) : workRowsSource, [workRowsSource, showTimeMetrics, showOnlyDelayed]);
+  const visibleWorks = useMemo(() => applyExcelTableFilters(rawVisibleWorks, workExcelColumns, workExcelFilters, workExcelSort, (work, key) => {
+    if (key === "asset") return work.asset?.tag ?? work.assetTag ?? "";
+    if (key === "location") return work.asset?.buildingCode || work.asset?.floor || work.location || "";
+    if (key === "description") return work.jobPlan || work.workNotes || work.title;
+    if (key === "assignedTo") return work.assignedTo?.email ?? work.assignedTeamCode ?? "";
+    if (key === "isIncidentCase") return work.isIncidentCase ? "Yes" : "No";
+    if (["dueAt", "createdAt", "updatedAt", "plannedStart"].includes(key)) return formatDateCell(work[key]);
+    return work[key];
+  }), [rawVisibleWorks, workExcelColumns, workExcelFilters, workExcelSort]);
   const selectedWork = visibleWorks.find((work) => work.id === selectedWorkId) ?? visibleWorks[0] ?? workRowsSource[0] ?? data.workOrders[0];
   const hasMoreWorks = workRowsSource.length < workTotal;
   const selectedVisibleWorks = visibleWorks.filter((work) => selectedWorkIds.has(work.id));
@@ -3079,21 +3097,19 @@ function WorkOrders({
                       />
                     </th>
                     <th className="px-3 py-3 font-black">#</th>
-                    <th className="px-3 py-3 font-black">Title</th>
-                    <th className="px-3 py-3 font-black">Status</th>
-                    <th className="px-3 py-3 font-black">Priority</th>
-                    <th className="px-3 py-3 font-black">Category</th>
-                    <th className="px-3 py-3 font-black">DPT</th>
-                    <th className="px-3 py-3 font-black">Due Date</th>
-                    <th className="px-3 py-3 font-black">Asset</th>
-                    <th className="px-3 py-3 font-black">Location</th>
-                    <th className="px-3 py-3 font-black">Work Type</th>
-                    <th className="px-3 py-3 font-black">Description</th>
-                    <th className="px-3 py-3 font-black">Created when</th>
-                    <th className="px-3 py-3 font-black">Assigned To</th>
-                    <th className="px-3 py-3 font-black">Updated when</th>
-                    <th className="px-3 py-3 font-black">Schedule</th>
-                    <th className="px-3 py-3 font-black">Incident / Case</th>
+                    {workExcelColumns.map(([key, label]) => (
+                      <th key={key} className="px-3 py-3 font-black">
+                        <ExcelFilterHeader label={label} columnKey={key} rows={rawVisibleWorks} filters={workExcelFilters} sort={workExcelSort} onFilterChange={(filterKey, values) => setWorkExcelFilters((current) => ({ ...current, [filterKey]: values }))} onSortChange={setWorkExcelSort} getValue={(work, valueKey) => {
+                          if (valueKey === "asset") return work.asset?.tag ?? work.assetTag ?? "";
+                          if (valueKey === "location") return work.asset?.buildingCode || work.asset?.floor || work.location || "";
+                          if (valueKey === "description") return work.jobPlan || work.workNotes || work.title;
+                          if (valueKey === "assignedTo") return work.assignedTo?.email ?? work.assignedTeamCode ?? "";
+                          if (valueKey === "isIncidentCase") return work.isIncidentCase ? "Yes" : "No";
+                          if (["dueAt", "createdAt", "updatedAt", "plannedStart"].includes(valueKey)) return formatDateCell(work[valueKey]);
+                          return work[valueKey];
+                        }} />
+                      </th>
+                    ))}
                     <th className="px-3 py-3 font-black">Actions</th>
                   </tr>
                 </thead>
@@ -3396,7 +3412,14 @@ function Helpdesk({
   const isSupervisorView = roleKindLabel(role) === "admin" || roleKindLabel(role) === "supervisor";
   const isAdmin = roleKindLabel(role) === "admin";
   const requestCategories = ["All", ...Array.from(new Set(requestRowsSource.map((request) => request.category).filter(Boolean)))];
-  const filteredRequests = requestRowsSource;
+  const requestExcelColumns: ExcelColumn[] = [["title", "Title"], ["status", "Status"], ["priority", "Priority"], ["category", "Category"], ["createdAt", "Created when"], ["dueAt", "Needed by"], ["location", "Location"], ["departmentCode", "Department"], ["serviceCode", "Service"], ["description", "Description"], ["requester", "Created by"], ["assignedSupervisorEmail", "Supervisor"], ["isIncidentCase", "Incident / Case"]];
+  const [requestExcelFilters, setRequestExcelFilters] = useState<ExcelFilterConfig>({});
+  const [requestExcelSort, setRequestExcelSort] = useState<ExcelSort>(null);
+  const filteredRequests = useMemo(() => applyExcelTableFilters(requestRowsSource, requestExcelColumns, requestExcelFilters, requestExcelSort, (request, key) => {
+    if (["createdAt", "dueAt"].includes(key)) return formatDateCell(request[key]);
+    if (key === "isIncidentCase") return request.isIncidentCase ? "Yes" : "No";
+    return request[key];
+  }), [requestRowsSource, requestExcelColumns, requestExcelFilters, requestExcelSort]);
   const selectedRequest = filteredRequests.find((request) => request.id === selectedRequestId) ?? filteredRequests[0] ?? requestRowsSource[0] ?? requests[0];
   const visibleRequests = filteredRequests;
   const hasMoreRequests = requestRowsSource.length < requestTotal;
@@ -3645,19 +3668,15 @@ function Helpdesk({
                   </th>
                 )}
                 <th className="px-3 py-3 font-black">#</th>
-                <th className="px-3 py-3 font-black">Title</th>
-                <th className="px-3 py-3 font-black">Status</th>
-                <th className="px-3 py-3 font-black">Priority</th>
-                <th className="px-3 py-3 font-black">Category</th>
-                <th className="px-3 py-3 font-black">Created when</th>
-                <th className="px-3 py-3 font-black">Needed by</th>
-                <th className="px-3 py-3 font-black">Location</th>
-                <th className="px-3 py-3 font-black">Department</th>
-                <th className="px-3 py-3 font-black">Service</th>
-                <th className="px-3 py-3 font-black">Description</th>
-                <th className="px-3 py-3 font-black">Created by</th>
-                <th className="px-3 py-3 font-black">Supervisor</th>
-                <th className="px-3 py-3 font-black">Incident / Case</th>
+                {requestExcelColumns.map(([key, label]) => (
+                  <th key={key} className="px-3 py-3 font-black">
+                    <ExcelFilterHeader label={label} columnKey={key} rows={requestRowsSource} filters={requestExcelFilters} sort={requestExcelSort} onFilterChange={(filterKey, values) => setRequestExcelFilters((current) => ({ ...current, [filterKey]: values }))} onSortChange={setRequestExcelSort} getValue={(request, valueKey) => {
+                      if (["createdAt", "dueAt"].includes(valueKey)) return formatDateCell(request[valueKey]);
+                      if (valueKey === "isIncidentCase") return request.isIncidentCase ? "Yes" : "No";
+                      return request[valueKey];
+                    }} />
+                  </th>
+                ))}
                 <th className="px-3 py-3 font-black">Actions</th>
               </tr>
             </thead>
@@ -5359,9 +5378,18 @@ function Ppm({
     acc[key] = [...(acc[key] ?? []), ppm];
     return acc;
   }, {});
+  const ppmExcelColumns: ExcelColumn[] = [["ppmCode", "PPM Code"], ["name", "Title"], ["active", "Status"], ["frequency", "Frequency"], ["nextDue", "Next Due"], ["priority", "Priority"], ["departmentCode", "Department"], ["assetTag", "Asset"], ["locationCode", "Location"]];
+  const [ppmExcelFilters, setPpmExcelFilters] = useState<ExcelFilterConfig>({});
+  const [ppmExcelSort, setPpmExcelSort] = useState<ExcelSort>(null);
+  const filteredPpmRows = useMemo(() => applyExcelTableFilters(ppmRowsSource, ppmExcelColumns, ppmExcelFilters, ppmExcelSort, (ppm, key) => {
+    if (key === "ppmCode") return ppm.ppmCode || String(ppm.code || "").split("-")[0] || ppm.code;
+    if (key === "active") return ppm.active ? "Planned" : "Paused";
+    if (key === "nextDue") return formatDateCell(ppm.nextDue);
+    return ppm[key];
+  }), [ppmRowsSource, ppmExcelColumns, ppmExcelFilters, ppmExcelSort]);
   const hasMorePpms = ppmRowsSource.length < ppmTotal;
-  const selectedVisiblePpms = ppmRowsSource.filter((ppm) => selectedPpmIds.has(ppm.id));
-  const allVisiblePpmsSelected = isAdmin && Boolean(ppmRowsSource.length) && selectedVisiblePpms.length === ppmRowsSource.length;
+  const selectedVisiblePpms = filteredPpmRows.filter((ppm) => selectedPpmIds.has(ppm.id));
+  const allVisiblePpmsSelected = isAdmin && Boolean(filteredPpmRows.length) && selectedVisiblePpms.length === filteredPpmRows.length;
   const someVisiblePpmsSelected = isAdmin && selectedVisiblePpms.length > 0 && !allVisiblePpmsSelected;
 
   useEffect(() => {
@@ -5437,7 +5465,7 @@ function Ppm({
   function toggleVisiblePpms(checked: boolean) {
     setSelectedPpmIds((current) => {
       const next = new Set(current);
-      ppmRowsSource.forEach((ppm) => {
+      filteredPpmRows.forEach((ppm) => {
         if (checked) next.add(ppm.id);
         else next.delete(ppm.id);
       });
@@ -5522,7 +5550,7 @@ function Ppm({
             )}
             {bulkProgress && <div className="mb-3"><BulkActionProgress label={bulkProgress.label} done={bulkProgress.done} total={bulkProgress.total} /></div>}
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm font-black text-slate-600">
-              <span>Showing {ppmRowsSource.length.toLocaleString()} of {ppmTotal.toLocaleString()} PPM plans</span>
+              <span>Showing {filteredPpmRows.length.toLocaleString()} of {ppmRowsSource.length.toLocaleString()} loaded / {ppmTotal.toLocaleString()} PPM plans</span>
               {ppmLoading && <span className="text-lagoon">Loading PPM plans...</span>}
             </div>
             <div ref={ppmScrollRef} onScroll={handlePpmScroll} className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
@@ -5541,11 +5569,22 @@ function Ppm({
                         />
                       </th>
                     )}
-                    <th className="px-3 py-3">#</th><th className="px-3 py-3">PPM Code</th><th className="px-3 py-3">Title</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Frequency</th><th className="px-3 py-3">Next Due</th><th className="px-3 py-3">Priority</th><th className="px-3 py-3">Department</th><th className="px-3 py-3">Asset</th><th className="px-3 py-3">Location</th><th className="px-3 py-3">Actions</th>
+                    <th className="px-3 py-3">#</th>
+                    {ppmExcelColumns.map(([key, label]) => (
+                      <th key={key} className="px-3 py-3">
+                        <ExcelFilterHeader label={label} columnKey={key} rows={ppmRowsSource} filters={ppmExcelFilters} sort={ppmExcelSort} onFilterChange={(filterKey, values) => setPpmExcelFilters((current) => ({ ...current, [filterKey]: values }))} onSortChange={setPpmExcelSort} getValue={(ppm, valueKey) => {
+                          if (valueKey === "ppmCode") return ppm.ppmCode || String(ppm.code || "").split("-")[0] || ppm.code;
+                          if (valueKey === "active") return ppm.active ? "Planned" : "Paused";
+                          if (valueKey === "nextDue") return formatDateCell(ppm.nextDue);
+                          return ppm[valueKey];
+                        }} />
+                      </th>
+                    ))}
+                    <th className="px-3 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {ppmRowsSource.map((ppm, index) => {
+                {filteredPpmRows.map((ppm, index) => {
                   const asset = assets.find((item) => item.tag === ppm.assetTag);
                   const location = locations.find((item) => item.code === ppm.locationCode);
                   return (
@@ -6947,19 +6986,22 @@ function ScrollableRowsTable({
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
   const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
-  const visibleRows = rows.slice(0, visibleCount);
+  const [excelFilters, setExcelFilters] = useState<ExcelFilterConfig>({});
+  const [excelSort, setExcelSort] = useState<ExcelSort>(null);
+  const filteredRows = useMemo(() => applyExcelTableFilters(rows, columns, excelFilters, excelSort), [rows, columns, excelFilters, excelSort]);
+  const visibleRows = filteredRows.slice(0, visibleCount);
   const rowKey = (row: any, index: number) => String(row.id ?? row.reference ?? row.title ?? index);
   const visibleRowKeys = visibleRows.map((row, index) => rowKey(row, index));
-  const selectedRows = rows.filter((row, index) => selectedRowKeys.has(rowKey(row, index)));
+  const selectedRows = filteredRows.filter((row, index) => selectedRowKeys.has(rowKey(row, index)));
   const selectedVisibleKeys = visibleRowKeys.filter((key) => selectedRowKeys.has(key));
   const allVisibleSelected = bulkSelectable && Boolean(visibleRowKeys.length) && selectedVisibleKeys.length === visibleRowKeys.length;
   const someVisibleSelected = bulkSelectable && selectedVisibleKeys.length > 0 && !allVisibleSelected;
   const displayTotal = totalRows ?? rows.length;
-  const hasMoreRows = onLoadMore ? rows.length < displayTotal : visibleRows.length < rows.length;
+  const hasMoreRows = onLoadMore ? rows.length < displayTotal : visibleRows.length < filteredRows.length;
 
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [rows.length]);
+  }, [filteredRows.length]);
 
   useEffect(() => {
     const allKeys = new Set(rows.map((row, index) => rowKey(row, index)));
@@ -6974,7 +7016,7 @@ function ScrollableRowsTable({
         void onLoadMore();
         return;
       }
-      setVisibleCount((current) => Math.min(rows.length, current + PAGE_SIZE));
+      setVisibleCount((current) => Math.min(filteredRows.length, current + PAGE_SIZE));
     }
   }
 
@@ -7016,8 +7058,8 @@ function ScrollableRowsTable({
       }
       return;
     }
-    const target = Math.ceil((rows.length * percent) / 100);
-    setSelectedRowKeys(new Set(rows.slice(0, target).map((row, index) => rowKey(row, index))));
+    const target = Math.ceil((filteredRows.length * percent) / 100);
+    setSelectedRowKeys(new Set(filteredRows.slice(0, target).map((row, index) => rowKey(row, index))));
   }
 
   async function deleteSelectedRows() {
@@ -7065,9 +7107,9 @@ function ScrollableRowsTable({
                 </th>
               )}
               <th className="w-14 px-3 py-3 font-black">#</th>
-              {columns.map(([, label]) => (
+              {columns.map(([key, label]) => (
                 <th key={label} className="px-3 py-3 font-black">
-                  {label}
+                  <ExcelFilterHeader label={label} columnKey={key} rows={rows} filters={excelFilters} sort={excelSort} onFilterChange={(filterKey, values) => setExcelFilters((current) => ({ ...current, [filterKey]: values }))} onSortChange={setExcelSort} />
                 </th>
               ))}
               {actions && <th className="w-28 px-3 py-3 font-black">Actions</th>}
@@ -10015,17 +10057,20 @@ function HousingTable({ title, rows, columns, onSelect, actions, reportType, bul
   const [page, setPage] = useState(1);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const [excelFilters, setExcelFilters] = useState<ExcelFilterConfig>({});
+  const [excelSort, setExcelSort] = useState<ExcelSort>(null);
+  const filteredRows = useMemo(() => applyExcelTableFilters(rows, columns, excelFilters, excelSort), [rows, columns, excelFilters, excelSort]);
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
-  const visibleRows = rows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const visibleRows = filteredRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
   const selectedVisibleRows = visibleRows.filter((row) => selectedRowIds.has(row.id));
-  const selectedRows = rows.filter((row) => selectedRowIds.has(row.id));
+  const selectedRows = filteredRows.filter((row) => selectedRowIds.has(row.id));
   const allVisibleSelected = bulkSelectable && Boolean(visibleRows.length) && selectedVisibleRows.length === visibleRows.length;
   const someVisibleSelected = bulkSelectable && selectedVisibleRows.length > 0 && !allVisibleSelected;
 
   useEffect(() => {
     setPage(1);
-  }, [rows.length, reportType]);
+  }, [filteredRows.length, reportType]);
 
   useEffect(() => {
     setSelectedRowIds((current) => new Set(Array.from(current).filter((id) => rows.some((row) => row.id === id))));
@@ -10052,8 +10097,8 @@ function HousingTable({ title, rows, columns, onSelect, actions, reportType, bul
   }
 
   function selectAllRows(percent = 100) {
-    const target = Math.ceil((rows.length * percent) / 100);
-    setSelectedRowIds(new Set(rows.slice(0, target).map((row) => row.id).filter(Boolean)));
+    const target = Math.ceil((filteredRows.length * percent) / 100);
+    setSelectedRowIds(new Set(filteredRows.slice(0, target).map((row) => row.id).filter(Boolean)));
   }
 
   async function deleteSelectedRows() {
@@ -10102,7 +10147,11 @@ function HousingTable({ title, rows, columns, onSelect, actions, reportType, bul
                 </th>
               )}
               <th className="px-3 py-3">#</th>
-              {columns.map(([, label]) => <th key={label} className="px-3 py-3">{label}</th>)}
+              {columns.map(([key, label]) => (
+                <th key={label} className="px-3 py-3">
+                  <ExcelFilterHeader label={label} columnKey={key} rows={rows} filters={excelFilters} sort={excelSort} onFilterChange={(filterKey, values) => setExcelFilters((current) => ({ ...current, [filterKey]: values }))} onSortChange={setExcelSort} />
+                </th>
+              ))}
               {actions && <th className="px-3 py-3">Actions</th>}
             </tr>
           </thead>
@@ -10124,12 +10173,12 @@ function HousingTable({ title, rows, columns, onSelect, actions, reportType, bul
                 {actions && <td className="px-3 py-3">{actions(row)}</td>}
               </tr>
             ))}
-            {!rows.length && <tr><td colSpan={columns.length + (actions ? 2 : 1) + (bulkSelectable ? 1 : 0)} className="px-3 py-6 text-center font-bold text-slate-500">No housing records found.</td></tr>}
+            {!filteredRows.length && <tr><td colSpan={columns.length + (actions ? 2 : 1) + (bulkSelectable ? 1 : 0)} className="px-3 py-6 text-center font-bold text-slate-500">No housing records found.</td></tr>}
           </tbody>
         </table>
       </div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-600">
-        <span>Page {safePage} of {totalPages} / {rows.length} entries / {PAGE_SIZE} per page</span>
+        <span>Page {safePage} of {totalPages} / {filteredRows.length} entries / {PAGE_SIZE} per page</span>
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled={safePage === 1} onClick={() => setPage((current) => Math.max(1, current - 1))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 disabled:opacity-50">Previous</button>
           {Array.from({ length: Math.min(totalPages, 5) }, (_, index) => {
@@ -11248,6 +11297,128 @@ function DeleteRowButton({ saving, onDelete }: { saving: boolean; onDelete: () =
   );
 }
 
+type ExcelSort = { key: string; direction: "asc" | "desc" } | null;
+type ExcelFilterConfig = Record<string, string[] | null>;
+type ExcelColumn = [string, string];
+
+function excelCellText(value: unknown) {
+  if (value === null || value === undefined || value === "") return "(Blanks)";
+  if (value instanceof Date) return formatDateCell(value.toISOString());
+  return String(value).trim() || "(Blanks)";
+}
+
+function applyExcelTableFilters<T>(rows: T[], columns: ExcelColumn[], filters: ExcelFilterConfig, sort: ExcelSort, getValue?: (row: T, key: string) => unknown) {
+  const filtered = rows.filter((row) => columns.every(([key]) => {
+    const selected = filters[key];
+    if (!selected) return true;
+    const value = excelCellText(getValue ? getValue(row, key) : (row as any)[key]);
+    return selected.includes(value);
+  }));
+  if (!sort) return filtered;
+  return [...filtered].sort((left, right) => {
+    const leftValue = excelCellText(getValue ? getValue(left, sort.key) : (left as any)[sort.key]);
+    const rightValue = excelCellText(getValue ? getValue(right, sort.key) : (right as any)[sort.key]);
+    const leftNumber = Number(leftValue.replace(/,/g, ""));
+    const rightNumber = Number(rightValue.replace(/,/g, ""));
+    const comparison = Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
+      ? leftNumber - rightNumber
+      : leftValue.localeCompare(rightValue, undefined, { numeric: true, sensitivity: "base" });
+    return sort.direction === "asc" ? comparison : -comparison;
+  });
+}
+
+function ExcelFilterHeader<T>({ label, columnKey, rows, filters, sort, onFilterChange, onSortChange, getValue }: {
+  label: string;
+  columnKey: string;
+  rows: T[];
+  filters: ExcelFilterConfig;
+  sort: ExcelSort;
+  onFilterChange: (key: string, values: string[] | null) => void;
+  onSortChange: (sort: ExcelSort) => void;
+  getValue?: (row: T, key: string) => unknown;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const allValues = useMemo(() => Array.from(new Set(rows.map((row) => excelCellText(getValue ? getValue(row, columnKey) : (row as any)[columnKey])))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })), [rows, columnKey, getValue]);
+  const selectedValues = filters[columnKey] ?? allValues;
+  const [draftValues, setDraftValues] = useState<Set<string>>(new Set(selectedValues));
+  const visibleValues = allValues.filter((value) => value.toLowerCase().includes(search.toLowerCase()));
+  const allVisibleChecked = visibleValues.length > 0 && visibleValues.every((value) => draftValues.has(value));
+  const active = Boolean(filters[columnKey]) || sort?.key === columnKey;
+
+  useEffect(() => {
+    if (open) setDraftValues(new Set(filters[columnKey] ?? allValues));
+  }, [open, filters, columnKey, allValues]);
+
+  function toggleValue(value: string, checked: boolean) {
+    setDraftValues((current) => {
+      const next = new Set(current);
+      if (checked) next.add(value);
+      else next.delete(value);
+      return next;
+    });
+  }
+
+  function toggleVisible(checked: boolean) {
+    setDraftValues((current) => {
+      const next = new Set(current);
+      visibleValues.forEach((value) => {
+        if (checked) next.add(value);
+        else next.delete(value);
+      });
+      return next;
+    });
+  }
+
+  function applyFilter() {
+    const nextValues = Array.from(draftValues);
+    onFilterChange(columnKey, nextValues.length === allValues.length ? null : nextValues);
+    setOpen(false);
+  }
+
+  function clearFilter() {
+    onFilterChange(columnKey, null);
+    if (sort?.key === columnKey) onSortChange(null);
+    setSearch("");
+    setDraftValues(new Set(allValues));
+    setOpen(false);
+  }
+
+  return (
+    <div className="relative inline-flex items-center gap-1">
+      <span>{label}</span>
+      <button type="button" onClick={(event) => { event.stopPropagation(); setOpen((current) => !current); }} className={`grid h-5 w-5 place-items-center rounded border text-[10px] ${active ? "border-lagoon bg-lagoon text-white" : "border-slate-300 bg-white text-slate-500"}`}>?</button>
+      {open && (
+        <div onClick={(event) => event.stopPropagation()} className="absolute left-0 top-7 z-50 w-72 rounded-lg border border-slate-200 bg-white p-3 text-left normal-case text-slate-700 shadow-xl">
+          <div className="grid gap-1 border-b border-slate-100 pb-2 text-xs font-bold">
+            <button type="button" onClick={() => { onSortChange({ key: columnKey, direction: "asc" }); setOpen(false); }} className="rounded px-2 py-2 text-left hover:bg-slate-50">Sort A to Z / Smallest to Largest</button>
+            <button type="button" onClick={() => { onSortChange({ key: columnKey, direction: "desc" }); setOpen(false); }} className="rounded px-2 py-2 text-left hover:bg-slate-50">Sort Z to A / Largest to Smallest</button>
+            <button type="button" onClick={clearFilter} className="rounded px-2 py-2 text-left text-coral hover:bg-rose-50">Clear Filter</button>
+          </div>
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search" className="mt-3 h-9 w-full rounded border border-slate-200 px-2 text-sm outline-none focus:border-lagoon" />
+          <label className="mt-2 flex items-center gap-2 rounded bg-slate-50 px-2 py-2 text-xs font-black">
+            <input type="checkbox" checked={allVisibleChecked} onChange={(event) => toggleVisible(event.target.checked)} />
+            (Select All)
+          </label>
+          <div className="mt-1 max-h-56 overflow-auto border border-slate-100 bg-white p-1">
+            {visibleValues.map((value) => (
+              <label key={value} className="flex items-center gap-2 px-2 py-1 text-xs font-bold hover:bg-slate-50">
+                <input type="checkbox" checked={draftValues.has(value)} onChange={(event) => toggleValue(value, event.target.checked)} />
+                <span className="truncate" title={value}>{value}</span>
+              </label>
+            ))}
+            {!visibleValues.length && <p className="px-2 py-4 text-center text-xs font-bold text-slate-400">No values</p>}
+          </div>
+          <div className="mt-3 flex justify-end gap-2">
+            <button type="button" onClick={() => setOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-600">Cancel</button>
+            <button type="button" onClick={applyFilter} className="rounded-lg bg-lagoon px-3 py-2 text-xs font-black text-white">OK</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DataTable({
   rows,
   columns,
@@ -11272,10 +11443,13 @@ function DataTable({
   const [page, setPage] = useState(1);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
   const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const [excelFilters, setExcelFilters] = useState<ExcelFilterConfig>({});
+  const [excelSort, setExcelSort] = useState<ExcelSort>(null);
+  const filteredRows = useMemo(() => applyExcelTableFilters(rows, columns, excelFilters, excelSort), [rows, columns, excelFilters, excelSort]);
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const startIndex = (currentPage - 1) * PAGE_SIZE;
-  const visibleRows = rows.slice(startIndex, startIndex + PAGE_SIZE);
+  const visibleRows = filteredRows.slice(startIndex, startIndex + PAGE_SIZE);
   const rowKey = (row: any, index: number) => String(row.id ?? row.code ?? row.name ?? row.reference ?? row.ticketNo ?? row.woNo ?? index);
   const visibleRowKeys = visibleRows.map((row, index) => rowKey(row, startIndex + index));
   const selectedRows = rows.filter((row, index) => selectedRowKeys.has(rowKey(row, index)));
@@ -11381,7 +11555,7 @@ function DataTable({
               <th className="whitespace-nowrap px-3 py-3 font-black">#</th>
               {columns.map(([, label]) => (
                 <th key={label} className="whitespace-nowrap px-3 py-3 font-black">
-                  {label}
+                  <ExcelFilterHeader label={label} columnKey={columns.find(([, currentLabel]) => currentLabel === label)?.[0] || label} rows={rows} filters={excelFilters} sort={excelSort} onFilterChange={(key, values) => setExcelFilters((current) => ({ ...current, [key]: values }))} onSortChange={setExcelSort} />
                 </th>
               ))}
               {actions && <th className="whitespace-nowrap px-3 py-3 font-black">Actions</th>}
@@ -11411,7 +11585,7 @@ function DataTable({
           </tbody>
         </table>
       </div>
-      <PaginationControls page={currentPage} totalPages={totalPages} onPageChange={setPage} totalItems={rows.length} />
+      <PaginationControls page={currentPage} totalPages={totalPages} onPageChange={setPage} totalItems={filteredRows.length} />
     </div>
   );
 }
