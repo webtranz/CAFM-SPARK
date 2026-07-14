@@ -23,8 +23,8 @@ type ImportEntry = ImportResult & { row: number; status: "SUCCESS" | "FAILED"; m
 type ImportFailure = { row: number; message: string };
 type BulkUploadUser = { id?: string; name?: string; email?: string; role?: string } | null;
 type UploadedDocumentFile = { file: File; name: string; size: number };
-type ImportMode = "keepExisting" | "replaceExisting";
-type ImportContext = { documentFiles?: Map<string, UploadedDocumentFile>; mode?: ImportMode };
+type ImportMode = "keepExisting" | "replaceExisting" | "deleteExisting";
+type ImportContext = { documentFiles?: Map<string, UploadedDocumentFile>; mode?: ImportMode; deletedRows?: number };
 type ManualLibraryRecord = { checksum: string; fileName: string; fileSize: number; fileUrl: string; mimeType: string; originalName: string };
 
 const BACKGROUND_ROW_THRESHOLD = 5000;
@@ -68,25 +68,45 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData();
     const requestedModule = String(formData.get("module") || "");
+    const context = buildImportContext(requestedModule, formData);
     const file = formData.get("file");
+    const deleteOnly = context.mode === "deleteExisting";
 
-    if (!(file instanceof File)) {
+    if (!(file instanceof File) && !deleteOnly) {
       return apiError(new Error("CSV file is required."), "CSV file is required", 400);
     }
 
-    const rows = parseCsv(await file.text());
+    const uploadFile = file instanceof File ? file : null;
+    const rows = uploadFile ? parseCsv(await uploadFile.text()) : [];
     const module = detectBulkUploadModule(requestedModule, rows);
     const { error, user } = await requireAnyPermission(bulkUploadPermissions(module));
     if (error) return error;
-    const context = buildImportContext(module, formData);
 
+    if (deleteOnly) {
+      const deleted = await clearExistingBulkUploadData(module);
+      const result = {
+        created: 0,
+        skipped: 0,
+        failed: [],
+        deleted,
+        message: `${deleted.toLocaleString()} existing ${bulkModuleLabel(module)} records deleted.`,
+      };
+      await auditAction({
+        user,
+        action: "BULK_DELETE_EXISTING",
+        entity: "bulk_upload",
+        entityId: module || "unknown",
+        details: { module, deleted, importMode: context.mode },
+      });
+      return NextResponse.json(result, { status: 200 });
+    }
 
     if (rows.length > BACKGROUND_ROW_THRESHOLD) {
       const job = await prisma.bulkUploadJob.create({
         data: {
           module,
-          fileName: file.name,
-          fileSize: file.size,
+          fileName: uploadFile?.name || "CSV upload",
+          fileSize: uploadFile?.size || 0,
           totalRows: rows.length,
           status: "QUEUED",
           message: "Bulk upload has been queued for background processing.",
@@ -96,14 +116,14 @@ export async function POST(request: Request) {
         },
       });
 
-      void processBulkUploadJob(job.id, module, rows, { name: file.name, size: file.size }, user, context);
+      void processBulkUploadJob(job.id, module, rows, { name: uploadFile?.name || "CSV upload", size: uploadFile?.size || 0 }, user, context);
 
       return NextResponse.json({
         jobId: job.id,
         status: "QUEUED",
         module,
-        fileName: file.name,
-        fileSize: file.size,
+        fileName: uploadFile?.name || "CSV upload",
+        fileSize: uploadFile?.size || 0,
         totalRows: rows.length,
         processedRows: 0,
         createdRows: 0,
@@ -123,8 +143,8 @@ export async function POST(request: Request) {
       entityId: module || "unknown",
       details: {
         module,
-        fileName: file.name,
-        fileSize: file.size,
+        fileName: uploadFile?.name || "CSV upload",
+        fileSize: uploadFile?.size || 0,
         totalRows: rows.length,
         created,
         skipped,
@@ -146,7 +166,11 @@ async function processRows(
   context: ImportContext = {},
   onProgress?: (progress: { processedRows: number; createdRows: number; failedRows: number; failed: ImportFailure[]; entries: ImportEntry[] }) => Promise<void>,
 ) {
-  await syncHierarchyModuleBeforeImport(module, rows, context);
+  if (shouldDeleteBeforeImport(context)) {
+    context.deletedRows = await clearExistingBulkUploadData(module);
+  } else {
+    await syncHierarchyModuleBeforeImport(module, rows, context);
+  }
   const failed: ImportFailure[] = [];
   const entries: ImportEntry[] = [];
   let created = 0;
@@ -180,7 +204,12 @@ async function processRows(
     }
   }
 
-  return { created, skipped, failed, entries, result: csvResponse(created, failed, skipped) };
+  const result = csvResponse(created, failed, skipped);
+  if (context.deletedRows) {
+    result.message = `${context.deletedRows.toLocaleString()} old ${bulkModuleLabel(module)} records deleted. ${result.message}`;
+    (result as typeof result & { deleted: number }).deleted = context.deletedRows;
+  }
+  return { created, skipped, failed, entries, result };
 }
 
 async function processBulkUploadJob(jobId: string, module: string, rows: Row[], file: { name: string; size: number }, user: BulkUploadUser, context: ImportContext = {}) {
@@ -310,7 +339,8 @@ function bulkUploadPermissions(module: string) {
 }
 
 function buildImportContext(module: string, formData: FormData): ImportContext {
-  const mode: ImportMode = String(formData.get("importMode") || "keepExisting") === "replaceExisting" ? "replaceExisting" : "keepExisting";
+  const requestedMode = String(formData.get("importMode") || "keepExisting");
+  const mode: ImportMode = requestedMode === "replaceExisting" || requestedMode === "deleteExisting" ? requestedMode : "keepExisting";
   if (module !== "omManuals") return { mode };
   const documentFiles = new Map<string, UploadedDocumentFile>();
   formData.getAll("manualFiles").forEach((item) => {
@@ -373,6 +403,141 @@ async function firstSite() {
 
 function shouldReplace(context: ImportContext = {}) {
   return context.mode === "replaceExisting";
+}
+
+function shouldDeleteBeforeImport(context: ImportContext = {}) {
+  return context.mode === "replaceExisting";
+}
+
+function bulkModuleLabel(module: string) {
+  return module.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+}
+
+async function clearExistingBulkUploadData(module: string) {
+  let deleted = 0;
+  const add = (result: { count: number }) => { deleted += result.count; };
+
+  if (module === "ppm") {
+    add(await prisma.preventiveMaintenance.deleteMany({}));
+    return deleted;
+  }
+  if (module === "workOrderComments") {
+    add(await prisma.workOrder.updateMany({ where: { workNotes: { not: "" } }, data: { workNotes: "" } }));
+    return deleted;
+  }
+  if (module === "workOrders") {
+    add(await prisma.inventoryIssue.deleteMany({}));
+    add(await prisma.workOrder.deleteMany({}));
+    return deleted;
+  }
+  if (module === "requests") {
+    await prisma.workOrder.updateMany({ where: { requestId: { not: null } }, data: { requestId: null } });
+    add(await prisma.serviceRequest.deleteMany({}));
+    return deleted;
+  }
+  if (module === "assets") {
+    await prisma.workOrder.updateMany({ where: { assetId: { not: null } }, data: { assetId: null } });
+    await prisma.meter.updateMany({ where: { assetId: { not: null } }, data: { assetId: null } });
+    add(await prisma.asset.deleteMany({}));
+    return deleted;
+  }
+  if (module === "locations") {
+    add(await prisma.location.deleteMany({}));
+    return deleted;
+  }
+  if (module === "sites") {
+    await clearExistingBulkUploadData("assets");
+    add(await prisma.space.deleteMany({}));
+    add(await prisma.building.deleteMany({}));
+    add(await prisma.site.deleteMany({}));
+    return deleted;
+  }
+  if (module === "buildings") {
+    await prisma.asset.updateMany({ where: { buildingId: { not: null } }, data: { buildingId: null } });
+    add(await prisma.space.deleteMany({}));
+    add(await prisma.building.deleteMany({}));
+    return deleted;
+  }
+  if (module === "spaces") {
+    add(await prisma.space.deleteMany({}));
+    return deleted;
+  }
+  if (module === "housingOccupancy") {
+    const bookings = await prisma.housingBooking.findMany({ select: { id: true } });
+    const bookingIds = bookings.map((booking) => booking.id);
+    if (bookingIds.length) {
+      add(await prisma.housingApproval.deleteMany({ where: { bookingId: { in: bookingIds } } }));
+      add(await prisma.housingNotification.deleteMany({ where: { bookingId: { in: bookingIds } } }));
+      add(await prisma.housingHistory.deleteMany({ where: { bookingId: { in: bookingIds } } }));
+    }
+    add(await prisma.housingBooking.deleteMany({}));
+    await prisma.housingRoom.updateMany({ data: { occupancy: 0, status: "AVAILABLE" } });
+    await prisma.housingBed.updateMany({ data: { occupant: null, occupantId: null, status: "AVAILABLE" } });
+    return deleted;
+  }
+  if (module === "housingGuests") {
+    await clearExistingBulkUploadData("housingOccupancy");
+    add(await prisma.housingResident.deleteMany({}));
+    return deleted;
+  }
+  if (module === "housingRooms") {
+    await clearExistingBulkUploadData("housingOccupancy");
+    add(await prisma.housingRoomHold.deleteMany({}));
+    add(await prisma.housingInspection.deleteMany({}));
+    add(await prisma.housingHistory.deleteMany({ where: { roomId: { not: null } } }));
+    await prisma.housingAsset.updateMany({ where: { roomId: { not: null } }, data: { roomId: null } });
+    await prisma.housingInventory.updateMany({ where: { roomId: { not: null } }, data: { roomId: null } });
+    add(await prisma.housingBed.deleteMany({}));
+    add(await prisma.housingRoom.deleteMany({}));
+    add(await prisma.housingBlock.deleteMany({}));
+    add(await prisma.housingProperty.deleteMany({}));
+    return deleted;
+  }
+  if (module === "housingAssets") {
+    add(await prisma.housingHistory.deleteMany({ where: { assetId: { not: null } } }));
+    add(await prisma.housingAsset.deleteMany({}));
+    return deleted;
+  }
+  if (module === "inventory") {
+    add(await prisma.inventoryIssue.deleteMany({}));
+    add(await prisma.inventoryItem.deleteMany({}));
+    return deleted;
+  }
+  if (module === "omManuals") {
+    add(await prisma.documentUpload.deleteMany({}));
+    return deleted;
+  }
+  if (module === "jobPlans") {
+    add(await prisma.jobPlan.deleteMany({}));
+    return deleted;
+  }
+  if (module === "inspections") {
+    add(await prisma.inspection.deleteMany({}));
+    return deleted;
+  }
+  if (module === "teams") {
+    await prisma.user.updateMany({ where: { teamId: { not: null } }, data: { teamId: null } });
+    await prisma.serviceCatalog.updateMany({ where: { teamId: { not: null } }, data: { teamId: null } });
+    add(await prisma.team.deleteMany({}));
+    return deleted;
+  }
+  if (module === "services") {
+    add(await prisma.serviceCatalog.deleteMany({}));
+    return deleted;
+  }
+  if (module === "departments") {
+    add(await prisma.department.deleteMany({}));
+    return deleted;
+  }
+  if (module === "employees") {
+    add(await prisma.employee.deleteMany({}));
+    return deleted;
+  }
+  if (module === "categories") {
+    add(await prisma.assetCategory.deleteMany({}));
+    return deleted;
+  }
+  throw new Error(`Delete existing data is not supported for module: ${module}`);
 }
 
 function existingResult(recordType: string, record: { id?: string } | null | undefined, recordKey?: string, displayName?: string): ImportResult {

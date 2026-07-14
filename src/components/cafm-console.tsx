@@ -780,11 +780,13 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
     const module = String(formData.get("module") || "bulk upload");
     const file = formData.get("file");
     const startedAt = new Date().toISOString();
+    const importMode = String(formData.get("importMode") || "keepExisting");
+    const deleteOnly = importMode === "deleteExisting";
     let totalRows = 0;
-    let fileName = "CSV upload";
+    let fileName = deleteOnly ? "Delete existing data" : "CSV upload";
     let fileSize = 0;
 
-    if (file instanceof File) {
+    if (file instanceof File && file.size > 0) {
       fileName = file.name;
       fileSize = file.size;
       if (!file.name.toLowerCase().endsWith(".csv")) {
@@ -793,6 +795,10 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
         return;
       }
       totalRows = countCsvDataRows(await file.text());
+    } else if (!deleteOnly) {
+      setToast("Select a CSV file or choose Delete existing data only.");
+      setSaving(false);
+      return;
     }
 
     if (canOpenModule("audit")) {
@@ -807,7 +813,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
       completion: 10,
       status: "UPLOADING",
       startedAt,
-      message: "Uploading CSV file to the server.",
+      message: deleteOnly ? "Deleting existing module data." : "Uploading CSV file to the server.",
     });
 
     try {
@@ -8133,14 +8139,14 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
   const [importMode, setImportMode] = useState("keepExisting");
   const [manualProgress, setManualProgress] = useState("");
   const [manualUploading, setManualUploading] = useState(false);
-  const hierarchyUploadModule = ["sites", "buildings", "spaces", "locations"].includes(module);
+  const deleteOnly = importMode === "deleteExisting";
 
   useEffect(() => {
     setModule(initialModule);
   }, [initialModule]);
 
   useEffect(() => {
-    setImportMode(["sites", "buildings", "spaces", "locations"].includes(module) ? "replaceExisting" : "keepExisting");
+    setImportMode("keepExisting");
   }, [module]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -8216,19 +8222,18 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
             Existing Data Handling
             <select name="importMode" value={importMode} onChange={(event) => setImportMode(event.target.value)} className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon">
               <option value="keepExisting">Keep existing data unchanged</option>
-              <option value="replaceExisting">Replace with this upload</option>
+              <option value="replaceExisting">Replace with this upload - delete old module data first</option>
+              <option value="deleteExisting">Delete existing data only</option>
             </select>
             <span className="text-xs font-bold text-slate-500">
-              {hierarchyUploadModule
-                ? "For site/building/space/location uploads, replace mode syncs the visible hierarchy to this file. Old locations not in the file are hidden."
-                : "Keep existing is safest: matching records are skipped and old data stays the same. Replace updates records with the same module key."}
+              Keep existing skips matching records. Replace deletes the selected module data first, then imports the CSV. Delete existing data only removes the selected module data without importing a file.
             </span>
           </label>
           <label className="grid gap-1 text-sm font-bold text-slate-600">
             CSV File
-            <input name="file" type="file" accept=".csv,text/csv" className="rounded-lg border border-slate-200 bg-white p-3" />
+            <input name="file" type="file" accept=".csv,text/csv" disabled={deleteOnly} className="rounded-lg border border-slate-200 bg-white p-3 disabled:bg-slate-100 disabled:text-slate-400" />
           </label>
-          {module === "omManuals" && (
+          {module === "omManuals" && !deleteOnly && (
             <label className="grid gap-1 text-sm font-bold text-slate-600">
               Manual PDF Files
               <input name="manualFiles" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.csv,.xlsx,.docx,.pptx" multiple className="rounded-lg border border-slate-200 bg-white p-3" />
@@ -8237,7 +8242,7 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
           )}
           {manualProgress && <div className="rounded-lg border border-lagoon/20 bg-lagoon/5 p-3 text-sm font-black text-lagoon">{manualProgress}</div>}
           <button disabled={saving || manualUploading} className="h-11 rounded-lg bg-ink font-black text-white disabled:bg-slate-400">
-            {saving || manualUploading ? "Uploading..." : module === "omManuals" ? "Upload Manuals then CSV" : "Upload CSV"}
+            {saving || manualUploading ? (deleteOnly ? "Deleting..." : "Uploading...") : deleteOnly ? "Delete Existing Data" : module === "omManuals" ? "Upload Manuals then CSV" : "Upload CSV"}
           </button>
         </form>
       </Panel>
