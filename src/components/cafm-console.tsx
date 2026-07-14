@@ -11494,10 +11494,13 @@ function ExcelFilterHeader<T>({ label, columnKey, rows, filters, sort, onFilterC
             return next;
           });
         }}
-        className={`relative grid h-5 w-5 place-items-center border text-[10px] shadow-sm ${active ? "border-lagoon bg-lagoon text-white" : "border-slate-300 bg-slate-100 text-slate-600"}`}
+        className={`grid h-5 w-5 place-items-center border shadow-sm ${active ? "border-lagoon bg-lagoon text-white" : "border-slate-300 bg-slate-100 text-slate-600"}`}
       >
-        <span className="absolute inset-x-1 top-[5px] h-[1px] bg-current opacity-70" />
-        <span className="mt-[3px] text-[9px] leading-none">?</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4">
+          <path d="M6 3h10l2 2v6h-3V6H6v5H3V5a2 2 0 0 1 2-2h1Z" fill={active ? "#d9f99d" : "#a3e635"} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+          <path d="M8 7h6M8 10h6M8 13h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+          <path d="M3 10h18l-7 7v4h-4v-4l-7-7Z" fill="white" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+        </svg>
       </button>
       {open && (
         <div onClick={(event) => event.stopPropagation()} className="absolute left-0 top-7 z-50 w-72 rounded-lg border border-slate-200 bg-white p-3 text-left normal-case text-slate-700 shadow-xl">
