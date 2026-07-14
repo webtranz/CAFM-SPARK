@@ -40,10 +40,11 @@
 export function csvResponse(created: number, failed: Array<{ row: number; message: string }>, skipped = 0) {
   return {
     created,
+    applied: created,
     skipped,
     failed,
     message: failed.length
-      ? `${created} rows imported, ${skipped} skipped, ${failed.length} failed.`
-      : `${created} rows imported successfully${skipped ? `, ${skipped} skipped` : ""}.`,
+      ? `${created} rows applied, ${skipped} skipped, ${failed.length} failed.`
+      : `${created} rows applied successfully${skipped ? `, ${skipped} skipped` : ""}.`,
   };
 }

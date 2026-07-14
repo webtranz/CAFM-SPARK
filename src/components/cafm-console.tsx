@@ -129,6 +129,7 @@ type BulkUploadProgressState = {
   totalRows: number;
   processedRows: number;
   createdRows?: number;
+  appliedRows?: number;
   failedRows?: number;
   completion: number;
   status: "UPLOADING" | "QUEUED" | "PROCESSING" | "FINALIZING" | "COMPLETED" | "COMPLETED_WITH_ERRORS" | "FAILED";
@@ -838,7 +839,8 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
           fileSize: result.fileSize ?? fileSize,
           totalRows: result.totalRows ?? totalRows,
           processedRows: result.processedRows ?? 0,
-          createdRows: result.createdRows ?? 0,
+          createdRows: result.createdRows ?? result.applied ?? 0,
+          appliedRows: result.applied ?? result.createdRows ?? 0,
           failedRows: result.failedRows ?? 0,
           completion: result.completion ?? 0,
           status: result.status ?? "QUEUED",
@@ -868,6 +870,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
       spaces: { path: "/api/spaces", key: "spaces" },
       locations: { path: "/api/locations", key: "locations" },
       requests: { path: "/api/service-requests", key: "requests" },
+      ppm: { path: "/api/ppm", key: "ppms" },
     };
     const endpoint = endpoints[module];
     if (!endpoint) return;
@@ -875,7 +878,11 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
     if (!response.ok) return;
     const result = await response.json();
     const nextRows = result[endpoint.key] ?? [];
-    setRecords((current) => ({ ...current, [endpoint.key]: nextRows }));
+    setRecords((current) => ({
+      ...current,
+      [endpoint.key]: nextRows,
+      ...(module === "ppm" ? { ppmsTotal: result.total ?? nextRows.length } : {}),
+    }));
   }
 
   async function patchRecord(path: string, body: Record<string, unknown>, successLabel: string, refresh = true) {
@@ -11053,7 +11060,7 @@ function BulkUploadProgress({ progress }: { progress: BulkUploadProgressState | 
           </div>
           {(progress.createdRows !== undefined || progress.failedRows !== undefined) && (
             <div className="grid gap-3 md:grid-cols-2">
-              <ProgressStat label="Rows Created" value={progress.createdRows ?? 0} tone="leaf" />
+              <ProgressStat label="Rows Applied" value={progress.appliedRows ?? progress.createdRows ?? 0} tone="leaf" />
               <ProgressStat label="Rows Failed" value={progress.failedRows ?? 0} tone="coral" />
             </div>
           )}
