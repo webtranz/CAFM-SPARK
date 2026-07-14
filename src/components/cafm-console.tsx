@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, UIEvent } from "react";
 import Image from "next/image";
 import {
@@ -5518,7 +5518,7 @@ function Ppm({
               {ppmLoading && <span className="text-lagoon">Loading PPM plans...</span>}
             </div>
             <div ref={ppmScrollRef} onScroll={handlePpmScroll} className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
-              <table className="cafm-data-table min-w-[1280px] border-collapse bg-white text-sm">
+              <table className="cafm-data-table min-w-[1400px] border-collapse bg-white text-sm">
                 <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                   <tr>
                     {isAdmin && (
@@ -5533,7 +5533,7 @@ function Ppm({
                         />
                       </th>
                     )}
-                    <th className="px-3 py-3">#</th><th className="px-3 py-3">Title</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Frequency</th><th className="px-3 py-3">Next Due</th><th className="px-3 py-3">Priority</th><th className="px-3 py-3">Department</th><th className="px-3 py-3">Asset</th><th className="px-3 py-3">Location</th><th className="px-3 py-3">Actions</th>
+                    <th className="px-3 py-3">#</th><th className="px-3 py-3">PPM Code</th><th className="px-3 py-3">Title</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Frequency</th><th className="px-3 py-3">Next Due</th><th className="px-3 py-3">Priority</th><th className="px-3 py-3">Department</th><th className="px-3 py-3">Asset</th><th className="px-3 py-3">Location</th><th className="px-3 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -5553,7 +5553,8 @@ function Ppm({
                         </td>
                       )}
                       <td className="px-3 py-3 font-black text-slate-500">{index + 1}</td>
-                      <td className="px-3 py-3"><p className="font-black">{ppm.name}</p><p className="text-xs font-bold text-slate-500">{ppm.code}</p></td>
+                      <td className="px-3 py-3 font-black text-lagoon">{ppm.ppmCode || String(ppm.code || "").split("-")[0] || ppm.code}</td>
+                      <td className="px-3 py-3"><p className="font-black">{ppm.name}</p><p className="text-xs font-bold text-slate-500">Record: {ppm.code}</p></td>
                       <td className="px-3 py-3"><span className={`rounded-full border px-2 py-1 text-xs font-black ${ppm.active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>{ppm.active ? "Planned" : "Paused"}</span></td>
                       <td className="px-3 py-3">{ppm.frequency}</td>
                       <td className="px-3 py-3">{formatDateCell(ppm.nextDue)}</td>
@@ -5716,6 +5717,21 @@ function PmPreviewModal({
     nextDue: ppm.nextDue,
     active: ppm.active,
   }];
+  const groupedEquipmentByLocation = useMemo(() => {
+    const rows = [...groupEquipment].sort((left: any, right: any) => {
+      const leftLocation = String(left.locationCode || "");
+      const rightLocation = String(right.locationCode || "");
+      if (leftLocation !== rightLocation) return leftLocation.localeCompare(rightLocation);
+      return String(left.assetTag || left.code || "").localeCompare(String(right.assetTag || right.code || ""));
+    });
+    return rows.reduce((groups: Array<{ location: string; rows: any[] }>, item: any) => {
+      const locationKey = item.locationCode || "No location";
+      const current = groups[groups.length - 1];
+      if (!current || current.location !== locationKey) groups.push({ location: locationKey, rows: [item] });
+      else current.rows.push(item);
+      return groups;
+    }, []);
+  }, [groupEquipment]);
   const [tab, setTab] = useState<"comments" | "history">("history");
   const [quickForm, setQuickForm] = useState<"" | "procedure" | "part">("");
   const [quickValue, setQuickValue] = useState("");
@@ -5747,7 +5763,7 @@ function PmPreviewModal({
   }
 
   return (
-    <RequestModalShell title={`PM | ${ppm.name}`} onClose={onClose}>
+    <RequestModalShell title={`PM Schedule | ${ppmGroupCode} ${ppm.name}`} onClose={onClose}>
       <div className="grid gap-5">
         <div className="sticky top-0 z-10 -mx-5 -mt-5 border-b border-slate-200 bg-white px-5 py-3 shadow-sm">
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -5781,23 +5797,46 @@ function PmPreviewModal({
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-4">
           <div className="flex items-center justify-between gap-3">
-            <h4 className="font-black">Linked Equipment / Locations</h4>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{ppmGroup ? `${groupEquipment.length} loaded` : "Loading group"}</span>
+            <h4 className="font-black">Equipment</h4>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{ppmGroup ? `${groupEquipment.length} equipment loaded` : "Loading equipment"}</span>
           </div>
-          <div className="mt-3 max-h-72 overflow-auto rounded-lg border border-slate-100">
-            <table className="w-full min-w-[760px] text-left text-xs">
-              <thead className="sticky top-0 bg-slate-50 text-slate-500">
-                <tr><th className="px-3 py-2">Code</th><th className="px-3 py-2">Asset / Location</th><th className="px-3 py-2">Description</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Next Due</th></tr>
+          <div className="mt-3 max-h-[520px] overflow-auto rounded-lg border border-slate-100">
+            <table className="w-full min-w-[1180px] text-left text-xs">
+              <thead className="sticky top-0 bg-slate-700 text-white">
+                <tr>
+                  <th className="px-3 py-2">Equipment</th>
+                  <th className="px-3 py-2">Description</th>
+                  <th className="px-3 py-2">Work Order Org.</th>
+                  <th className="px-3 py-2">Location</th>
+                  <th className="px-3 py-2">Department</th>
+                  <th className="px-3 py-2">Due Date</th>
+                  <th className="px-3 py-2">Perform Every</th>
+                  <th className="px-3 py-2">Period UOM</th>
+                  <th className="px-3 py-2">Updated</th>
+                  <th className="px-3 py-2">PM Type</th>
+                </tr>
               </thead>
               <tbody>
-                {groupEquipment.map((item: any) => (
-                  <tr key={item.id || item.code} className="border-t border-slate-100">
-                    <td className="px-3 py-2 font-black text-slate-600">{item.code}</td>
-                    <td className="px-3 py-2 font-bold text-lagoon">{item.assetTag || item.locationCode || "-"}</td>
-                    <td className="px-3 py-2">{item.equipmentDescription || item.objectCategory || item.objectClass || "-"}</td>
-                    <td className="px-3 py-2">{item.departmentCode || "-"}</td>
-                    <td className="px-3 py-2">{formatDateCell(item.nextDue)}</td>
-                  </tr>
+                {groupedEquipmentByLocation.map((group) => (
+                  <Fragment key={group.location}>
+                    <tr className="bg-slate-100 text-slate-700">
+                      <td className="px-3 py-2 font-black" colSpan={10}>Location: {group.location} / {group.rows.length} equipment</td>
+                    </tr>
+                    {group.rows.map((item: any) => (
+                      <tr key={item.id || item.code} className="border-t border-slate-100 align-top hover:bg-slate-50">
+                        <td className="px-3 py-2 font-black text-lagoon">{item.assetTag || item.locationCode || "-"}</td>
+                        <td className="px-3 py-2 font-bold text-slate-700">{item.equipmentDescription || item.objectCategory || item.objectClass || ppm.name || "-"}</td>
+                        <td className="px-3 py-2">FBC</td>
+                        <td className="px-3 py-2 font-bold">{item.locationCode || "-"}</td>
+                        <td className="px-3 py-2">{item.departmentCode || "-"}</td>
+                        <td className="px-3 py-2">{formatDateCell(item.nextDue)}</td>
+                        <td className="px-3 py-2 text-right">1</td>
+                        <td className="px-3 py-2">{item.frequency || ppm.frequency || "Months"}</td>
+                        <td className="px-3 py-2">{item.active ? "Yes" : "No"}</td>
+                        <td className="px-3 py-2">Scheduled</td>
+                      </tr>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

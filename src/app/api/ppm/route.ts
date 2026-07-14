@@ -46,7 +46,7 @@ export async function GET(request: Request) {
           { code: { startsWith: `${groupCode}-`, mode: "insensitive" } },
         ],
       },
-      orderBy: [{ assetTag: "asc" }, { locationCode: "asc" }, { nextDue: "asc" }],
+      orderBy: [{ locationCode: "asc" }, { assetTag: "asc" }, { nextDue: "asc" }],
       take: 20000,
     });
     const checklistSource = groupedPpms.find((item) => item.checklist)?.checklist || "";
@@ -64,6 +64,8 @@ export async function GET(request: Request) {
         objectClass: item.objectClass,
         objectCategory: item.objectCategory,
         departmentCode: item.departmentCode,
+        frequency: item.frequency,
+        durationHrs: item.durationHrs,
         nextDue: item.nextDue,
         active: item.active,
       })),
