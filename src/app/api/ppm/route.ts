@@ -5,6 +5,7 @@ import { apiError } from "@/lib/api-response";
 import { requireAdmin, requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
+import { allowsCustomPpmLocation } from "@/lib/scoped-ppm-custom-locations";
 
 const boolValue = z.preprocess((value) => {
   if (value === "true") return true;
@@ -152,12 +153,14 @@ export async function POST(request: Request) {
     const input = schema.parse(await request.json());
     const count = await prisma.preventiveMaintenance.count();
     const code = input.code || `PPM-${String(count + 1).padStart(4, "0")}`;
+    const ppmCode = input.ppmCode || code;
+    const canUseCustomLocation = allowsCustomPpmLocation(ppmCode) || allowsCustomPpmLocation(code);
     const data = {
       code,
-      ppmCode: input.ppmCode || code,
+      ppmCode,
       name: input.name || `PPM ${count + 1}`,
-      assetTag: input.assetTag || "Unassigned",
-      locationCode: input.locationCode || "",
+      assetTag: input.assetTag || (canUseCustomLocation ? "" : "Unassigned"),
+      locationCode: input.locationCode || (canUseCustomLocation ? ppmCode : ""),
       equipmentDescription: input.equipmentDescription || "",
       objectType: input.objectType || "",
       objectClass: input.objectClass || "",

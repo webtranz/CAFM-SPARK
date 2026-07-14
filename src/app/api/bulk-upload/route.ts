@@ -9,6 +9,7 @@ import { auditAction } from "@/lib/audit";
 import { csvResponse, parseCsv } from "@/lib/csv";
 import { privateFileUrl, privateUploadRoot } from "@/lib/private-files";
 import { prisma } from "@/lib/prisma";
+import { allowsCustomPpmLocation } from "@/lib/scoped-ppm-custom-locations";
 
 type Row = Record<string, string>;
 type ImportResult = {
@@ -1383,26 +1384,29 @@ async function importJobPlan(row: Row, context: ImportContext = {}) {
 
 async function importPpm(row: Row, context: ImportContext = {}) {
   const baseCode = required(row, "code", "PPM CODE", "ppmCode");
+  const ppmCode = value(row, "ppmCode", "PPM CODE") || baseCode;
+  const canUseCustomLocation = allowsCustomPpmLocation(ppmCode) || allowsCustomPpmLocation(baseCode);
   const rawAssetTag = value(row, "assetTag", "asset", "assetCode", "EQUIPMENTNO", "OBJECT (ASSET/LOCATION)");
   const rawLocationCode = value(row, "locationCode", "location", "Location", "LOCATION", "OBJECTS LOCATIONS");
   const assetTag = rawAssetTag && !rawAssetTag.startsWith("L-") ? rawAssetTag : "";
   const inputLocationCode = rawLocationCode || (rawAssetTag.startsWith("L-") ? rawAssetTag : "");
   const asset = assetTag ? await prisma.asset.findUnique({ where: { tag: assetTag } }) : null;
-  const locationCode = inputLocationCode || asset?.locationCode || "";
+  const fallbackCustomLocation = canUseCustomLocation ? rawAssetTag || rawLocationCode || ppmCode : "";
+  const locationCode = inputLocationCode || asset?.locationCode || fallbackCustomLocation || "";
   const location = locationCode ? await prisma.location.findUnique({ where: { code: locationCode } }) : null;
 
-  if (assetTag && !asset) throw new Error(`Asset not found for PPM: ${assetTag}`);
-  if (locationCode && !location && !asset?.locationCode) throw new Error(`Location not found for PPM: ${locationCode}`);
-  if (!assetTag && !locationCode) throw new Error("assetTag or locationCode is required");
+  if (assetTag && !asset && !canUseCustomLocation) throw new Error(`Asset not found for PPM: ${assetTag}`);
+  if (locationCode && !location && !asset?.locationCode && !canUseCustomLocation) throw new Error(`Location not found for PPM: ${locationCode}`);
+  if (!assetTag && !locationCode && !canUseCustomLocation) throw new Error("assetTag or locationCode is required");
 
-  const targetKey = assetTag || locationCode;
+  const targetKey = assetTag || locationCode || ppmCode;
   const code = value(row, "uniqueCode") || uniquePpmCode(baseCode, targetKey);
   const existing = await prisma.preventiveMaintenance.findUnique({ where: { code } });
   if (existing && !shouldReplace(context)) return existingResult("preventive_maintenance", existing, code, existing.name);
   const nextDue = optionalDate(value(row, "nextDue", "DUE DATE", "dueAt")) || addDays(new Date(), 7);
   const activeValue = value(row, "active");
   const data = {
-    ppmCode: value(row, "ppmCode", "PPM CODE") || baseCode,
+    ppmCode,
     name: value(row, "name", "PPM DESCRIPTION", "description") || baseCode,
     assetTag: assetTag || "",
     locationCode,
@@ -1419,6 +1423,26 @@ async function importPpm(row: Row, context: ImportContext = {}) {
     checklist: ppmChecklistValue(row),
     active: activeValue ? yesNo(activeValue, true) : true,
   };
+  if (canUseCustomLocation) {
+    const existingByIdentity = await prisma.preventiveMaintenance.findUnique({
+      where: {
+        assetTag_locationCode_frequency_name: {
+          assetTag: data.assetTag,
+          locationCode: data.locationCode,
+          frequency: data.frequency,
+          name: data.name,
+        },
+      },
+    });
+    if (existingByIdentity && existingByIdentity.code !== code) {
+      if (!shouldReplace(context)) return existingResult("preventive_maintenance", existingByIdentity, existingByIdentity.code, existingByIdentity.name);
+      const updated = await prisma.preventiveMaintenance.update({
+        where: { id: existingByIdentity.id },
+        data,
+      });
+      return importResult("preventive_maintenance", "UPDATE", updated, updated.code, updated.name);
+    }
+  }
   const ppm = await prisma.preventiveMaintenance.upsert({
     where: { code },
     update: data,

@@ -31,6 +31,7 @@ import {
   Wrench,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { allowsCustomPpmLocation } from "@/lib/scoped-ppm-custom-locations";
 import {
   Area,
   AreaChart,
@@ -5739,7 +5740,7 @@ function Ppm({
           </div>
         )}
       </Panel>
-      <PpmCreateForm assets={assets} onSubmit={submitPpm} saving={saving} />
+      <PpmCreateForm assets={assets} locations={locations} onSubmit={submitPpm} saving={saving} />
       {previewPpm && (
         <PmPreviewModal
           ppm={previewPpm}
@@ -5758,17 +5759,29 @@ function Ppm({
   );
 }
 
-function PpmCreateForm({ assets, onSubmit, saving }: { assets: any[]; onSubmit: (formData: FormData) => void; saving: boolean }) {
+function PpmCreateForm({ assets, locations, onSubmit, saving }: { assets: any[]; locations: any[]; onSubmit: (formData: FormData) => void; saving: boolean }) {
+  const [ppmCodeValue, setPpmCodeValue] = useState("");
   const [selectedAssetTag, setSelectedAssetTag] = useState("");
+  const [customLocationCode, setCustomLocationCode] = useState("");
   const selectedAsset = assets.find((asset) => asset.tag === selectedAssetTag);
+  const customLocationAllowed = allowsCustomPpmLocation(ppmCodeValue);
+  const selectedCustomLocation = locations.find((location) => location.code === customLocationCode);
   const selectedLocation = selectedAsset ? [selectedAsset.siteCode || selectedAsset.site?.name, selectedAsset.buildingCode || selectedAsset.building?.name, selectedAsset.floor, selectedAsset.room].filter(Boolean).join(" > ") : "";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
-    await onSubmit(new FormData(form));
+    const formData = new FormData(form);
+    const code = String(formData.get("code") || "").trim();
+    if (customLocationAllowed) {
+      formData.set("ppmCode", code);
+      formData.set("locationCode", selectedAsset?.locationCode || customLocationCode || code);
+    }
+    await onSubmit(formData);
     form.reset();
+    setPpmCodeValue("");
     setSelectedAssetTag("");
+    setCustomLocationCode("");
   }
 
   return (
@@ -5780,7 +5793,8 @@ function PpmCreateForm({ assets, onSubmit, saving }: { assets: any[]; onSubmit: 
         <h3 className="text-xl font-black">Create PPM</h3>
       </div>
       <div className="grid min-w-0 gap-3">
-        <input name="code" placeholder="PPM code" className={TICKET_PLAN_FIELD_CLASS} />
+        <input name="code" value={ppmCodeValue} onChange={(event) => setPpmCodeValue(event.target.value)} placeholder="PPM code" className={TICKET_PLAN_FIELD_CLASS} />
+        <input type="hidden" name="ppmCode" value={ppmCodeValue} />
         <input name="name" placeholder="PPM title" className={TICKET_PLAN_FIELD_CLASS} />
         <select name="assetTag" value={selectedAssetTag} onChange={(event) => setSelectedAssetTag(event.target.value)} className={TICKET_PLAN_FIELD_CLASS}>
           <option value="">Select asset from register</option>
@@ -5790,13 +5804,24 @@ function PpmCreateForm({ assets, onSubmit, saving }: { assets: any[]; onSubmit: 
             </option>
           ))}
         </select>
-        <input name="locationCode" value={selectedAsset?.locationCode || ""} readOnly placeholder="Linked location" className={`${TICKET_PLAN_FIELD_CLASS} bg-slate-50 text-slate-500`} />
+        {customLocationAllowed ? (
+          <select name="locationCode" value={selectedAsset?.locationCode || customLocationCode} onChange={(event) => setCustomLocationCode(event.target.value)} disabled={Boolean(selectedAsset)} className={TICKET_PLAN_FIELD_CLASS}>
+            <option value="">Select custom location for this PPM code</option>
+            {locations.map((location) => (
+              <option key={location.id ?? location.code} value={location.code}>
+                {location.code} - {location.description || location.room || location.building || "Location"}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input name="locationCode" value={selectedAsset?.locationCode || ""} readOnly placeholder="Linked location" className={`${TICKET_PLAN_FIELD_CLASS} bg-slate-50 text-slate-500`} />
+        )}
         <input name="departmentCode" value={selectedAsset?.departmentCode || ""} readOnly placeholder="Department" className={`${TICKET_PLAN_FIELD_CLASS} bg-slate-50 text-slate-500`} />
-        {selectedAsset && (
+        {(selectedAsset || (customLocationAllowed && selectedCustomLocation)) && (
           <div className="grid gap-1 rounded-lg bg-slate-50 p-3 text-xs font-bold text-slate-600">
-            <span>Location: {selectedLocation || "-"}</span>
-            <span>Department: {selectedAsset.departmentCode || "-"}</span>
-            <span>Team: {selectedAsset.assignedTeamCode || "-"}</span>
+            <span>Location: {selectedLocation || selectedCustomLocation?.description || customLocationCode || "-"}</span>
+            <span>Department: {selectedAsset?.departmentCode || "-"}</span>
+            <span>Team: {selectedAsset?.assignedTeamCode || "-"}</span>
           </div>
         )}
         <select name="frequency" className={TICKET_PLAN_FIELD_CLASS}>
