@@ -5732,6 +5732,9 @@ function PmPreviewModal({
       return groups;
     }, []);
   }, [groupEquipment]);
+  const [selectedLinkedEquipment, setSelectedLinkedEquipment] = useState<any | null>(null);
+  const selectedAssetDetails = selectedLinkedEquipment?.assetDetails;
+  const selectedLocationDetails = selectedLinkedEquipment?.locationDetails;
   const [tab, setTab] = useState<"comments" | "history">("history");
   const [quickForm, setQuickForm] = useState<"" | "procedure" | "part">("");
   const [quickValue, setQuickValue] = useState("");
@@ -5745,6 +5748,7 @@ function PmPreviewModal({
   useEffect(() => {
     let mounted = true;
     setPpmGroup(null);
+    setSelectedLinkedEquipment(null);
     if (!ppmGroupCode) return () => { mounted = false; };
     fetch(`/api/ppm?groupCode=${encodeURIComponent(ppmGroupCode)}`)
       .then((response) => response.ok ? response.json() : null)
@@ -5823,12 +5827,12 @@ function PmPreviewModal({
                       <td className="px-3 py-2 font-black" colSpan={10}>Location: {group.location} / {group.rows.length} equipment</td>
                     </tr>
                     {group.rows.map((item: any) => (
-                      <tr key={item.id || item.code} className="border-t border-slate-100 align-top hover:bg-slate-50">
-                        <td className="px-3 py-2 font-black text-lagoon">{item.assetTag || item.locationCode || "-"}</td>
-                        <td className="px-3 py-2 font-bold text-slate-700">{item.equipmentDescription || item.objectCategory || item.objectClass || ppm.name || "-"}</td>
-                        <td className="px-3 py-2">FBC</td>
-                        <td className="px-3 py-2 font-bold">{item.locationCode || "-"}</td>
-                        <td className="px-3 py-2">{item.departmentCode || "-"}</td>
+                      <tr key={item.id || item.code} onClick={() => setSelectedLinkedEquipment(item)} className={`cursor-pointer border-t border-slate-100 align-top hover:bg-lagoon/5 ${selectedLinkedEquipment?.id === item.id ? "bg-lagoon/10" : ""}`}>
+                        <td className="px-3 py-2 font-black text-lagoon"><button type="button" className="text-left underline-offset-2 hover:underline">{item.assetTag || item.locationCode || "-"}</button></td>
+                        <td className="px-3 py-2 font-bold text-slate-700">{item.equipmentDescription || item.assetDetails?.assetDescription || item.assetDetails?.name || item.objectCategory || item.objectClass || ppm.name || "-"}</td>
+                        <td className="px-3 py-2">{item.assetDetails?.organization || "FBC"}</td>
+                        <td className="px-3 py-2 font-bold"><button type="button" className="text-left underline-offset-2 hover:underline">{item.locationCode || "-"}</button></td>
+                        <td className="px-3 py-2">{item.departmentCode || item.assetDetails?.departmentCode || "-"}</td>
                         <td className="px-3 py-2">{formatDateCell(item.nextDue)}</td>
                         <td className="px-3 py-2 text-right">1</td>
                         <td className="px-3 py-2">{item.frequency || ppm.frequency || "Months"}</td>
@@ -5842,6 +5846,34 @@ function PmPreviewModal({
             </table>
           </div>
         </div>
+        {selectedLinkedEquipment && (
+          <div className="rounded-lg border border-lagoon/20 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase text-slate-500">Selected Linked Equipment / Location</p>
+                <h4 className="mt-1 text-lg font-black text-ink">{selectedLinkedEquipment.assetTag || selectedLinkedEquipment.locationCode || selectedLinkedEquipment.code}</h4>
+              </div>
+              <button type="button" onClick={() => setSelectedLinkedEquipment(null)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-600">Close Details</button>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              <PreviewField label="Equipment" value={selectedLinkedEquipment.assetTag || "Location based"} />
+              <PreviewField label="Description" value={selectedLinkedEquipment.equipmentDescription || selectedAssetDetails?.assetDescription || selectedAssetDetails?.name || selectedLinkedEquipment.objectCategory} />
+              <PreviewField label="Location Code" value={selectedLinkedEquipment.locationCode || selectedAssetDetails?.locationCode} />
+              <PreviewField label="Location Description" value={selectedLocationDetails?.description || selectedAssetDetails?.locationDesc} />
+              <PreviewField label="Site / Building" value={[selectedAssetDetails?.siteCode || selectedLocationDetails?.site, selectedAssetDetails?.buildingCode || selectedLocationDetails?.building].filter(Boolean).join(" / ")} />
+              <PreviewField label="Floor / Room" value={[selectedAssetDetails?.floor || selectedLocationDetails?.floor, selectedAssetDetails?.room || selectedLocationDetails?.room].filter(Boolean).join(" / ")} />
+              <PreviewField label="Department" value={selectedLinkedEquipment.departmentCode || selectedAssetDetails?.departmentCode} />
+              <PreviewField label="Category" value={selectedAssetDetails?.assetGroup || selectedAssetDetails?.category || selectedLinkedEquipment.objectCategory} />
+              <PreviewField label="Class" value={selectedAssetDetails?.classCode || selectedLinkedEquipment.objectClass} />
+              <PreviewField label="Status" value={selectedAssetDetails?.assetStatusText || selectedAssetDetails?.status || (selectedLinkedEquipment.active ? "Active" : "Paused")} />
+              <PreviewField label="Criticality" value={selectedAssetDetails?.criticality || ppm.priority} />
+              <PreviewField label="Next Due" value={formatDateCell(selectedLinkedEquipment.nextDue)} />
+              <PreviewField label="Manufacturer" value={selectedAssetDetails?.manufacturer} />
+              <PreviewField label="Model" value={selectedAssetDetails?.model} />
+              <PreviewField label="Serial No." value={selectedAssetDetails?.serialNumber} />
+            </div>
+          </div>
+        )}
         <div className="rounded-lg border border-slate-200 bg-white p-4">
           <div className="flex items-center justify-between gap-3">
             <h4 className="font-black">Procedures & Checklist</h4>

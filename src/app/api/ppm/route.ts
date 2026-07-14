@@ -49,6 +49,14 @@ export async function GET(request: Request) {
       orderBy: [{ locationCode: "asc" }, { assetTag: "asc" }, { nextDue: "asc" }],
       take: 20000,
     });
+    const assetTags = [...new Set(groupedPpms.map((item) => item.assetTag).filter(Boolean))];
+    const locationCodes = [...new Set(groupedPpms.map((item) => item.locationCode).filter(Boolean))];
+    const [assets, locations] = await Promise.all([
+      assetTags.length ? prisma.asset.findMany({ where: { tag: { in: assetTags } } }) : [],
+      locationCodes.length ? prisma.location.findMany({ where: { code: { in: locationCodes } } }) : [],
+    ]);
+    const assetByTag = new Map(assets.map((asset) => [asset.tag, asset]));
+    const locationByCode = new Map(locations.map((location) => [location.code, location]));
     const checklistSource = groupedPpms.find((item) => item.checklist)?.checklist || "";
     return NextResponse.json({
       ppmCode: groupCode,
@@ -68,6 +76,8 @@ export async function GET(request: Request) {
         durationHrs: item.durationHrs,
         nextDue: item.nextDue,
         active: item.active,
+        assetDetails: item.assetTag ? assetByTag.get(item.assetTag) || null : null,
+        locationDetails: item.locationCode ? locationByCode.get(item.locationCode) || null : null,
       })),
     });
   }
