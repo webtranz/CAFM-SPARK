@@ -169,7 +169,7 @@ async function processRows(
 ) {
   if (shouldDeleteBeforeImport(context)) {
     context.deletedRows = await clearExistingBulkUploadData(module);
-  } else {
+  } else if (typeof context.deletedRows !== "number") {
     await syncHierarchyModuleBeforeImport(module, rows, context);
   }
   const failed: ImportFailure[] = [];
@@ -220,9 +220,21 @@ async function processBulkUploadJob(jobId: string, module: string, rows: Row[], 
       data: {
         status: "PROCESSING",
         startedAt: new Date(),
-        message: `Processing ${rows.length} rows in chunks of ${BULK_UPLOAD_CHUNK_SIZE}.`,
+        message: shouldDeleteBeforeImport(context)
+          ? `Deleting old ${bulkModuleLabel(module)} records before importing ${rows.length} rows.`
+          : `Processing ${rows.length} rows in chunks of ${BULK_UPLOAD_CHUNK_SIZE}.`,
       },
     });
+
+    if (shouldDeleteBeforeImport(context)) {
+      context.deletedRows = await clearExistingBulkUploadData(module);
+      await prisma.bulkUploadJob.update({
+        where: { id: jobId },
+        data: {
+          message: `${context.deletedRows.toLocaleString()} old ${bulkModuleLabel(module)} records deleted. Importing ${rows.length} rows in chunks of ${BULK_UPLOAD_CHUNK_SIZE}.`,
+        },
+      });
+    }
 
     const { created, skipped, failed, entries, result } = await processRows(module, rows, context, async ({ processedRows, createdRows, failedRows }) => {
       await prisma.bulkUploadJob.update({
@@ -407,7 +419,7 @@ function shouldReplace(context: ImportContext = {}) {
 }
 
 function shouldDeleteBeforeImport(context: ImportContext = {}) {
-  return context.mode === "replaceExisting";
+  return context.mode === "replaceExisting" && typeof context.deletedRows !== "number";
 }
 
 function bulkModuleLabel(module: string) {
