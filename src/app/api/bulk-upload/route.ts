@@ -1237,9 +1237,15 @@ async function importPpm(row: Row, context: ImportContext = {}) {
   const nextDue = optionalDate(value(row, "nextDue", "DUE DATE", "dueAt")) || addDays(new Date(), 7);
   const activeValue = value(row, "active");
   const data = {
+    ppmCode: value(row, "ppmCode", "PPM CODE") || baseCode,
     name: value(row, "name", "PPM DESCRIPTION", "description") || baseCode,
     assetTag: assetTag || "",
     locationCode,
+    equipmentDescription: value(row, "equipmentDescription", "OBJECT (ASSET/LOCATION) DESCRIPTION") || asset?.assetDescription || asset?.name || "",
+    objectType: value(row, "objectType", "OBJECT TYPE") || (assetTag ? "Asset" : "Location"),
+    objectClass: value(row, "objectClass", "OBJECT CLASS") || asset?.classCode || "",
+    objectCategory: value(row, "objectCategory", "OBJECT CATEGORY") || asset?.category || "",
+    checklistLink: value(row, "checklistLink", "ACTIVITY CHECKLIST") || "",
     departmentCode: value(row, "departmentCode", "DEPARTMENT", "DEPARTMENT ") || asset?.departmentCode || "",
     priority: priority(value(row, "priority", "OBJECT CRITICALITY")),
     frequency: value(row, "frequency", "FREQUENCY") || "Monthly",

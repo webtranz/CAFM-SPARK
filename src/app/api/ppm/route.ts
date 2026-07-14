@@ -14,9 +14,15 @@ const boolValue = z.preprocess((value) => {
 
 const schema = z.object({
   code: z.string().optional(),
+  ppmCode: z.string().optional(),
   name: z.string().optional(),
   assetTag: z.string().optional(),
   locationCode: z.string().optional(),
+  equipmentDescription: z.string().optional(),
+  objectType: z.string().optional(),
+  objectClass: z.string().optional(),
+  objectCategory: z.string().optional(),
+  checklistLink: z.string().optional(),
   departmentCode: z.string().optional(),
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
   frequency: z.string().optional(),
@@ -30,6 +36,39 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const query = url.searchParams.get("query")?.trim() || "";
   const status = url.searchParams.get("status")?.trim() || "All";
+  const groupCode = url.searchParams.get("groupCode")?.trim() || "";
+  if (groupCode) {
+    const groupedPpms = await prisma.preventiveMaintenance.findMany({
+      where: {
+        OR: [
+          { ppmCode: groupCode },
+          { code: groupCode },
+          { code: { startsWith: `${groupCode}-`, mode: "insensitive" } },
+        ],
+      },
+      orderBy: [{ assetTag: "asc" }, { locationCode: "asc" }, { nextDue: "asc" }],
+      take: 20000,
+    });
+    const checklistSource = groupedPpms.find((item) => item.checklist)?.checklist || "";
+    return NextResponse.json({
+      ppmCode: groupCode,
+      total: groupedPpms.length,
+      checklist: checklistSource,
+      equipment: groupedPpms.map((item) => ({
+        id: item.id,
+        code: item.code,
+        assetTag: item.assetTag,
+        locationCode: item.locationCode,
+        equipmentDescription: item.equipmentDescription,
+        objectType: item.objectType,
+        objectClass: item.objectClass,
+        objectCategory: item.objectCategory,
+        departmentCode: item.departmentCode,
+        nextDue: item.nextDue,
+        active: item.active,
+      })),
+    });
+  }
   const pageInput = Number(url.searchParams.get("page") || 1);
   const pageSizeInput = Number(url.searchParams.get("pageSize") || 100);
   const page = Number.isFinite(pageInput) ? Math.max(1, Math.floor(pageInput)) : 1;
@@ -41,7 +80,9 @@ export async function GET(request: Request) {
   if (query) {
     where.OR = [
       { code: { contains: query, mode: "insensitive" } },
+      { ppmCode: { contains: query, mode: "insensitive" } },
       { name: { contains: query, mode: "insensitive" } },
+      { equipmentDescription: { contains: query, mode: "insensitive" } },
       { assetTag: { contains: query, mode: "insensitive" } },
       { locationCode: { contains: query, mode: "insensitive" } },
       { departmentCode: { contains: query, mode: "insensitive" } },
@@ -86,9 +127,15 @@ export async function POST(request: Request) {
     const code = input.code || `PPM-${String(count + 1).padStart(4, "0")}`;
     const data = {
       code,
+      ppmCode: input.ppmCode || code,
       name: input.name || `PPM ${count + 1}`,
       assetTag: input.assetTag || "Unassigned",
       locationCode: input.locationCode || "",
+      equipmentDescription: input.equipmentDescription || "",
+      objectType: input.objectType || "",
+      objectClass: input.objectClass || "",
+      objectCategory: input.objectCategory || "",
+      checklistLink: input.checklistLink || "",
       departmentCode: input.departmentCode || "",
       priority: input.priority || "MEDIUM",
       frequency: input.frequency || "Monthly",
@@ -120,9 +167,15 @@ export async function PATCH(request: Request) {
     const current = await prisma.preventiveMaintenance.findUnique({ where: id ? { id } : { code: code! } });
     if (!current) throw new Error("PPM not found");
     const data = {
+      ppmCode: input.ppmCode,
       name: input.name,
       assetTag: input.assetTag,
       locationCode: input.locationCode,
+      equipmentDescription: input.equipmentDescription,
+      objectType: input.objectType,
+      objectClass: input.objectClass,
+      objectCategory: input.objectCategory,
+      checklistLink: input.checklistLink,
       departmentCode: input.departmentCode,
       priority: input.priority,
       frequency: input.frequency,

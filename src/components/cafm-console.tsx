@@ -4978,12 +4978,12 @@ function isImageUrl(value: string) {
   return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(pathOnly) || value.startsWith("/uploads/") || value.startsWith("/api/files/");
 }
 
-function checklistItems(value: unknown) {
+function checklistItems(value: unknown, limit = 12) {
   const items = String(value || "")
     .split(/\r?\n|(?:^|\s)\d+[.)]\s+/)
     .map((item) => item.replace(/^[-*]\s*/, "").trim())
     .filter((item) => item.length > 3);
-  return items.length ? items.slice(0, 12) : [
+  return items.length ? items.slice(0, limit) : [
     "Check filters and replace if required",
     "Check fan blades for dust buildup and clean if necessary",
     "Check moving parts for cracks and excessive wear",
@@ -5694,7 +5694,22 @@ function PmPreviewModal({
   onClose: () => void;
   onUpdate: (body: Record<string, unknown>) => Promise<void> | void;
 }) {
-  const checklist = checklistItems(ppm.checklist);
+  const ppmGroupCode = ppm.ppmCode || String(ppm.code || "").split("-")[0];
+  const [ppmGroup, setPpmGroup] = useState<any | null>(null);
+  const checklist = checklistItems(ppmGroup?.checklist || ppm.checklist, 200);
+  const groupEquipment = ppmGroup?.equipment?.length ? ppmGroup.equipment : [{
+    id: ppm.id,
+    code: ppm.code,
+    assetTag: ppm.assetTag,
+    locationCode: ppm.locationCode,
+    equipmentDescription: ppm.equipmentDescription,
+    objectType: ppm.objectType,
+    objectClass: ppm.objectClass,
+    objectCategory: ppm.objectCategory,
+    departmentCode: ppm.departmentCode,
+    nextDue: ppm.nextDue,
+    active: ppm.active,
+  }];
   const [tab, setTab] = useState<"comments" | "history">("history");
   const [quickForm, setQuickForm] = useState<"" | "procedure" | "part">("");
   const [quickValue, setQuickValue] = useState("");
@@ -5704,6 +5719,17 @@ function PmPreviewModal({
     created: 1,
     completed: ["CLOSED", "COMPLETED", "PENDING_SUPERVISOR_REVIEW"].includes(work.status) ? 1 : 0,
   }));
+
+  useEffect(() => {
+    let mounted = true;
+    setPpmGroup(null);
+    if (!ppmGroupCode) return () => { mounted = false; };
+    fetch(`/api/ppm?groupCode=${encodeURIComponent(ppmGroupCode)}`)
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => { if (mounted && data) setPpmGroup(data); })
+      .catch(() => { if (mounted) setPpmGroup(null); });
+    return () => { mounted = false; };
+  }, [ppm.id, ppmGroupCode]);
 
   async function savePpmQuick(kind: "procedure" | "part") {
     const value = quickValue.trim();
@@ -5727,9 +5753,9 @@ function PmPreviewModal({
         </div>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-black text-slate-500">{ppm.code} / Next due {formatDateCell(ppm.nextDue)}</p>
+            <p className="text-xs font-black text-slate-500">PPM {ppmGroupCode} / Record {ppm.code} / Next due {formatDateCell(ppm.nextDue)}</p>
             <h3 className="mt-1 text-2xl font-black">{ppm.name}</h3>
-            <p className="mt-2 max-w-3xl whitespace-pre-wrap text-sm font-bold text-slate-600">{ppm.checklist}</p>
+            <p className="mt-2 max-w-3xl whitespace-pre-wrap text-sm font-bold text-slate-600">{checklist.slice(0, 5).join("\\n")}</p>
           </div>
           <RequestPriorityBadge priority={priority} />
         </div>
@@ -5739,11 +5765,37 @@ function PmPreviewModal({
           <PreviewField label="Time to Complete" value={`${ppm.durationHrs || 0} hrs`} />
           <PreviewField label="Work Type" value="Preventive" />
           <PreviewField label="Schedule" value={ppm.frequency} />
+          <PreviewField label="PPM Code" value={ppmGroupCode} />
+          <PreviewField label="Linked Equipment" value={`${groupEquipment.length} item${groupEquipment.length === 1 ? "" : "s"}`} />
           <PreviewField label="Asset" value={ppm.assetTag} />
           <PreviewField label="Location Code" value={ppm.locationCode || asset?.locationCode} />
           <PreviewField label="Department" value={ppm.departmentCode || asset?.departmentCode} />
           <PreviewField label="Category" value={asset?.assetGroup || asset?.category} />
           <PreviewField label="Location" value={location?.description || asset?.locationDesc || [asset?.buildingCode, asset?.floor, asset?.room].filter(Boolean).join(" / ")} />
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h4 className="font-black">Linked Equipment / Locations</h4>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">{ppmGroup ? `${groupEquipment.length} loaded` : "Loading group"}</span>
+          </div>
+          <div className="mt-3 max-h-72 overflow-auto rounded-lg border border-slate-100">
+            <table className="w-full min-w-[760px] text-left text-xs">
+              <thead className="sticky top-0 bg-slate-50 text-slate-500">
+                <tr><th className="px-3 py-2">Code</th><th className="px-3 py-2">Asset / Location</th><th className="px-3 py-2">Description</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Next Due</th></tr>
+              </thead>
+              <tbody>
+                {groupEquipment.map((item: any) => (
+                  <tr key={item.id || item.code} className="border-t border-slate-100">
+                    <td className="px-3 py-2 font-black text-slate-600">{item.code}</td>
+                    <td className="px-3 py-2 font-bold text-lagoon">{item.assetTag || item.locationCode || "-"}</td>
+                    <td className="px-3 py-2">{item.equipmentDescription || item.objectCategory || item.objectClass || "-"}</td>
+                    <td className="px-3 py-2">{item.departmentCode || "-"}</td>
+                    <td className="px-3 py-2">{formatDateCell(item.nextDue)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-4">
           <div className="flex items-center justify-between gap-3">
@@ -8211,7 +8263,7 @@ function Templates() {
     ["requests", "Requests", "ticketNo,title,category,departmentCode,serviceCode,assignedTeamCode,requester,channel,priority,status,location,attachmentUrls,rejectionReason,slaHours,description"],
     ["workOrders", "Work Orders", "woNo,title,type,assetType,departmentCode,serviceCode,assignedTeamCode,jobPlanCode,priority,status,assetTag,plannedStart,dueAt,finishedAt,resolutionAt,dateTimeCreated,estimatedHours,actualHours,cost,jobPlan,safetyNotes,workNotes,materialRequest,photoUrls,assetsUsed,inventoryUsed,supervisorDecision,sourceYear,sourceWorkOrder,sourceServiceRequest,sourceEquipmentLocation,sourceLocation,matchSource"],
     ["workOrderComments", "Work Order Comments", "woNo,commentText,commentedAt,commentedBy,sourceYear,sourceLine,sourceUserCode"],
-    ["ppm", "PPM Schedule", "code,name,assetTag,locationCode,frequency,nextDue,durationHrs,departmentCode,priority,checklist,active"],
+    ["ppm", "PPM Schedule", "code,ppmCode,uniqueCode,name,assetTag,locationCode,equipmentDescription,objectType,objectClass,objectCategory,frequency,periodUom,nextDue,durationHrs,departmentCode,priority,criticalityDescription,workType,nestingCode,activityCode,checklistLink,checklist,checklistItemCount,active"],
     ["omManuals", "O&M Manual Index", "category,assetTag,sourcePath,fileName,manualCode,manualTitle,matchField,assetClass,assetCategory,assetPrimarySystem,department"],
     ["jobPlans", "Job Plans", "code,name,assetType,departmentCode,serviceCode,estimatedHours,priority,steps,safetyNotes"],
     ["locations", "Locations", "Location,Description,Class,Parent Location,Out of Service,Residential"],
