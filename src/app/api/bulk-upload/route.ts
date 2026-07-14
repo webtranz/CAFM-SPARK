@@ -1402,7 +1402,7 @@ async function importPpm(row: Row, context: ImportContext = {}) {
   const targetKey = assetTag || locationCode || ppmCode;
   const code = value(row, "uniqueCode") || uniquePpmCode(baseCode, targetKey);
   const existing = await prisma.preventiveMaintenance.findUnique({ where: { code } });
-  if (existing && !shouldReplace(context)) return existingResult("preventive_maintenance", existing, code, existing.name);
+  if (existing && !shouldReplace(context) && !canUseCustomLocation) return existingResult("preventive_maintenance", existing, code, existing.name);
   const nextDue = optionalDate(value(row, "nextDue", "DUE DATE", "dueAt")) || addDays(new Date(), 7);
   const activeValue = value(row, "active");
   const data = {
@@ -1435,7 +1435,6 @@ async function importPpm(row: Row, context: ImportContext = {}) {
       },
     });
     if (existingByIdentity && existingByIdentity.code !== code) {
-      if (!shouldReplace(context)) return existingResult("preventive_maintenance", existingByIdentity, existingByIdentity.code, existingByIdentity.name);
       const updated = await prisma.preventiveMaintenance.update({
         where: { id: existingByIdentity.id },
         data,
