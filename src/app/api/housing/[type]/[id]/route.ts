@@ -399,7 +399,10 @@ async function deleteHousingRecord(type: string, id: string) {
     await refreshRoomOccupancy(booking.roomId);
     return;
   }
-  if (type === "room") return void await prisma.housingRoom.delete({ where: { id } });
+  if (type === "room") {
+    await deleteHousingRoomWithLinks(id);
+    return;
+  }
   if (type === "inspection") return void await prisma.housingInspection.delete({ where: { id } });
   if (type === "asset") return void await prisma.housingAsset.delete({ where: { id } });
   if (type === "inventory") return void await prisma.housingInventory.delete({ where: { id } });
@@ -410,6 +413,35 @@ async function deleteHousingRecord(type: string, id: string) {
   if (type === "property") return void await prisma.housingProperty.delete({ where: { id } });
   if (type === "block") return void await prisma.housingBlock.delete({ where: { id } });
   throw new Error(`Unsupported housing record type: ${type}`);
+}
+
+async function deleteHousingRoomWithLinks(id: string) {
+  const room = await prisma.housingRoom.findUnique({ where: { id }, select: { id: true, propertyId: true } });
+  if (!room) throw new Error("Room not found.");
+  const bookings = await prisma.housingBooking.findMany({ where: { roomId: id }, select: { id: true } });
+  const bookingIds = bookings.map((booking) => booking.id);
+
+  await prisma.$transaction(async (tx) => {
+    if (bookingIds.length) {
+      await tx.housingApproval.deleteMany({ where: { bookingId: { in: bookingIds } } });
+      await tx.housingNotification.deleteMany({ where: { bookingId: { in: bookingIds } } });
+      await tx.housingHistory.deleteMany({ where: { bookingId: { in: bookingIds } } });
+    }
+    await tx.housingHistory.deleteMany({ where: { roomId: id } });
+    await tx.housingRoomHold.deleteMany({ where: { roomId: id } });
+    await tx.housingInspection.deleteMany({ where: { roomId: id } });
+    await tx.housingBooking.deleteMany({ where: { roomId: id } });
+    await tx.housingAsset.updateMany({ where: { roomId: id }, data: { roomId: null, roomLocation: "", buildingLocation: "" } });
+    await tx.housingInventory.updateMany({ where: { roomId: id }, data: { roomId: null } });
+    await tx.housingBed.deleteMany({ where: { roomId: id } });
+    await tx.housingRoom.delete({ where: { id } });
+  });
+  await refreshHousingPropertyRoomCount(room.propertyId);
+}
+
+async function refreshHousingPropertyRoomCount(propertyId: string) {
+  const totalRooms = await prisma.housingRoom.count({ where: { propertyId } });
+  await prisma.housingProperty.update({ where: { id: propertyId }, data: { totalRooms } });
 }
 
 async function refreshRoomOccupancy(roomId: string) {
