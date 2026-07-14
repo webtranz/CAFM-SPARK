@@ -43,6 +43,7 @@ const schema = z.object({
   durationHrs: z.coerce.number().min(0.25).optional(),
   checklist: z.string().optional(),
   active: boolValue.optional(),
+  applyToGroup: boolValue.optional(),
 });
 
 export async function GET(request: Request) {
@@ -188,9 +189,10 @@ export async function PATCH(request: Request) {
     const input = schema.extend({ id: z.string().optional() }).parse(await request.json());
     const id = input.id || undefined;
     const code = input.code || undefined;
-    if (!id && !code) throw new Error("PPM id or code is required");
-    const current = await prisma.preventiveMaintenance.findUnique({ where: id ? { id } : { code: code! } });
-    if (!current) throw new Error("PPM not found");
+    const groupCode = input.ppmCode || code;
+    if (!id && !code && !groupCode) throw new Error("PPM id, code or PPM code is required");
+    const current = id || code ? await prisma.preventiveMaintenance.findUnique({ where: id ? { id } : { code: code! } }) : null;
+    if ((id || code) && !current) throw new Error("PPM not found");
     const data = {
       ppmCode: input.ppmCode,
       name: input.name,
@@ -209,9 +211,24 @@ export async function PATCH(request: Request) {
       active: input.active,
       nextDue: input.nextDue ? new Date(input.nextDue) : undefined,
     };
+    const cleanData = Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
+    if (input.applyToGroup && groupCode && input.checklist !== undefined) {
+      const result = await prisma.preventiveMaintenance.updateMany({
+        where: {
+          OR: [
+            { ppmCode: groupCode },
+            { code: groupCode },
+            { code: { startsWith: `${groupCode}-`, mode: "insensitive" } },
+          ],
+        },
+        data: { checklist: input.checklist },
+      });
+      await auditAction({ user, action: "PPM_GROUP_CHECKLIST_UPDATE", entity: "preventive_maintenance", entityId: groupCode, details: { input, updatedCount: result.count } });
+      return NextResponse.json({ ok: true, ppmCode: groupCode, updatedCount: result.count, checklist: input.checklist });
+    }
     const updated = await prisma.preventiveMaintenance.update({
       where: id ? { id } : { code: code! },
-      data,
+      data: cleanData,
     });
     await auditAction({ user, action: "PPM_UPDATE", entity: "preventive_maintenance", entityId: updated.id, details: { before: current, input, after: updated } });
     return NextResponse.json(updated);

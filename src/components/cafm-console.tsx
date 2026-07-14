@@ -5765,13 +5765,25 @@ function PmPreviewModal({
     return () => { mounted = false; };
   }, [ppm.id, ppmGroupCode]);
 
+  async function savePpmChecklist(nextItems: string[]) {
+    const cleanedItems = nextItems.map((item) => item.trim()).filter((item) => item && item !== "No match");
+    const nextChecklist = cleanedItems.length ? cleanedItems.join("\n") : "No match";
+    await onUpdate({ ppmCode: ppmGroupCode, applyToGroup: true, checklist: nextChecklist });
+    setPpmGroup((current: any) => current ? { ...current, checklist: nextChecklist } : current);
+  }
+
   async function savePpmQuick(kind: "procedure" | "part") {
     const value = quickValue.trim();
     if (!value) return;
     const line = kind === "procedure" ? value : `Part: ${value}`;
-    await onUpdate({ checklist: [ppm.checklist, line].filter(Boolean).join("\n") });
+    await savePpmChecklist([...checklist, line]);
     setQuickValue("");
     setQuickForm("");
+  }
+
+  async function deletePpmChecklistItem(indexToDelete: number) {
+    const nextItems = checklist.filter((_, index) => index !== indexToDelete);
+    await savePpmChecklist(nextItems);
   }
 
   return (
@@ -5896,10 +5908,11 @@ function PmPreviewModal({
             {checklist.length === 1 && checklist[0] === "No match" ? (
               <p className="rounded-lg bg-amber-50 p-3 text-sm font-black text-amber-700">No match</p>
             ) : checklist.map((item, index) => (
-              <label key={`${item}-${index}`} className="flex gap-3 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-700">
+              <div key={`${item}-${index}`} className="flex items-start gap-3 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-700">
                 <input type="checkbox" className="mt-1" />
-                <span>{index + 1}. {item}</span>
-              </label>
+                <span className="flex-1">{index + 1}. {item}</span>
+                <button type="button" disabled={saving} onClick={() => deletePpmChecklistItem(index)} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300">Delete</button>
+              </div>
             ))}
           </div>
         </div>
