@@ -536,7 +536,7 @@ model PreventiveMaintenance {
   checklist            String
   active               Boolean  @default(true)
 
-  @@unique([assetTag, locationCode, frequency, name], map: "ppm_plans_asset_location_frequency_name_unique")
+  @@index([assetTag, locationCode, frequency, name], map: "ppm_plans_asset_location_frequency_name_idx")
   @@index([ppmCode])
 }
 

@@ -1423,25 +1423,6 @@ async function importPpm(row: Row, context: ImportContext = {}) {
     checklist: ppmChecklistValue(row),
     active: activeValue ? yesNo(activeValue, true) : true,
   };
-  if (canUseCustomLocation) {
-    const existingByIdentity = await prisma.preventiveMaintenance.findUnique({
-      where: {
-        assetTag_locationCode_frequency_name: {
-          assetTag: data.assetTag,
-          locationCode: data.locationCode,
-          frequency: data.frequency,
-          name: data.name,
-        },
-      },
-    });
-    if (existingByIdentity && existingByIdentity.code !== code) {
-      const updated = await prisma.preventiveMaintenance.update({
-        where: { id: existingByIdentity.id },
-        data,
-      });
-      return importResult("preventive_maintenance", "UPDATE", updated, updated.code, updated.name);
-    }
-  }
   const ppm = await prisma.preventiveMaintenance.upsert({
     where: { code },
     update: data,
