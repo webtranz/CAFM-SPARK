@@ -2116,6 +2116,35 @@ function Assets({
     }
   }
 
+  async function loadAllAssetsForFilters() {
+    if (assetLoading || assetRowsSource.length >= assetTotal) return;
+    setAssetLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: "1",
+        pageSize: "all",
+        query,
+        filterField,
+        filterValue,
+        locationCode: locationFilter,
+        locationQuery: locationSearch,
+        class: classFilter,
+        status: statusFilter,
+      });
+      Object.entries(columnFilters).forEach(([field, value]) => {
+        const trimmed = value.trim();
+        if (trimmed) params.set(`column_${field}`, trimmed);
+      });
+      const response = await fetch(`/api/assets/filter?${params.toString()}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const result = await response.json();
+      setAssetRowsSource(result.assets ?? []);
+      setAssetTotal(Number(result.total ?? result.assets?.length ?? 0));
+    } finally {
+      setAssetLoading(false);
+    }
+  }
+
   async function bulkDeleteSelectedAssets() {
     const ids = Array.from(selectedAssetIds);
     if (!ids.length) return;
@@ -2278,7 +2307,7 @@ function Assets({
                 </th>
                 {assetDisplayColumns.map(([key, label]) => (
                   <th key={label} className="px-3 py-3">
-                    <ExcelFilterHeader label={label} columnKey={key} rows={assetRows} filters={assetExcelFilters} sort={assetExcelSort} onFilterChange={(filterKey, values) => setAssetExcelFilters((current) => ({ ...current, [filterKey]: values }))} onSortChange={setAssetExcelSort} />
+                    <ExcelFilterHeader label={label} columnKey={key} rows={assetRows} filters={assetExcelFilters} sort={assetExcelSort} onFilterChange={(filterKey, values) => setAssetExcelFilters((current) => ({ ...current, [filterKey]: values }))} onSortChange={setAssetExcelSort} onOpen={loadAllAssetsForFilters} />
                   </th>
                 ))}
                 {isAdmin && <th className="px-3 py-3">Actions</th>}
@@ -2984,6 +3013,33 @@ function WorkOrders({
     }
   }
 
+  async function loadAllWorksForFilters() {
+    if (workLoading || workRowsSource.length >= workTotal) return;
+    setWorkLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: "1",
+        pageSize: "all",
+        query: search,
+        status: statusFilter,
+        priority: priorityFilter,
+        category: categoryFilter,
+        department: departmentFilter,
+        type: typeFilter,
+        assigned: assignedFilter,
+        overdueOnly: overdueOnly ? "true" : "false",
+        delayedOnly: showTimeMetrics && showOnlyDelayed ? "true" : "false",
+      });
+      const response = await fetch(`/api/work-orders?${params.toString()}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const result = await response.json();
+      setWorkRowsSource(result.workOrders ?? []);
+      setWorkTotal(Number(result.total ?? result.workOrders?.length ?? 0));
+    } finally {
+      setWorkLoading(false);
+    }
+  }
+
   async function bulkDeleteSelectedWorks() {
     const ids = Array.from(selectedWorkIds);
     if (!ids.length) return;
@@ -3099,7 +3155,7 @@ function WorkOrders({
                     <th className="px-3 py-3 font-black">#</th>
                     {workExcelColumns.map(([key, label]) => (
                       <th key={key} className="px-3 py-3 font-black">
-                        <ExcelFilterHeader label={label} columnKey={key} rows={rawVisibleWorks} filters={workExcelFilters} sort={workExcelSort} onFilterChange={(filterKey, values) => setWorkExcelFilters((current) => ({ ...current, [filterKey]: values }))} onSortChange={setWorkExcelSort} getValue={(work, valueKey) => {
+                        <ExcelFilterHeader label={label} columnKey={key} rows={rawVisibleWorks} filters={workExcelFilters} sort={workExcelSort} onFilterChange={(filterKey, values) => setWorkExcelFilters((current) => ({ ...current, [filterKey]: values }))} onSortChange={setWorkExcelSort} onOpen={loadAllWorksForFilters} getValue={(work, valueKey) => {
                           if (valueKey === "asset") return work.asset?.tag ?? work.assetTag ?? "";
                           if (valueKey === "location") return work.asset?.buildingCode || work.asset?.floor || work.location || "";
                           if (valueKey === "description") return work.jobPlan || work.workNotes || work.title;
@@ -3560,6 +3616,30 @@ function Helpdesk({
     }
   }
 
+  async function loadAllRequestsForFilters() {
+    if (requestLoading || requestRowsSource.length >= requestTotal) return;
+    setRequestLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: "1",
+        pageSize: "all",
+        query: search,
+        status: statusFilter,
+        priority: priorityFilter,
+        category: categoryFilter,
+        overdueOnly: overdueOnly ? "true" : "false",
+      });
+      const response = await fetch(`/api/service-requests?${params.toString()}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const result = await response.json();
+      setRequestRowsSource(result.requests ?? []);
+      setRequestTotal(Number(result.total ?? result.requests?.length ?? 0));
+      setAllRequestTotal(Number(result.allTotal ?? result.total ?? result.requests?.length ?? 0));
+    } finally {
+      setRequestLoading(false);
+    }
+  }
+
   async function runRequestAction(key: string, request: any, action: () => Promise<void> | void) {
     setSelectedRequestId(request.id);
     setRequestAction(key);
@@ -3670,7 +3750,7 @@ function Helpdesk({
                 <th className="px-3 py-3 font-black">#</th>
                 {requestExcelColumns.map(([key, label]) => (
                   <th key={key} className="px-3 py-3 font-black">
-                    <ExcelFilterHeader label={label} columnKey={key} rows={requestRowsSource} filters={requestExcelFilters} sort={requestExcelSort} onFilterChange={(filterKey, values) => setRequestExcelFilters((current) => ({ ...current, [filterKey]: values }))} onSortChange={setRequestExcelSort} getValue={(request, valueKey) => {
+                    <ExcelFilterHeader label={label} columnKey={key} rows={requestRowsSource} filters={requestExcelFilters} sort={requestExcelSort} onFilterChange={(filterKey, values) => setRequestExcelFilters((current) => ({ ...current, [filterKey]: values }))} onSortChange={setRequestExcelSort} onOpen={loadAllRequestsForFilters} getValue={(request, valueKey) => {
                       if (["createdAt", "dueAt"].includes(valueKey)) return formatDateCell(request[valueKey]);
                       if (valueKey === "isIncidentCase") return request.isIncidentCase ? "Yes" : "No";
                       return request[valueKey];
@@ -5500,6 +5580,21 @@ function Ppm({
     }
   }
 
+  async function loadAllPpmsForFilters() {
+    if (ppmLoading || ppmRowsSource.length >= ppmTotal) return;
+    setPpmLoading(true);
+    try {
+      const params = new URLSearchParams({ page: "1", pageSize: "all", query: search, status: statusFilter });
+      const response = await fetch(`/api/ppm?${params.toString()}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const result = await response.json();
+      setPpmRowsSource(result.ppms ?? []);
+      setPpmTotal(Number(result.total ?? result.ppms?.length ?? 0));
+    } finally {
+      setPpmLoading(false);
+    }
+  }
+
   async function bulkDeleteSelectedPpms() {
     const ids = Array.from(selectedPpmIds);
     if (!ids.length) return;
@@ -5572,7 +5667,7 @@ function Ppm({
                     <th className="px-3 py-3">#</th>
                     {ppmExcelColumns.map(([key, label]) => (
                       <th key={key} className="px-3 py-3">
-                        <ExcelFilterHeader label={label} columnKey={key} rows={ppmRowsSource} filters={ppmExcelFilters} sort={ppmExcelSort} onFilterChange={(filterKey, values) => setPpmExcelFilters((current) => ({ ...current, [filterKey]: values }))} onSortChange={setPpmExcelSort} getValue={(ppm, valueKey) => {
+                        <ExcelFilterHeader label={label} columnKey={key} rows={ppmRowsSource} filters={ppmExcelFilters} sort={ppmExcelSort} onFilterChange={(filterKey, values) => setPpmExcelFilters((current) => ({ ...current, [filterKey]: values }))} onSortChange={setPpmExcelSort} onOpen={loadAllPpmsForFilters} getValue={(ppm, valueKey) => {
                           if (valueKey === "ppmCode") return ppm.ppmCode || String(ppm.code || "").split("-")[0] || ppm.code;
                           if (valueKey === "active") return ppm.active ? "Planned" : "Paused";
                           if (valueKey === "nextDue") return formatDateCell(ppm.nextDue);
@@ -11327,7 +11422,7 @@ function applyExcelTableFilters<T>(rows: T[], columns: ExcelColumn[], filters: E
   });
 }
 
-function ExcelFilterHeader<T>({ label, columnKey, rows, filters, sort, onFilterChange, onSortChange, getValue }: {
+function ExcelFilterHeader<T>({ label, columnKey, rows, filters, sort, onFilterChange, onSortChange, getValue, onOpen }: {
   label: string;
   columnKey: string;
   rows: T[];
@@ -11336,6 +11431,7 @@ function ExcelFilterHeader<T>({ label, columnKey, rows, filters, sort, onFilterC
   onFilterChange: (key: string, values: string[] | null) => void;
   onSortChange: (sort: ExcelSort) => void;
   getValue?: (row: T, key: string) => unknown;
+  onOpen?: () => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -11387,7 +11483,22 @@ function ExcelFilterHeader<T>({ label, columnKey, rows, filters, sort, onFilterC
   return (
     <div className="relative inline-flex items-center gap-1">
       <span>{label}</span>
-      <button type="button" onClick={(event) => { event.stopPropagation(); setOpen((current) => !current); }} className={`grid h-5 w-5 place-items-center rounded border text-[10px] ${active ? "border-lagoon bg-lagoon text-white" : "border-slate-300 bg-white text-slate-500"}`}>?</button>
+      <button
+        type="button"
+        aria-label={`Filter ${label}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen((current) => {
+            const next = !current;
+            if (next) void onOpen?.();
+            return next;
+          });
+        }}
+        className={`relative grid h-5 w-5 place-items-center border text-[10px] shadow-sm ${active ? "border-lagoon bg-lagoon text-white" : "border-slate-300 bg-slate-100 text-slate-600"}`}
+      >
+        <span className="absolute inset-x-1 top-[5px] h-[1px] bg-current opacity-70" />
+        <span className="mt-[3px] text-[9px] leading-none">?</span>
+      </button>
       {open && (
         <div onClick={(event) => event.stopPropagation()} className="absolute left-0 top-7 z-50 w-72 rounded-lg border border-slate-200 bg-white p-3 text-left normal-case text-slate-700 shadow-xl">
           <div className="grid gap-1 border-b border-slate-100 pb-2 text-xs font-bold">

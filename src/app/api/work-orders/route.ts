@@ -64,9 +64,10 @@ export async function GET(request: Request) {
   const overdueOnly = url.searchParams.get("overdueOnly") === "true";
   const delayedOnly = url.searchParams.get("delayedOnly") === "true";
   const pageInput = Number(url.searchParams.get("page") || 1);
-  const pageSizeInput = Number(url.searchParams.get("pageSize") || 100);
+  const pageSizeParam = url.searchParams.get("pageSize") || "100";
+  const pageSizeInput = pageSizeParam === "all" ? Number.MAX_SAFE_INTEGER : Number(pageSizeParam);
   const page = Number.isFinite(pageInput) ? Math.max(1, Math.floor(pageInput)) : 1;
-  const pageSize = Number.isFinite(pageSizeInput) ? Math.min(200, Math.max(25, Math.floor(pageSizeInput))) : 100;
+  const pageSize = pageSizeParam === "all" ? 20000 : Number.isFinite(pageSizeInput) ? Math.min(500, Math.max(25, Math.floor(pageSizeInput))) : 100;
   const where: any = {
     ...visibleWorkWhere(user),
     ...(status && status !== "All" ? { status } : {}),
