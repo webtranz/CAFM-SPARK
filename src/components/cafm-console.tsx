@@ -4984,18 +4984,26 @@ function isImageUrl(value: string) {
   return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(pathOnly) || value.startsWith("/uploads/") || value.startsWith("/api/files/");
 }
 
+function isInvalidChecklistValue(value: unknown) {
+  const raw = String(value || "").trim();
+  const normalized = raw.toLowerCase();
+  return !raw ||
+    normalized === "no match" ||
+    raw.startsWith("=") ||
+    normalized.includes("iferror(") ||
+    normalized.includes("hyperlink(") ||
+    normalized.includes("activities & checklist") ||
+    normalized.includes("#n/a") ||
+    normalized.includes("#value");
+}
+
 function checklistItems(value: unknown, limit = 12) {
+  if (isInvalidChecklistValue(value)) return ["No match"];
   const items = String(value || "")
     .split(/\r?\n|(?:^|\s)\d+[.)]\s+/)
     .map((item) => item.replace(/^[-*]\s*/, "").trim())
-    .filter((item) => item.length > 3);
-  return items.length ? items.slice(0, limit) : [
-    "Check filters and replace if required",
-    "Check fan blades for dust buildup and clean if necessary",
-    "Check moving parts for cracks and excessive wear",
-    "Verify safety isolation and lockout requirements",
-    "Record completion notes, time, parts and proof photos",
-  ];
+    .filter((item) => item.length > 3 && !isInvalidChecklistValue(item));
+  return items.length ? items.slice(0, limit) : ["No match"];
 }
 
 function RequestStatusBadge({ status }: { status: string }) {
@@ -5781,7 +5789,6 @@ function PmPreviewModal({
           <div>
             <p className="text-xs font-black text-slate-500">PPM {ppmGroupCode} / Record {ppm.code} / Next due {formatDateCell(ppm.nextDue)}</p>
             <h3 className="mt-1 text-2xl font-black">{ppm.name}</h3>
-            <p className="mt-2 max-w-3xl whitespace-pre-wrap text-sm font-bold text-slate-600">{checklist.slice(0, 5).join("\\n")}</p>
           </div>
           <RequestPriorityBadge priority={priority} />
         </div>
@@ -5886,7 +5893,9 @@ function PmPreviewModal({
             </div>
           )}
           <div className="mt-3 grid gap-2">
-            {checklist.map((item, index) => (
+            {checklist.length === 1 && checklist[0] === "No match" ? (
+              <p className="rounded-lg bg-amber-50 p-3 text-sm font-black text-amber-700">No match</p>
+            ) : checklist.map((item, index) => (
               <label key={`${item}-${index}`} className="flex gap-3 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-700">
                 <input type="checkbox" className="mt-1" />
                 <span>{index + 1}. {item}</span>

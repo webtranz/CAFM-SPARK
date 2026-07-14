@@ -12,6 +12,19 @@ const boolValue = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
+function isInvalidChecklistValue(value: unknown) {
+  const raw = String(value || "").trim();
+  const normalized = raw.toLowerCase();
+  return !raw ||
+    normalized === "no match" ||
+    raw.startsWith("=") ||
+    normalized.includes("iferror(") ||
+    normalized.includes("hyperlink(") ||
+    normalized.includes("activities & checklist") ||
+    normalized.includes("#n/a") ||
+    normalized.includes("#value");
+}
+
 const schema = z.object({
   code: z.string().optional(),
   ppmCode: z.string().optional(),
@@ -57,7 +70,7 @@ export async function GET(request: Request) {
     ]);
     const assetByTag = new Map(assets.map((asset) => [asset.tag, asset]));
     const locationByCode = new Map(locations.map((location) => [location.code, location]));
-    const checklistSource = groupedPpms.find((item) => item.checklist)?.checklist || "";
+    const checklistSource = groupedPpms.find((item) => item.checklist && !isInvalidChecklistValue(item.checklist))?.checklist || "No match";
     return NextResponse.json({
       ppmCode: groupCode,
       total: groupedPpms.length,

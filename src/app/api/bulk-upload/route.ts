@@ -1416,7 +1416,7 @@ async function importPpm(row: Row, context: ImportContext = {}) {
     frequency: value(row, "frequency", "FREQUENCY") || "Monthly",
     nextDue,
     durationHrs: number(value(row, "durationHrs", "duration", "PPA_DURATION"), 2),
-    checklist: value(row, "checklist", "ACTIVITY CHECKLIST", "steps") || "Checklist to be defined.",
+    checklist: ppmChecklistValue(row),
     active: activeValue ? yesNo(activeValue, true) : true,
   };
   const ppm = await prisma.preventiveMaintenance.upsert({
@@ -1757,6 +1757,27 @@ function yesNo(value: string | undefined, fallback: boolean) {
   if (["yes", "true", "1", "y"].includes(normalized)) return true;
   if (["no", "false", "0", "n"].includes(normalized)) return false;
   return fallback;
+}
+
+function isInvalidPpmChecklistValue(value: unknown) {
+  const raw = String(value || "").trim();
+  const normalized = raw.toLowerCase();
+  return !raw ||
+    normalized === "no match" ||
+    raw.startsWith("=") ||
+    normalized.includes("iferror(") ||
+    normalized.includes("hyperlink(") ||
+    normalized.includes("activities & checklist") ||
+    normalized.includes("#n/a") ||
+    normalized.includes("#value");
+}
+
+function ppmChecklistValue(row: Row) {
+  const directChecklist = value(row, "checklist", "steps");
+  if (directChecklist && !isInvalidPpmChecklistValue(directChecklist)) return directChecklist;
+  const activityChecklist = value(row, "ACTIVITY CHECKLIST");
+  if (activityChecklist && !isInvalidPpmChecklistValue(activityChecklist)) return activityChecklist;
+  return "No match";
 }
 
 function date(value: string | undefined, fallback: Date) {
