@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Image from "next/image";
 
 export default function LoginPage() {
   const [message, setMessage] = useState("");
@@ -26,8 +27,9 @@ export default function LoginPage() {
     <main className="grid min-h-screen place-items-center bg-slate-50 p-6 text-ink">
       <form onSubmit={submit} className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex items-center gap-3">
-          {/* Tamimi logo hidden on request; restore the image block when requested. */}
-          <div aria-hidden="true" className="h-12 w-12 shrink-0" />
+          <div className="grid h-12 w-12 place-items-center overflow-hidden rounded-xl border border-amber-200 bg-white p-1 shadow-sm">
+            <Image src="/tafga.png" alt="Tamimi Global CAFM logo" width={48} height={48} className="h-full w-full object-contain" priority />
+          </div>
           <div>
             <h1 className="text-xl font-bold leading-tight text-slate-900">Tamimi Global</h1>
             <p className="text-sm text-slate-500">CAFM system</p>
