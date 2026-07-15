@@ -5794,6 +5794,7 @@ function Ppm({
           ppm={previewPpm}
           asset={assets.find((asset) => asset.tag === previewPpm.assetTag)}
           location={locations.find((location) => location.code === previewPpm.locationCode)}
+          locations={locations}
           workOrders={workOrders.filter((work) => work.asset?.tag === previewPpm.assetTag || work.assetTag === previewPpm.assetTag)}
           saving={saving}
           onClose={() => setPreviewPpm(null)}
@@ -5903,6 +5904,7 @@ function PmPreviewModal({
   ppm,
   asset,
   location,
+  locations,
   workOrders,
   saving,
   onClose,
@@ -5911,6 +5913,7 @@ function PmPreviewModal({
   ppm: any;
   asset?: any;
   location?: any;
+  locations: any[];
   workOrders: any[];
   saving: boolean;
   onClose: () => void;
@@ -5950,6 +5953,9 @@ function PmPreviewModal({
   const [selectedLinkedEquipment, setSelectedLinkedEquipment] = useState<any | null>(null);
   const selectedAssetDetails = selectedLinkedEquipment?.assetDetails;
   const selectedLocationDetails = selectedLinkedEquipment?.locationDetails;
+  const customLocationAllowed = allowsCustomPpmLocation(ppmGroupCode);
+  const [editableLocationCode, setEditableLocationCode] = useState(ppm.locationCode || asset?.locationCode || "");
+  const selectedEditableLocation = locations.find((item) => item.code === editableLocationCode);
   const [tab, setTab] = useState<"comments" | "history">("history");
   const [quickForm, setQuickForm] = useState<"" | "procedure" | "part">("");
   const [quickValue, setQuickValue] = useState("");
@@ -5964,13 +5970,27 @@ function PmPreviewModal({
     let mounted = true;
     setPpmGroup(null);
     setSelectedLinkedEquipment(null);
+    setEditableLocationCode(ppm.locationCode || asset?.locationCode || "");
     if (!ppmGroupCode) return () => { mounted = false; };
     fetch(`/api/ppm?groupCode=${encodeURIComponent(ppmGroupCode)}`)
       .then((response) => response.ok ? response.json() : null)
       .then((data) => { if (mounted && data) setPpmGroup(data); })
       .catch(() => { if (mounted) setPpmGroup(null); });
     return () => { mounted = false; };
-  }, [ppm.id, ppmGroupCode]);
+  }, [ppm.id, ppmGroupCode, ppm.locationCode, asset?.locationCode]);
+
+  async function savePpmLocation() {
+    const nextLocationCode = editableLocationCode.trim();
+    await onUpdate({ locationCode: nextLocationCode });
+    setPpmGroup((current: any) => current ? {
+      ...current,
+      equipment: (current.equipment || []).map((item: any) => item.id === ppm.id ? {
+        ...item,
+        locationCode: nextLocationCode,
+        locationDetails: selectedEditableLocation || item.locationDetails,
+      } : item),
+    } : current);
+  }
 
   async function savePpmChecklist(nextItems: string[]) {
     const cleanedItems = nextItems.map((item) => item.trim()).filter((item) => item && item !== "No match");
@@ -6025,6 +6045,33 @@ function PmPreviewModal({
           <PreviewField label="Category" value={asset?.assetGroup || asset?.category} />
           <PreviewField label="Location" value={location?.description || asset?.locationDesc || [asset?.buildingCode, asset?.floor, asset?.room].filter(Boolean).join(" / ")} />
         </div>
+        {customLocationAllowed && (
+          <div className="rounded-lg border border-lagoon/20 bg-lagoon/5 p-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="grid min-w-[260px] flex-1 gap-1 text-xs font-black uppercase text-slate-500">
+                Select Location For This PPM
+                <select
+                  value={editableLocationCode}
+                  onChange={(event) => setEditableLocationCode(event.target.value)}
+                  className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold normal-case text-ink outline-none focus:border-lagoon"
+                >
+                  <option value="">No location selected</option>
+                  {locations.map((item) => (
+                    <option key={item.id ?? item.code} value={item.code}>
+                      {item.code} - {item.description || item.room || item.floor || item.building || "Location"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" disabled={saving} onClick={savePpmLocation} className="h-11 rounded-lg bg-lagoon px-4 text-sm font-black text-white disabled:bg-slate-300">
+                Save Location
+              </button>
+            </div>
+            <p className="mt-2 text-xs font-bold text-slate-600">
+              Enabled only for the failed-upload PPM codes that are allowed to use a custom location.
+            </p>
+          </div>
+        )}
         <div className="rounded-lg border border-slate-200 bg-white p-4">
           <div className="flex items-center justify-between gap-3">
             <h4 className="font-black">Equipment</h4>
