@@ -9751,6 +9751,7 @@ function HousingOperations({
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selected, setSelected] = useState<{ type: string; record: any } | null>(null);
+  const [createHousingForm, setCreateHousingForm] = useState<"booking" | "hold" | "inspection" | "asset" | "inventory" | null>(null);
   const [runningAlerts, setRunningAlerts] = useState(false);
   const rooms = housing?.rooms ?? [];
   const bookings = housing?.bookings ?? [];
@@ -10067,8 +10068,9 @@ function HousingOperations({
         </section>
       )}
       {activePanel === "bookings" && (
-        <section className="grid gap-5 xl:grid-cols-[1fr_380px]">
+        <section className="grid gap-5">
           <div className="grid gap-3">
+            {canManage && <HousingCreateButton label="Create New Booking" onClick={() => setCreateHousingForm("booking")} />}
             {canManage && (
               <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
                 <button type="button" onClick={() => visibleBookings.filter((booking) => booking.status === "APPROVED").forEach((booking) => updateHousing("booking", booking.id, { status: "CHECKED_IN", notes: "Bulk check-in completed" }))} className="rounded-lg bg-lagoon px-4 py-2 text-xs font-black text-white">Bulk Check-in Approved</button>
@@ -10095,7 +10097,6 @@ function HousingOperations({
               )}
             />
           </div>
-          {canManage && <HousingBookingForm rooms={rooms} beds={housing.beds ?? []} residents={housing.residents ?? []} holds={holds} saving={saving} onSubmit={submitHousing} />}
         </section>
       )}
 
@@ -10123,7 +10124,8 @@ function HousingOperations({
       )}
 
       {activePanel === "holds" && (
-        <section className="grid gap-5 xl:grid-cols-[1fr_380px]">
+        <section className="grid gap-5">
+          {canManage && <HousingCreateButton label="Create New Hold" onClick={() => setCreateHousingForm("hold")} />}
           <HousingTable
             title="Room Hold / Reservation Management"
             rows={visibleHolds}
@@ -10139,11 +10141,11 @@ function HousingOperations({
               </div>
             )}
           />
-          {canManage && <HousingHoldForm rooms={rooms} saving={saving} onSubmit={submitHousing} />}
         </section>
       )}
       {activePanel === "inspections" && (
-        <section className="grid gap-5 xl:grid-cols-[1fr_380px]">
+        <section className="grid gap-5">
+          {canManage && <HousingCreateButton label="Create New Inspection" onClick={() => setCreateHousingForm("inspection")} />}
           <HousingTable
             title="Room Inspection Management"
             rows={visibleInspections}
@@ -10154,12 +10156,12 @@ function HousingOperations({
             onBulkDelete={async (rows) => { await Promise.all(rows.map((row) => deleteHousing("inspection", row.id))); }}
             actions={(record) => canManage && <button type="button" onClick={(event) => { event.stopPropagation(); updateHousing("inspection", record.id, { status: "CLOSED", completedAt: new Date().toISOString() }); }} className="rounded-lg bg-lagoon px-3 py-2 text-xs font-black text-white">Close</button>}
           />
-          {canManage && <HousingInspectionForm rooms={rooms} beds={housing.beds ?? []} bookings={bookings} assets={assets} saving={saving} onSubmit={submitHousing} />}
         </section>
       )}
 
       {activePanel === "assets" && (
-        <section className="grid gap-5 xl:grid-cols-[1fr_380px]">
+        <section className="grid gap-5">
+          {canManage && <HousingCreateButton label="Create New Housing Asset" onClick={() => setCreateHousingForm("asset")} />}
           <HousingTable
             title="Housing Asset Management"
             rows={visibleAssets}
@@ -10177,12 +10179,12 @@ function HousingOperations({
               </div>
             )}
           />
-          {canManage && <HousingAssetForm rooms={rooms} saving={saving} onSubmit={submitHousing} />}
         </section>
       )}
 
       {activePanel === "inventory" && (
-        <section className="grid gap-5 xl:grid-cols-[1fr_380px]">
+        <section className="grid gap-5">
+          {canManage && <HousingCreateButton label="Create New Inventory Item" onClick={() => setCreateHousingForm("inventory")} />}
           <HousingTable
             title="Housing Inventory Management"
             rows={visibleInventory}
@@ -10200,7 +10202,6 @@ function HousingOperations({
               </div>
             )}
           />
-          {canManage && <HousingInventoryForm rooms={rooms} saving={saving} onSubmit={submitHousing} />}
         </section>
       )}
 
@@ -10242,6 +10243,15 @@ function HousingOperations({
         <HousingReportsWorkspace rooms={rooms} bookings={bookings} />
       )}
 
+      {createHousingForm && (
+        <RequestModalShell title={createHousingForm === "booking" ? "Create New Booking" : createHousingForm === "hold" ? "Create New Room Hold" : createHousingForm === "inspection" ? "Create New Room Inspection" : createHousingForm === "asset" ? "Create New Housing Asset" : "Create New Inventory Item"} onClose={() => setCreateHousingForm(null)}>
+          {createHousingForm === "booking" && <HousingBookingForm rooms={rooms} beds={housing.beds ?? []} residents={housing.residents ?? []} holds={holds} saving={saving} onSubmit={async (formData) => { await submitHousing(formData); setCreateHousingForm(null); }} />}
+          {createHousingForm === "hold" && <HousingHoldForm rooms={rooms} saving={saving} onSubmit={async (formData) => { await submitHousing(formData); setCreateHousingForm(null); }} />}
+          {createHousingForm === "inspection" && <HousingInspectionForm rooms={rooms} beds={housing.beds ?? []} bookings={bookings} assets={assets} saving={saving} onSubmit={async (formData) => { await submitHousing(formData); setCreateHousingForm(null); }} />}
+          {createHousingForm === "asset" && <HousingAssetForm rooms={rooms} saving={saving} onSubmit={async (formData) => { await submitHousing(formData); setCreateHousingForm(null); }} />}
+          {createHousingForm === "inventory" && <HousingInventoryForm rooms={rooms} saving={saving} onSubmit={async (formData) => { await submitHousing(formData); setCreateHousingForm(null); }} />}
+        </RequestModalShell>
+      )}
       {selected && (
         <HousingPreviewModal
           type={selected.type}
@@ -10256,6 +10266,14 @@ function HousingOperations({
         />
       )}
     </section>
+  );
+}
+
+function HousingCreateButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <div className="flex justify-end rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+      <button type="button" onClick={onClick} className="rounded-lg bg-lagoon px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-lagoon/90">+ {label}</button>
+    </div>
   );
 }
 
