@@ -9794,14 +9794,17 @@ function HousingOperations({
     return (!search || haystack.includes(filterText)) && (status === "All" || hold.status === status);
   });
   const movementRows = bookings
-    .flatMap((booking) => [
-      { ...booking, movement: "Check-In", movementDate: booking.checkIn, roomNumber: booking.roomNumber || booking.room?.roomNumber, roomType: booking.room?.roomType || booking.roomType },
-      booking.checkOut ? { ...booking, movement: "Check-Out", movementDate: booking.checkOut, roomNumber: booking.roomNumber || booking.room?.roomNumber, roomType: booking.room?.roomType || booking.roomType } : null,
-    ].filter(Boolean) as any[])
+    .flatMap((booking) => {
+      const guestId = booking.employeeId || booking.resident?.residentNo || booking.residentNo || booking.guestId || booking.residentId || "";
+      return [
+        { ...booking, guestId, movement: "Check-In", movementDate: booking.checkIn, roomNumber: booking.roomNumber || booking.room?.roomNumber, roomType: booking.room?.roomType || booking.roomType },
+        booking.checkOut ? { ...booking, guestId, movement: "Check-Out", movementDate: booking.checkOut, roomNumber: booking.roomNumber || booking.room?.roomNumber, roomType: booking.room?.roomType || booking.roomType } : null,
+      ].filter(Boolean) as any[];
+    })
     .filter((booking) => String(booking.movementDate || "").slice(0, 10) === movementDate)
     .filter((booking) => movementTab === "combined" || (movementTab === "checkins" ? booking.movement === "Check-In" : booking.movement === "Check-Out"))
     .filter((booking) => {
-      const haystack = `${booking.bookingNo} ${booking.residentName} ${booking.roomNumber} ${booking.room?.roomNumber} ${booking.room?.roomType} ${booking.status}`.toLowerCase();
+      const haystack = `${booking.guestId} ${booking.bookingNo} ${booking.residentName} ${booking.roomNumber} ${booking.room?.roomNumber} ${booking.room?.roomType} ${booking.status}`.toLowerCase();
       return !search || haystack.includes(filterText);
     })
     .sort((left, right) => String(left.movementDate || "").localeCompare(String(right.movementDate || "")));
@@ -10018,7 +10021,7 @@ function HousingOperations({
             <HousingTable
               title="Scheduled Guest Movements"
               rows={movementRows}
-              columns={[["movement", "Type"], ["residentName", "Guest Name"], ["bookingNo", "Booking / Reservation"], ["roomNumber", "Room Number"], ["roomType", "Room Type"], ["checkIn", "Check-In Date"], ["checkOut", "Check-Out Date"], ["status", "Booking Status"]]}
+              columns={[["movement", "Type"], ["guestId", "Guest ID"], ["residentName", "Guest Name"], ["bookingNo", "Booking / Reservation"], ["roomNumber", "Room Number"], ["roomType", "Room Type"], ["checkIn", "Check-In Date"], ["checkOut", "Check-Out Date"], ["status", "Booking Status"]]}
               onSelect={(record) => setSelected({ type: "booking", record })}
               reportType="housing-bookings"
             />
