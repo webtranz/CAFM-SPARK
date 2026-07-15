@@ -1267,6 +1267,8 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
               requests={records.requests}
               workOrders={records.workOrders}
               inspections={records.inspections}
+              saving={saving}
+              submitIncident={(formData) => postRecord("/api/service-requests", formData, "Incident / case")}
               navigate={navigate}
             />
           )}
@@ -6597,8 +6599,9 @@ function LinkedTicketsTable({ rows, navigate }: { rows: any[]; navigate: (module
   );
 }
 
-function IncidentCaseManagement({ requests, workOrders, inspections, navigate }: { requests: any[]; workOrders: any[]; inspections: any[]; navigate: (moduleId: string, menuKey: string, view?: string) => void }) {
+function IncidentCaseManagement({ requests, workOrders, inspections, saving, submitIncident, navigate }: { requests: any[]; workOrders: any[]; inspections: any[]; saving: boolean; submitIncident: (formData: FormData) => void; navigate: (moduleId: string, menuKey: string, view?: string) => void }) {
   const [query, setQuery] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [tab, setTab] = useState<"record" | "comments" | "documents" | "tasks" | "eventLog">("record");
   const incidentRequests = requests.filter((request) => request.isIncidentCase);
@@ -6716,6 +6719,49 @@ function IncidentCaseManagement({ requests, workOrders, inspections, navigate }:
   return (
     <section className="grid gap-5">
       <Panel title="Incident & Case Management" icon={AlertTriangle}>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-bold text-slate-500">Create and track customer complaints, HSE incidents, cases, and linked follow-up work.</p>
+          </div>
+          <button type="button" onClick={() => setCreateOpen((current) => !current)} className="rounded-lg bg-lagoon px-4 py-2 text-sm font-black text-white">
+            {createOpen ? "Close" : "+ Create New Incident"}
+          </button>
+        </div>
+        {createOpen && (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              submitIncident(new FormData(event.currentTarget));
+              event.currentTarget.reset();
+              setCreateOpen(false);
+            }}
+            className="mb-4 grid gap-3 rounded-lg border border-lagoon/20 bg-lagoon/5 p-4"
+          >
+            <input type="hidden" name="isIncidentCase" value="true" />
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <input name="title" required placeholder="Incident / case title" className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-lagoon xl:col-span-2" />
+              <select name="category" defaultValue="Customer Complaint" className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-lagoon">
+                {caseTypeOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+              <select name="priority" defaultValue="MEDIUM" className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-lagoon">
+                <option value="LOW">Low</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="HIGH">High</option>
+                <option value="CRITICAL">Critical</option>
+              </select>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <input name="location" placeholder="Location / room / area" className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-lagoon" />
+              <input name="departmentCode" placeholder="Department code" className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-lagoon" />
+              <input name="requester" placeholder="Reported by" className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-lagoon" />
+              <input name="serviceCode" placeholder="Service code" className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-lagoon" />
+            </div>
+            <textarea name="description" placeholder="Incident details / complaint description" className="min-h-24 rounded-lg border border-slate-200 bg-white p-3 text-sm font-bold outline-none focus:border-lagoon" />
+            <div className="flex justify-end">
+              <button type="submit" disabled={saving} className="rounded-lg bg-ink px-5 py-2 text-sm font-black text-white disabled:bg-slate-300">Create Incident</button>
+            </div>
+          </form>
+        )}
         <div className="mb-4 grid gap-3 md:grid-cols-4">
           {[
             ["Total Cases", rows.length],
