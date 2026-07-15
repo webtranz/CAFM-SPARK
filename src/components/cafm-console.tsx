@@ -4250,7 +4250,7 @@ function ServiceRequestForm({ title, request, services, categories, departments,
   }, [locations]);
 
   useEffect(() => {
-    if (fullLocationsLoaded || locationLoading) return;
+    if (fullLocationsLoaded) return;
     let cancelled = false;
     setLocationLoading(true);
     fetch("/api/locations?pageSize=all", { cache: "no-store" })
@@ -4265,7 +4265,7 @@ function ServiceRequestForm({ title, request, services, categories, departments,
         if (!cancelled) setLocationLoading(false);
       });
     return () => { cancelled = true; };
-  }, [fullLocationsLoaded, locationLoading]);
+  }, [fullLocationsLoaded]);
 
   const filteredServices = useMemo(() => services.filter((service) => serviceMatchesDepartment(service, departmentCode)), [services, departmentCode]);
   const selectedService = services.find((service) => service.code === serviceCode);
