@@ -4130,10 +4130,9 @@ function SearchableDropdownField({
   const [highlightedIndex, setHighlightedIndex] = useState(0);
   const search = String(value || "").trim().toLowerCase();
   const filteredOptions = useMemo(() => {
-    const rows = search
+    return search
       ? options.filter((option) => `${option.value} ${option.label}`.toLowerCase().includes(search))
       : options;
-    return rows.slice(0, 120);
   }, [options, search]);
 
   useEffect(() => {
@@ -4216,9 +4215,12 @@ function ServiceRequestForm({ title, request, services, categories, departments,
     if (!request) form.reset();
   }
 
+  const [fullLocations, setFullLocations] = useState<any[]>(locations);
+  const [fullLocationsLoaded, setFullLocationsLoaded] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
   const activeLocations = useMemo(
-    () => Array.from(new Map(locations.filter((location) => location.active !== false && location.code).map((location) => [location.code, location])).values()),
-    [locations],
+    () => Array.from(new Map(fullLocations.filter((location) => location.active !== false && location.code).map((location) => [location.code, location])).values()),
+    [fullLocations],
   );
   const initialLocationCode = useMemo(() => resolveLocationCode(activeLocations, request?.location ?? ""), [activeLocations, request?.location]);
   const initialLocation = activeLocations.find((location) => location.code === initialLocationCode);
@@ -4243,6 +4245,28 @@ function ServiceRequestForm({ title, request, services, categories, departments,
     ...localCategories.map((category) => category.name || category.code).filter(Boolean),
     ...services.map((service) => service.category).filter(Boolean),
   ]));
+  useEffect(() => {
+    setFullLocations((current) => current.length >= locations.length ? current : locations);
+  }, [locations]);
+
+  useEffect(() => {
+    if (fullLocationsLoaded || locationLoading) return;
+    let cancelled = false;
+    setLocationLoading(true);
+    fetch("/api/locations?pageSize=all", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((result) => {
+        if (cancelled || !result?.locations) return;
+        setFullLocations(result.locations);
+        setFullLocationsLoaded(true);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setLocationLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [fullLocationsLoaded, locationLoading]);
+
   const filteredServices = useMemo(() => services.filter((service) => serviceMatchesDepartment(service, departmentCode)), [services, departmentCode]);
   const selectedService = services.find((service) => service.code === serviceCode);
   const selectedTeamCode = selectedService?.team?.code || selectedService?.teamCode || teams.find((team) => team.code === departmentCode)?.code || "";
@@ -4383,7 +4407,7 @@ function ServiceRequestForm({ title, request, services, categories, departments,
         <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-2">
           <SearchableDropdownField
             value={locationSearchValue}
-            placeholder="1. Location"
+            placeholder={locationLoading ? "Loading all locations..." : `1. Location (${activeLocations.length.toLocaleString()} loaded)`}
             options={allLocationDropdownOptions}
             className="md:col-span-2"
             onInput={(nextValue) => {
