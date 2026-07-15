@@ -2,7 +2,6 @@
 
 import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, UIEvent } from "react";
-import Image from "next/image";
 import {
   Activity,
   AlertTriangle,
@@ -151,13 +150,9 @@ type ModuleGroup = { label: string; icon: LucideIcon; items: ModuleItem[]; flat?
 
 function BrandLogoMark({ size = "md" }: { size?: "sm" | "md" }) {
   const boxClass = size === "sm" ? "h-9 w-9 rounded-lg" : "h-12 w-12 rounded-xl";
-  const imageSize = size === "sm" ? 36 : 48;
 
-  return (
-    <div className={`grid ${boxClass} place-items-center overflow-hidden border border-amber-200 bg-white p-1 shadow-sm`}>
-      <Image src="/tafga.png" alt="Tamimi Global CAFM logo" width={imageSize} height={imageSize} className="h-full w-full object-contain" priority />
-    </div>
-  );
+  // Tamimi logo hidden on request; restore the Image below when requested.
+  return <div aria-hidden="true" className={`${boxClass} shrink-0`} />;
 }
 
 const moduleGroups: ModuleGroup[] = [
