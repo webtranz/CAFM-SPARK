@@ -10114,9 +10114,9 @@ function HousingOperations({
             <HousingTable
               title="Scheduled Guest Movements"
               rows={movementRows}
-              columns={[["movement", "Type"], ["guestId", "Guest ID"], ["residentName", "Guest Name"], ["bookingNo", "Booking / Reservation"], ["roomNumber", "Room Number"], ["roomType", "Room Type"], ["checkIn", "Check-In Date"], ["checkOut", "Check-Out Date"], ["status", "Booking Status"]]}
+              columns={[["movement", "Type"], ["guestId", "Guest ID"], ["residentName", "Guest Name"], ["departmentCode", "Department"], ["bookingNo", "Booking / Reservation"], ["roomNumber", "Room Number"], ["roomType", "Room Type"], ["checkIn", "Check-In Date"], ["checkOut", "Check-Out Date"], ["status", "Booking Status"]]}
               onSelect={(record) => setSelected({ type: "booking", record })}
-              reportType="housing-bookings"
+              reportType="housing-check-movements"
             />
           </Panel>
         </section>

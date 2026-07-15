@@ -303,8 +303,8 @@ async function housingReportRows(type: string, filters: ReturnType<typeof report
   if (type === "housing-check-movements") {
     const rows = await prisma.housingBooking.findMany({ include: { room: { include: { property: true, block: true } }, bed: true, resident: true }, orderBy: [{ checkIn: "asc" }, { checkOut: "asc" }] });
     return applyHousingFilters(rows.flatMap((row) => [
-      { movement: "Check-In", guestName: row.residentName, bookingNo: row.bookingNo, roomNumber: row.roomNumber ?? row.room.roomNumber, roomType: row.room.roomType, checkInDate: dateValue(row.checkIn), checkOutDate: dateValue(row.checkOut), status: row.status },
-      row.checkOut ? { movement: "Check-Out", guestName: row.residentName, bookingNo: row.bookingNo, roomNumber: row.roomNumber ?? row.room.roomNumber, roomType: row.room.roomType, checkInDate: dateValue(row.checkIn), checkOutDate: dateValue(row.checkOut), status: row.status } : null,
+      { movement: "Check-In", guestId: row.employeeId ?? row.resident?.residentNo ?? "", guestName: row.residentName, department: row.departmentCode, departmentCode: row.departmentCode, bookingNo: row.bookingNo, roomNumber: row.roomNumber ?? row.room.roomNumber, roomType: row.room.roomType, checkInDate: dateValue(row.checkIn), checkOutDate: dateValue(row.checkOut), status: row.status },
+      row.checkOut ? { movement: "Check-Out", guestId: row.employeeId ?? row.resident?.residentNo ?? "", guestName: row.residentName, department: row.departmentCode, departmentCode: row.departmentCode, bookingNo: row.bookingNo, roomNumber: row.roomNumber ?? row.room.roomNumber, roomType: row.room.roomType, checkInDate: dateValue(row.checkIn), checkOutDate: dateValue(row.checkOut), status: row.status } : null,
     ].filter(Boolean) as ReportRow[]), filters);
   }
   if (type === "housing-guests") {
