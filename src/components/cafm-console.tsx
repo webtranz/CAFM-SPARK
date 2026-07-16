@@ -5145,11 +5145,26 @@ function isInvalidChecklistValue(value: unknown) {
     normalized.includes("#value");
 }
 
+function cleanChecklistItem(value: unknown) {
+  return String(value || "")
+    .replace(/^[-*]\s*/, "")
+    .replace(/^\s*\d+[.)]\s+/, "")
+    .replace(/^\s*[A-Z]{2,}[A-Z0-9]*\d[A-Z0-9-]*\s*[-:\u2013]\s*/i, "")
+    .replace(/\s*\(\s*Activity\s*:\s*.*$/i, "")
+    .replace(/\s+Activity\s*:\s*.*$/i, "")
+    .replace(/\s+Trade\s*:\s*.*$/i, "")
+    .replace(/\s+Duration\s*:\s*.*$/i, "")
+    .replace(/\s+Estimate\s*:\s*.*$/i, "")
+    .replace(/\s*\(\s*$/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function checklistItems(value: unknown, limit = 12) {
   if (isInvalidChecklistValue(value)) return ["No match"];
   const items = String(value || "")
-    .split(/\r?\n|(?:^|\s)\d+[.)]\s+/)
-    .map((item) => item.replace(/^[-*]\s*/, "").trim())
+    .split(/\r?\n|(?=\s*\d+[.)]\s+[A-Z]{2,}[A-Z0-9]*\d[A-Z0-9-]*\s*[-:\u2013]\s*)/)
+    .map(cleanChecklistItem)
     .filter((item) => item.length > 3 && !isInvalidChecklistValue(item));
   return items.length ? items.slice(0, limit) : ["No match"];
 }
