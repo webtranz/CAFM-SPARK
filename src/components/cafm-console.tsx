@@ -3971,15 +3971,27 @@ function requestFormData(request: any, status: string, rejectionReason = "", ove
   return formData;
 }
 
-function requestLocationNeedles(location: string) {
-  return String(location || "")
+function requestLocationNeedles(location: string, selectedLocation?: any) {
+  const textParts = String(location || "")
     .split("/")
-    .map((part) => part.trim().toLowerCase())
-    .filter((part) => part.length > 1 && !["unassigned", "-"].includes(part));
+    .map((part) => part.trim());
+  const selectedParts = selectedLocation ? [
+    selectedLocation.code,
+    selectedLocation.description,
+    selectedLocation.site,
+    selectedLocation.building,
+    selectedLocation.floor,
+    selectedLocation.room,
+    selectedLocation.parentLocation,
+    selectedLocation.zone,
+  ] : [];
+  return Array.from(new Set([...textParts, ...selectedParts]
+    .map((part) => String(part || "").trim().toLowerCase())
+    .filter((part) => part.length > 1 && !["unassigned", "-", "facility location"].includes(part))));
 }
 
-function assetMatchesLocation(asset: any, location: string) {
-  const needles = requestLocationNeedles(location);
+function assetMatchesLocation(asset: any, location: string, selectedLocation?: any) {
+  const needles = requestLocationNeedles(location, selectedLocation);
   if (!needles.length) return true;
   const assetLocationParts = [
     asset.locationCode,
@@ -3997,6 +4009,7 @@ function assetMatchesLocation(asset: any, location: string) {
 
   return needles.some((needle) => {
     const compactNeedle = needle.replace(/[^a-z0-9]/g, "");
+    if (compactNeedle.length < 2) return false;
     return (
       haystack.includes(needle) ||
       compactAssetParts.some((part) => part.includes(compactNeedle) || compactNeedle.includes(part))
@@ -4060,11 +4073,26 @@ function inferServiceFromCategory(categoryValue: string, services: any[], depart
   return { departmentCode: inferredDepartmentCode, serviceCode: service?.code || "" };
 }
 
-function scopedAssetOptions(assets: any[], departmentCode: string, assignedTeamCode: string, location: string) {
-  if (!departmentCode && !assignedTeamCode) return [];
-  const departmentAssets = assets.filter((asset) => assetMatchesDepartment(asset, departmentCode, assignedTeamCode));
-  const locationAssets = departmentAssets.filter((asset) => assetMatchesLocation(asset, location));
-  return location && locationAssets.length ? locationAssets : departmentAssets;
+function sortAssetsForRequest(first: any, second: any) {
+  return [first.departmentCode || "", first.locationCode || first.room || "", first.tag || ""].join("|").localeCompare(
+    [second.departmentCode || "", second.locationCode || second.room || "", second.tag || ""].join("|"),
+    undefined,
+    { numeric: true, sensitivity: "base" },
+  );
+}
+
+function scopedAssetOptions(assets: any[], departmentCode: string, assignedTeamCode: string, location: string, selectedLocation?: any) {
+  const locationScopedAssets = location || selectedLocation
+    ? assets.filter((asset) => assetMatchesLocation(asset, location, selectedLocation))
+    : assets;
+  const departmentScopedAssets = locationScopedAssets.filter((asset) => assetMatchesDepartment(asset, departmentCode, assignedTeamCode));
+  const fallbackDepartmentAssets = assets.filter((asset) => assetMatchesDepartment(asset, departmentCode, assignedTeamCode));
+  const chosenAssets = departmentScopedAssets.length
+    ? departmentScopedAssets
+    : locationScopedAssets.length
+      ? locationScopedAssets
+      : fallbackDepartmentAssets;
+  return [...chosenAssets].sort(sortAssetsForRequest).slice(0, 2500);
 }
 
 function serviceRequestLocationLabel(location: any) {
@@ -4311,7 +4339,16 @@ function ServiceRequestForm({ title, request, services, categories, departments,
   const allLocationDropdownOptions = useMemo(() => activeLocations.map((location) => ({ value: location.code, label: locationSelectLabel(location) })), [activeLocations]);
   const selectedLocation = activeLocations.find((location) => location.code === locationCodeValue);
   const locationValue = selectedLocation ? serviceRequestLocationLabel(selectedLocation) : "";
-  const filteredAssets = useMemo(() => scopedAssetOptions(assets, departmentCode, selectedTeamCode, locationValue), [assets, departmentCode, selectedTeamCode, locationValue]);
+  const filteredAssets = useMemo(() => scopedAssetOptions(assets, departmentCode, selectedTeamCode, locationValue, selectedLocation), [assets, departmentCode, selectedTeamCode, locationValue, selectedLocation]);
+  const departmentMatchedAssetCount = useMemo(() => filteredAssets.filter((asset) => assetMatchesDepartment(asset, departmentCode, selectedTeamCode)).length, [filteredAssets, departmentCode, selectedTeamCode]);
+  const groupedFilteredAssets = useMemo(() => {
+    const groups = new Map<string, any[]>();
+    filteredAssets.forEach((asset) => {
+      const key = asset.departmentCode || asset.assignedTeamCode || "Unassigned Department";
+      groups.set(key, [...(groups.get(key) || []), asset]);
+    });
+    return Array.from(groups.entries()).map(([department, rows]) => ({ department, rows }));
+  }, [filteredAssets]);
 
   useEffect(() => {
     if (serviceCode && !filteredServices.some((service) => service.code === serviceCode)) {
@@ -4506,15 +4543,20 @@ function ServiceRequestForm({ title, request, services, categories, departments,
         <label className="grid gap-2 text-sm font-bold text-slate-600">
           Related Asset
           <select name="assetTag" value={assetTagValue} onChange={(event) => setAssetTagValue(event.target.value)} className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon">
-            <option value="">{departmentCode || selectedTeamCode ? `Matching assets (${filteredAssets.length})` : "Select department or service first"}</option>
-            {filteredAssets.map((asset) => (
-              <option key={asset.id ?? asset.tag} value={asset.tag}>
-                {asset.tag} - {asset.assetDescription || asset.name} / {[asset.departmentCode, asset.buildingCode || asset.building?.name, asset.floor, asset.room].filter(Boolean).join(" > ")}
-              </option>
+            <option value="">{locationCodeValue ? `Location assets (${filteredAssets.length})` : departmentCode || selectedTeamCode ? `Department assets (${filteredAssets.length})` : "Select location, department or service"}</option>
+            {groupedFilteredAssets.map((group) => (
+              <optgroup key={group.department} label={`${group.department} (${group.rows.length})`}>
+                {group.rows.map((asset) => (
+                  <option key={asset.id ?? asset.tag} value={asset.tag}>
+                    {asset.tag} - {asset.assetDescription || asset.name} / {[asset.locationCode || asset.room, asset.departmentCode || asset.assignedTeamCode, asset.buildingCode || asset.building?.name, asset.floor].filter(Boolean).join(" > ")}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
-          {!departmentCode && !selectedTeamCode && <span className="text-xs font-black text-slate-500">Select a department or service to load only relevant coded assets.</span>}
-          {(departmentCode || selectedTeamCode) && !filteredAssets.length && <span className="text-xs font-black text-amber-700">No assets match the selected department/service code.</span>}
+          {locationCodeValue && filteredAssets.length > 0 && departmentCode && departmentMatchedAssetCount === 0 && <span className="text-xs font-black text-amber-700">No exact {departmentCode} asset was found at this location, so all assets at the selected location are shown department-wise.</span>}
+          {!locationCodeValue && !departmentCode && !selectedTeamCode && <span className="text-xs font-black text-slate-500">Select a location first to show assets location-wise, then choose department/service to narrow them.</span>}
+          {locationCodeValue && !filteredAssets.length && <span className="text-xs font-black text-amber-700">No assets are linked to the selected location hierarchy.</span>}
         </label>
         {request && (
           <select name="status" defaultValue={request.status} className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon">
