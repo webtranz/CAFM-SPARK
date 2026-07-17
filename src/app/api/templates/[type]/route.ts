@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 
 const templates: Record<string, string> = {
@@ -21,6 +21,7 @@ const templates: Record<string, string> = {
   locations: "code,site,zone,building,floor,room,type,description\n",
   jobPlans: "code,name,assetType,departmentCode,serviceCode,estimatedHours,priority,steps,safetyNotes\n",
   ppm: "code,name,assetTag,locationCode,frequency,nextDue,durationHrs,departmentCode,priority,checklist,active\n",
+  ppmChecklistHistory: "SOURCE_YEAR,SOURCE_FILE,LINK_STATUS,SYSTEM_WORK_ORDER_MATCH,SYSTEM_ASSET_MATCH,SYSTEM_PPM_MATCH,UPLOAD_KEY,ACK_EVENT,EVT_CREATED,EVT_DESC,ACK_OBJECT,ACK_TYPE,ACK_CODE,ACK_ACT,ACK_SEQUENCE,ACK_DESC,ACK_NOTES,ACK_UPDATED,ACK_UPDATEDBY,ACK_UPDATECOUNT,ACK_OBJECT_ORG,ACK_YES,ACK_NO,ACK_FINDING,ACK_VALUE,ACK_UOM,ACK_FOLLOWUP,ACK_FOLLOWUPEVENT,ACK_LASTSAVED\n",
   omManuals: "category,assetTag,sourcePath,fileName,manualCode,manualTitle,matchField,assetClass,assetCategory,assetPrimarySystem,department\n",
   inspections: "code,title,area,inspector,risk,score,status,dueAt,findings\n",
 };

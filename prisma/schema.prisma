@@ -363,6 +363,7 @@ model Asset {
   workOrders              WorkOrder[]
   meters                  Meter[]
   history                 AssetHistory[]
+  ppmChecklistHistory     PpmChecklistHistory[]
   createdAt               DateTime       @default(now())
   updatedAt               DateTime       @updatedAt
 
@@ -468,6 +469,7 @@ model WorkOrder {
   request            ServiceRequest?  @relation(fields: [requestId], references: [id])
   assignedTo         User?            @relation(fields: [assignedToId], references: [id])
   inventoryIssues    InventoryIssue[]
+  ppmChecklistHistory PpmChecklistHistory[]
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
 
@@ -535,11 +537,61 @@ model PreventiveMaintenance {
   durationHrs          Decimal  @db.Decimal(6, 2)
   checklist            String
   active               Boolean  @default(true)
+  checklistHistory     PpmChecklistHistory[]
 
   @@index([assetTag, locationCode, frequency, name], map: "ppm_plans_asset_location_frequency_name_idx")
   @@index([ppmCode])
 }
 
+model PpmChecklistHistory {
+  id                   String                 @id @default(cuid())
+  sourceYear           String                 @default("")
+  sourceFile           String                 @default("")
+  uploadKey            String                 @unique
+  ackEvent             String                 @default("")
+  eventCreated         DateTime?
+  eventDescription     String                 @default("")
+  ackObject            String                 @default("")
+  ackType              String                 @default("")
+  ackCode              String                 @default("")
+  ackAct               String                 @default("")
+  ackSequence          String                 @default("")
+  ackDescription       String                 @default("")
+  ackNotes             String                 @default("")
+  ackUpdated           DateTime?
+  ackUpdatedBy         String                 @default("")
+  ackUpdateCount       Int?
+  ackObjectOrg         String                 @default("")
+  ackYes               String                 @default("")
+  ackNo                String                 @default("")
+  ackFinding           String                 @default("")
+  ackValue             String                 @default("")
+  ackUom               String                 @default("")
+  ackFollowup          String                 @default("")
+  ackFollowupEvent     String                 @default("")
+  ackLastSaved         DateTime?
+  systemWorkOrderMatch Boolean                @default(false)
+  systemAssetMatch     Boolean                @default(false)
+  systemPpmMatch       Boolean                @default(false)
+  linkStatus           String                 @default("PENDING")
+  workOrderId          String?
+  assetId              String?
+  ppmId                String?
+  workOrder            WorkOrder?             @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
+  asset                Asset?                 @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  ppm                  PreventiveMaintenance? @relation(fields: [ppmId], references: [id], onDelete: SetNull)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  @@index([ackEvent])
+  @@index([ackObject])
+  @@index([ackCode])
+  @@index([sourceYear])
+  @@index([linkStatus])
+  @@index([workOrderId])
+  @@index([assetId])
+  @@index([ppmId])
+}
 model InventoryItem {
   id           String           @id @default(cuid())
   sku          String           @unique
@@ -1084,3 +1136,4 @@ model HousingHistory {
   @@index([roomId, createdAt])
   @@index([bookingId, createdAt])
 }
+

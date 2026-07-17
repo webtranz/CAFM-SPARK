@@ -50,12 +50,13 @@ function countWorkOrderComments(rows: Array<{ workNotes: string | null }>) {
 }
 
 async function getTotalEntryCounts() {
-  const [assetRegistry, locationList, workOrdersHistory, ppmSchedules, ppmChecklistRows, omManuals, serviceRequestHistory, casesAndIncidents, commentRows, rooms, guestProfiles, guestStayOccupancy] = await Promise.all([
+  const [assetRegistry, locationList, workOrdersHistory, ppmSchedules, ppmChecklistRows, ppmChecklistHistoryRows, omManuals, serviceRequestHistory, casesAndIncidents, commentRows, rooms, guestProfiles, guestStayOccupancy] = await Promise.all([
     prisma.asset.count(),
     prisma.location.count(),
     prisma.workOrder.count(),
     prisma.preventiveMaintenance.count(),
     prisma.preventiveMaintenance.findMany({ select: { checklist: true } }),
+    prisma.ppmChecklistHistory.count(),
     prisma.documentUpload.count({ where: { category: "OM_MANUAL" } }),
     prisma.serviceRequest.count({ where: { isIncidentCase: false } }),
     prisma.serviceRequest.count({ where: { isIncidentCase: true } }),
@@ -70,7 +71,7 @@ async function getTotalEntryCounts() {
     locationList,
     workOrdersHistory,
     ppmSchedules,
-    ppmWoChecklistItemsHistory: countChecklistItems(ppmChecklistRows),
+    ppmWoChecklistItemsHistory: countChecklistItems(ppmChecklistRows) + ppmChecklistHistoryRows,
     omManuals,
     serviceRequestHistory,
     casesAndIncidents,

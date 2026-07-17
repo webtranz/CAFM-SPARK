@@ -1,4 +1,4 @@
-﻿import { createHash } from "crypto";
+import { createHash } from "crypto";
 import { copyFile, mkdir, readFile, stat, writeFile } from "fs/promises";
 import path from "path";
 import { NextResponse } from "next/server";
@@ -339,11 +339,13 @@ function detectBulkUploadModule(requestedModule: string, rows: Row[]) {
   if (headers.has("bookingno") && (headers.has("occupancystatus") || headers.has("checkin") || headers.has("checkout"))) return "housingOccupancy";
   if (headers.has("residentno") && (headers.has("guestid") || headers.has("companyname")) && !headers.has("bookingno")) return "housingGuests";
   if (headers.has("roomcode") && headers.has("roomnumber") && headers.has("roomtype") && !headers.has("bookingno")) return "housingRooms";
+  if ((headers.has("ackevent") || headers.has("ack_event")) && (headers.has("ackdesc") || headers.has("ack_desc"))) return "ppmChecklistHistory";
   return requestedModule;
 }
 function bulkUploadPermissions(module: string) {
   if (module === "omManuals") return ["documents.upload"];
   if (module === "ppm") return ["ppm.manage", "assets.manage"];
+  if (module === "ppmChecklistHistory") return ["ppm.manage", "work.manage", "assets.manage"];
   if (["housingAssets", "housingRooms", "housingGuests", "housingOccupancy"].includes(module)) return ["housing.manage", "assets.manage"];
   if (["workOrders", "workOrderComments"].includes(module)) return ["work.manage", "assets.manage"];
   if (module === "requests") return ["requests.manage"];
@@ -386,6 +388,7 @@ async function importRow(module: string, row: Row, context: ImportContext = {}) 
   if (module === "locations") return importLocation(row, context);
   if (module === "jobPlans") return importJobPlan(row, context);
   if (module === "ppm") return importPpm(row, context);
+  if (module === "ppmChecklistHistory") return importPpmChecklistHistory(row, context);
   if (module === "omManuals") return importDocumentIndex(row, context);
   throw new Error(`Unsupported module: ${module}`);
 }
@@ -432,6 +435,10 @@ async function clearExistingBulkUploadData(module: string) {
 
   if (module === "ppm") {
     add(await prisma.preventiveMaintenance.deleteMany({}));
+    return deleted;
+  }
+  if (module === "ppmChecklistHistory") {
+    add(await prisma.ppmChecklistHistory.deleteMany({}));
     return deleted;
   }
   if (module === "workOrderComments") {
@@ -1443,6 +1450,77 @@ async function importPpm(row: Row, context: ImportContext = {}) {
   return importResult("preventive_maintenance", existing ? "UPDATE" : "CREATE", ppm, code, data.name);
 }
 
+async function importPpmChecklistHistory(row: Row, context: ImportContext = {}) {
+  const ackEvent = required(row, "ACK_EVENT", "ackEvent");
+  const ackCode = required(row, "ACK_CODE", "ackCode");
+  const ackDescription = required(row, "ACK_DESC", "ackDescription", "description");
+  const ackObject = value(row, "ACK_OBJECT", "ackObject", "assetTag", "equipmentNo");
+  const ackAct = value(row, "ACK_ACT", "ackAct");
+  const ackSequence = value(row, "ACK_SEQUENCE", "ackSequence");
+  const uploadKey = value(row, "UPLOAD_KEY", "uploadKey") || [ackEvent, ackObject, ackCode, ackAct, ackSequence, ackDescription].join("|").slice(0, 500);
+
+  const [workOrder, asset, ppm] = await Promise.all([
+    prisma.workOrder.findFirst({
+      where: { OR: [{ woNo: ackEvent }, { woNo: `WO-${ackEvent}` }, { woNo: { endsWith: ackEvent } }] },
+      select: { id: true, woNo: true },
+    }),
+    ackObject ? prisma.asset.findUnique({ where: { tag: ackObject }, select: { id: true, tag: true } }) : null,
+    ackCode ? prisma.preventiveMaintenance.findFirst({
+      where: { OR: [{ ppmCode: ackCode }, { code: ackCode }, { code: { startsWith: `${ackCode}-` } }] },
+      select: { id: true, code: true, ppmCode: true },
+    }) : null,
+  ]);
+
+  const computedLinkStatus = [
+    workOrder ? "" : "MISSING_WORK_ORDER",
+    ackObject && !asset ? "MISSING_ASSET" : "",
+    ppm ? "" : "NO_MATCH_PPM_CODE",
+  ].filter(Boolean).join("; ") || "LINKED";
+  const linkStatus = value(row, "LINK_STATUS", "linkStatus") || computedLinkStatus;
+
+  const data = {
+    sourceYear: value(row, "SOURCE_YEAR", "sourceYear"),
+    sourceFile: value(row, "SOURCE_FILE", "sourceFile"),
+    ackEvent,
+    eventCreated: optionalDate(value(row, "EVT_CREATED", "eventCreated")),
+    eventDescription: value(row, "EVT_DESC", "eventDescription"),
+    ackObject,
+    ackType: value(row, "ACK_TYPE", "ackType"),
+    ackCode,
+    ackAct,
+    ackSequence,
+    ackDescription,
+    ackNotes: value(row, "ACK_NOTES", "ackNotes"),
+    ackUpdated: optionalDate(value(row, "ACK_UPDATED", "ackUpdated")),
+    ackUpdatedBy: value(row, "ACK_UPDATEDBY", "ackUpdatedBy"),
+    ackUpdateCount: numberOrNull(value(row, "ACK_UPDATECOUNT", "ackUpdateCount")),
+    ackObjectOrg: value(row, "ACK_OBJECT_ORG", "ackObjectOrg"),
+    ackYes: value(row, "ACK_YES", "ackYes"),
+    ackNo: value(row, "ACK_NO", "ackNo"),
+    ackFinding: value(row, "ACK_FINDING", "ackFinding"),
+    ackValue: value(row, "ACK_VALUE", "ackValue"),
+    ackUom: value(row, "ACK_UOM", "ackUom"),
+    ackFollowup: value(row, "ACK_FOLLOWUP", "ackFollowup"),
+    ackFollowupEvent: value(row, "ACK_FOLLOWUPEVENT", "ackFollowupEvent"),
+    ackLastSaved: optionalDate(value(row, "ACK_LASTSAVED", "ackLastSaved")),
+    systemWorkOrderMatch: Boolean(workOrder) || yesNo(value(row, "SYSTEM_WORK_ORDER_MATCH", "systemWorkOrderMatch"), false),
+    systemAssetMatch: Boolean(asset) || yesNo(value(row, "SYSTEM_ASSET_MATCH", "systemAssetMatch"), false),
+    systemPpmMatch: Boolean(ppm) || yesNo(value(row, "SYSTEM_PPM_MATCH", "systemPpmMatch"), false),
+    linkStatus,
+    workOrderId: workOrder?.id || null,
+    assetId: asset?.id || null,
+    ppmId: ppm?.id || null,
+  };
+
+  const existing = await prisma.ppmChecklistHistory.findUnique({ where: { uploadKey } });
+  if (existing && !shouldReplace(context)) return existingResult("ppm_checklist_history", existing, uploadKey, ackDescription);
+  const record = await prisma.ppmChecklistHistory.upsert({
+    where: { uploadKey },
+    update: data,
+    create: { uploadKey, ...data },
+  });
+  return importResult("ppm_checklist_history", existing ? "UPDATE" : "CREATE", record, uploadKey, ackDescription.slice(0, 120));
+}
 async function importDocumentIndex(row: Row, context: ImportContext = {}) {
   const category = value(row, "category") || "OM_MANUAL";
   const folder = documentCategories[category];
@@ -1613,7 +1691,7 @@ function importResult(recordType: string, action: string, record: { id?: string 
 }
 
 function rowIdentifier(module: string, row: Row) {
-  return value(row, "tag", "Asset Code", "Housing Asset Code", "EQUIPMENTNO", "ASSET NUMBER", "sku", "ticketNo", "woNo", "commentText", "code", "Location", "locationCode", "assetTag", "companyId", "email") || module || "unknown";
+  return value(row, "UPLOAD_KEY", "uploadKey", "ACK_EVENT", "ackEvent", "ACK_CODE", "ackCode", "tag", "Asset Code", "Housing Asset Code", "EQUIPMENTNO", "ASSET NUMBER", "sku", "ticketNo", "woNo", "commentText", "code", "Location", "locationCode", "assetTag", "companyId", "email") || module || "unknown";
 }
 
 function safeSegment(value: string) {
