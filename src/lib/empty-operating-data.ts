@@ -27,6 +27,7 @@ export const emptyOperatingData = {
   auditLogs: [],
   complianceCertificates: [],
   documentUploads: [],
+  totalEntries: {},
   shiftRotation: {
     shifts: [],
     rotations: [],

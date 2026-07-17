@@ -85,6 +85,7 @@ type ConsoleData = {
   auditLogs: any[];
   complianceCertificates: any[];
   documentUploads: any[];
+  totalEntries?: Record<string, number>;
   shiftRotation?: {
     shifts: any[];
     rotations: any[];
@@ -164,7 +165,10 @@ const moduleGroups: ModuleGroup[] = [
   {
     label: "Dashboard",
     icon: LayoutDashboard,
-    items: [{ id: "command", label: "Dashboard", icon: LayoutDashboard }],
+    items: [
+      { id: "command", label: "Dashboard", icon: LayoutDashboard },
+      { id: "totalEntries", label: "Total Entries", icon: Gauge },
+    ],
   },
   {
     label: "Tickets",
@@ -382,6 +386,7 @@ const modulePermissions: Record<string, string> = {
   ppm: "ppm.manage",
   users: "users.manage",
   reports: "reports.view",
+  totalEntries: "reports.view",
   bulk: "assets.manage",
   templates: "assets.manage",
   teams: "requests.manage",
@@ -688,7 +693,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
     return new Set([...defaultCodes, ...assignedCodes]);
   }, [records.rolePermissions, user.role]);
   const isReadOnlyUser = roleKindLabel(user.role) === "readonly";
-  const readOnlyModules = new Set(["command", "dashboard", "assets", "work", "ppm", "requests", "reports", "housing", "compliance", "documents", "incidents"]);
+  const readOnlyModules = new Set(["command", "dashboard", "assets", "work", "ppm", "requests", "reports", "totalEntries", "housing", "compliance", "documents", "incidents"]);
   const can = (permission?: string) => user.role === "Admin" || !permission || (!isReadOnlyUser && hasPermissionCode(permissionCodes, permission));
   const canOpenModule = (moduleId: string) => (isReadOnlyUser && readOnlyModules.has(moduleId)) || can(modulePermissions[moduleId]);
   const canViewActive = canOpenModule(active);
@@ -1156,6 +1161,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
 
           {!canViewActive && <AccessDenied moduleId={active} />}
           {canViewActive && active === "command" && <CommandCenter data={records} />}
+          {canViewActive && active === "totalEntries" && <TotalEntries data={records} />}
           {canViewActive && active === "assets" && (
             <Assets
               assets={records.assets}
@@ -1475,6 +1481,94 @@ function compactNumber(value: number) {
   return Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
+function totalEntryRows(data: ConsoleData) {
+  const totals = data.totalEntries ?? {};
+  return [
+    { no: 1, module: "Asset Registry", count: totals.assetRegistry ?? data.assets.length },
+    { no: 2, module: "Location List", count: totals.locationList ?? data.locations.length },
+    { no: 3, module: "Work Orders History", count: totals.workOrdersHistory ?? data.workOrdersTotal ?? data.workOrders.length },
+    { no: 4, module: "PPM Schedules", count: totals.ppmSchedules ?? data.ppmsTotal ?? data.ppms.length },
+    { no: 5, module: "PPM WOs Checklist Items History", count: totals.ppmWoChecklistItemsHistory ?? 0 },
+    { no: 6, module: "System O&M Manual", count: totals.omManuals ?? data.documentUploads.filter((document) => document.category === "OM_MANUAL").length },
+    { no: 7, module: "Service Request History", count: totals.serviceRequestHistory ?? data.requests.filter((request) => !request.isIncidentCase).length },
+    { no: 8, module: "Cases & Incident", count: totals.casesAndIncidents ?? data.requests.filter((request) => request.isIncidentCase).length },
+    { no: 9, module: "Comment History", count: totals.commentHistory ?? data.workOrders.filter((work) => String(work.workNotes ?? "").trim()).length },
+    { no: 10, module: "Rooms", count: totals.rooms ?? data.housing.rooms.length },
+    { no: 11, module: "Guest Profile", count: totals.guestProfiles ?? data.housing.residents.length },
+    { no: 12, module: "Guest Stay Occupancy", count: totals.guestStayOccupancy ?? data.housing.bookings.length },
+  ];
+}
+
+function TotalEntries({ data }: { data: ConsoleData }) {
+  const rows = totalEntryRows(data);
+  const grandTotal = rows.reduce((total, row) => total + Number(row.count || 0), 0);
+  const largest = Math.max(1, ...rows.map((row) => Number(row.count || 0)));
+
+  return (
+    <section className="space-y-5">
+      <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-lg bg-lagoon/10 text-lagoon"><Gauge size={20} /></div>
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">System Data Audit</p>
+              <h1 className="text-2xl font-black text-ink">Total Entries</h1>
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-right">
+            <p className="text-xs font-black uppercase text-slate-500">Combined Entries</p>
+            <p className="text-2xl font-black text-ink">{grandTotal.toLocaleString()}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {rows.slice(0, 4).map((row) => (
+          <div key={row.module} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <p className="text-xs font-black uppercase text-slate-500">{row.module}</p>
+            <p className="mt-2 text-2xl font-black text-ink">{Number(row.count || 0).toLocaleString()}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+          <h2 className="text-base font-black text-ink">Module Entry Counts</h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="bg-slate-100 text-xs font-black uppercase text-slate-600">
+              <tr>
+                <th className="w-16 px-4 py-3">#</th>
+                <th className="px-4 py-3">Module</th>
+                <th className="px-4 py-3 text-right">Total Entries</th>
+                <th className="px-4 py-3">Data Load</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((row) => {
+                const count = Number(row.count || 0);
+                const width = `${Math.max(4, Math.round((count / largest) * 100))}%`;
+                return (
+                  <tr key={row.module} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-black text-slate-500">{row.no}</td>
+                    <td className="px-4 py-3 font-bold text-ink">{row.module}</td>
+                    <td className="px-4 py-3 text-right text-lg font-black text-lagoon">{count.toLocaleString()}</td>
+                    <td className="px-4 py-3">
+                      <div className="h-2 w-full rounded-full bg-slate-100">
+                        <div className="h-2 rounded-full bg-lagoon" style={{ width }} />
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  );
+}
 function CommandCenter({ data }: { data: ConsoleData }) {
   const [fromValue, setFromValue] = useState("");
   const [toValue, setToValue] = useState("");
