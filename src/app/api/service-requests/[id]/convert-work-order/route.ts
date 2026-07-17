@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { addHours } from "date-fns";
 import { apiError } from "@/lib/api-response";
-import { canManageDepartmentRecord } from "@/lib/access-control";
+import { requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -14,10 +14,8 @@ export async function POST(requestBody: Request, { params }: { params: Promise<{
     const body = await requestBody.json().catch(() => ({}));
     const request = await prisma.serviceRequest.findUnique({ where: { id } });
     if (!request) throw new Error("Service request not found");
-    const user = await getCurrentUser();
-    if (!canManageDepartmentRecord(user, request.departmentCode)) {
-      return apiError(new Error("Only Admin or the department Supervisor can convert this request."), "Access denied", 403);
-    }
+    const { error: permissionError, user } = await requirePermission("servicerequests.assign");
+    if (permissionError) return permissionError;
     const existingWorkOrder = await prisma.workOrder.findUnique({ where: { requestId: id } });
     if (existingWorkOrder) {
       return NextResponse.json(existingWorkOrder);
@@ -90,3 +88,4 @@ export async function POST(requestBody: Request, { params }: { params: Promise<{
     return apiError(error, "Unable to convert request to work order");
   }
 }
+

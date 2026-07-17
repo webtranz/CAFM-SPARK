@@ -23,9 +23,6 @@ async function upsertPermissionCatalog() {
 }
 
 export async function ensureRoleDefaultPermissions(roleName: string) {
-  const existingPermissions = await prisma.rolePermission.count({ where: { role: roleName } });
-  if (existingPermissions > 0) return;
-
   const defaultGrants = defaultPermissionGrantsForRole(roleName);
   if (!defaultGrants.length) return;
 
@@ -73,3 +70,4 @@ export function ensureDefaultRbac() {
   }
   return defaultRbacSeed;
 }
+

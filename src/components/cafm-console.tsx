@@ -683,7 +683,9 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
   }, [bulkUploadProgress?.jobId]);
 
   const permissionCodes = useMemo(() => {
-    return new Set(records.rolePermissions.filter((item) => item.role === user.role).map((item) => item.permission.code));
+    const assignedCodes = records.rolePermissions.filter((item) => item.role === user.role).map((item) => item.permission.code);
+    const defaultCodes = DEFAULT_ROLE_NAMES.includes(user.role as any) ? defaultPermissionCodesForRole(user.role) : [];
+    return new Set([...defaultCodes, ...assignedCodes]);
   }, [records.rolePermissions, user.role]);
   const isReadOnlyUser = roleKindLabel(user.role) === "readonly";
   const readOnlyModules = new Set(["command", "dashboard", "assets", "work", "ppm", "requests", "reports", "housing", "compliance", "documents", "incidents"]);
@@ -12094,3 +12096,4 @@ function actionFieldLabel(field: string) {
   };
   return labels[field] || field.replace(/([A-Z])/g, " $1");
 }
+

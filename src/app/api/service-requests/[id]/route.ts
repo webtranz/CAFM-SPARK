@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { addHours } from "date-fns";
 import { apiError } from "@/lib/api-response";
-import { canManageDepartmentRecord } from "@/lib/access-control";
-import { requireAdmin } from "@/lib/api-auth";
+import { requireAdmin, requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -41,12 +40,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     const { id } = await params;
     const input = schema.parse(await request.json());
+    const permissionCode = ["APPROVED", "REJECTED", "VERIFIED", "CLOSED"].includes(String(input.status || "")) ? "servicerequests.approve" : "servicerequests.edit";
+    const { error: permissionError } = await requirePermission(permissionCode);
+    if (permissionError) return permissionError;
     const current = await prisma.serviceRequest.findUnique({ where: { id } });
     if (!current) throw new Error("Service request not found");
     const user = await getCurrentUser();
-    if (!canManageDepartmentRecord(user, current.departmentCode)) {
-      return apiError(new Error("You do not have permission for this department request."), "Access denied", 403);
-    }
     const priority = ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(input.priority || "") ? input.priority as keyof typeof slaByPriority : current.priority;
     const status = input.status && ["OPEN", "NEW", "TRIAGED", "APPROVED", "REJECTED", "PENDING_ASSIGNMENT", "ASSIGNED", "ACCEPTED", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "VERIFIED", "REOPENED", "CLOSED"].includes(input.status) ? input.status as any : current.status;
     const slaHours = slaByPriority[priority];
@@ -104,3 +103,4 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
     return apiError(error, "Unable to delete service request");
   }
 }
+

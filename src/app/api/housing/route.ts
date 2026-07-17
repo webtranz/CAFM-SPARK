@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api-response";
+import { requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth";
 import { ensureHousingNotificationSettings } from "@/lib/housing-alerts";
@@ -175,6 +176,8 @@ const housingSchema = z.object({
 });
 
 export async function GET() {
+  const { error } = await requirePermission("housing.view");
+  if (error) return error;
   await expireRoomHolds();
   const [
     properties,
@@ -213,6 +216,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const { error } = await requirePermission("housing.create");
+    if (error) return error;
     const input = housingSchema.parse(await request.json());
     const user = await getCurrentUser();
     const actor = user?.name || user?.email || "System";
@@ -881,3 +886,4 @@ async function assertNoOverlappingBooking(roomId: string, start: Date, end: Date
   });
   if (overlap) throw new Error(`Room already has booking ${overlap.bookingNo} overlapping this hold period.`);
 }
+

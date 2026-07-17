@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { accessRole } from "@/lib/access-control";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { expandPermissionCode } from "@/lib/default-role-permissions";
+import { DEFAULT_ROLE_NAMES, defaultPermissionCodesForRole, expandPermissionCode, hasPermissionCode } from "@/lib/default-role-permissions";
 
 export function authError(message = "Authentication required.", status = 401) {
   return NextResponse.json({ message }, { status });
@@ -31,8 +31,8 @@ export async function requirePermission(code: string) {
     where: { role: user.role || "", permission: { code: { in: expandPermissionCode(code) } } },
     select: { id: true },
   });
-  if (!allowed) return { user: null, error: authError("Access denied.", 403) };
-  return { user, error: null };
+  if (allowed || defaultRoleAllows(user.role || "", code)) return { user, error: null };
+  return { user: null, error: authError("Access denied.", 403) };
 }
 
 export async function requireAnyPermission(codes: string[]) {
@@ -43,8 +43,13 @@ export async function requireAnyPermission(codes: string[]) {
     where: { role: user.role || "", permission: { code: { in: Array.from(new Set(codes.flatMap(expandPermissionCode))) } } },
     select: { id: true },
   });
-  if (!allowed) return { user: null, error: authError("Access denied.", 403) };
-  return { user, error: null };
+  if (allowed || codes.some((code) => defaultRoleAllows(user.role || "", code))) return { user, error: null };
+  return { user: null, error: authError("Access denied.", 403) };
+}
+
+function defaultRoleAllows(role: string, code: string) {
+  if (!DEFAULT_ROLE_NAMES.includes(role as any)) return false;
+  return hasPermissionCode(new Set(defaultPermissionCodesForRole(role)), code);
 }
 
 export async function requireAdmin() {
@@ -55,3 +60,4 @@ export async function requireAdmin() {
   }
   return { user, error: null };
 }
+

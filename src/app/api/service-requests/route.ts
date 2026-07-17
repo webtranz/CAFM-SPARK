@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { addHours } from "date-fns";
 import { auditAction } from "@/lib/audit";
+import { requirePermission } from "@/lib/api-auth";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
@@ -35,7 +36,8 @@ const slaByPriority = {
 
 export async function GET(request: Request) {
   try {
-    await getCurrentUser();
+    const { error } = await requirePermission("servicerequests.view");
+    if (error) return error;
     const url = new URL(request.url);
     const query = url.searchParams.get("query")?.trim() || "";
     const status = url.searchParams.get("status")?.trim() || "All";
@@ -84,6 +86,8 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const { error } = await requirePermission("servicerequests.create");
+    if (error) return error;
     const input = schema.parse(await request.json());
     const user = await getCurrentUser();
     const count = await prisma.serviceRequest.count();
@@ -132,3 +136,4 @@ export async function POST(request: Request) {
     );
   }
 }
+

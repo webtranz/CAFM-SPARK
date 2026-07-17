@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api-response";
-import { requireAdmin } from "@/lib/api-auth";
+import { requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -19,6 +19,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ty
   try {
     const { type, id } = await params;
     const input = bodySchema.parse(await request.json());
+    const permissionCode = type === "approval" ? "housing.approve" : "housing.edit";
+    const { error: permissionError } = await requirePermission(permissionCode);
+    if (permissionError) return permissionError;
     const user = await getCurrentUser();
     const current = await findHousingRecord(type, id);
     const record = await updateHousingRecord(type, id, input, user);
@@ -31,7 +34,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ty
 
 export async function DELETE(_: Request, { params }: { params: Promise<{ type: string; id: string }> }) {
   try {
-    const { error, user } = await requireAdmin();
+    const { error, user } = await requirePermission("housing.delete");
     if (error) return error;
     const { type, id } = await params;
     const current = await findHousingRecord(type, id);
@@ -606,3 +609,5 @@ async function assertNoOverlappingBooking(roomId: string, start: Date, end: Date
   });
   if (overlap) throw new Error(`Room already has booking ${overlap.bookingNo} overlapping this hold period.`);
 }
+
+
