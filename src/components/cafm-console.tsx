@@ -9811,6 +9811,7 @@ function HousingOperations({
   const [dateTo, setDateTo] = useState("");
   const [selected, setSelected] = useState<{ type: string; record: any } | null>(null);
   const [createHousingForm, setCreateHousingForm] = useState<"booking" | "hold" | "inspection" | "asset" | "inventory" | null>(null);
+  const [swapBooking, setSwapBooking] = useState<any | null>(null);
   const [runningAlerts, setRunningAlerts] = useState(false);
   const rooms = housing?.rooms ?? [];
   const bookings = housing?.bookings ?? [];
@@ -10145,11 +10146,12 @@ function HousingOperations({
               reportType="housing-bookings"
               bulkSelectable={isAdmin}
               onBulkDelete={async (rows) => { await Promise.all(rows.map((row) => deleteHousing("booking", row.id))); }}
-              actions={(record) => canApprove && (
+              actions={(record) => (canManage || canApprove) && (
                 <div className="flex flex-wrap gap-2">
-                  {currentApprovalFor(record) && <button type="button" onClick={(event) => { event.stopPropagation(); approvalAction(currentApprovalFor(record), "APPROVED"); }} className="rounded-lg bg-leaf px-3 py-2 text-xs font-black text-white">Approve Step</button>}
-                  {currentApprovalFor(record) && <button type="button" onClick={(event) => { event.stopPropagation(); approvalAction(currentApprovalFor(record), "RETURNED"); }} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white">Return</button>}
+                  {canApprove && currentApprovalFor(record) && <button type="button" onClick={(event) => { event.stopPropagation(); approvalAction(currentApprovalFor(record), "APPROVED"); }} className="rounded-lg bg-leaf px-3 py-2 text-xs font-black text-white">Approve Step</button>}
+                  {canApprove && currentApprovalFor(record) && <button type="button" onClick={(event) => { event.stopPropagation(); approvalAction(currentApprovalFor(record), "RETURNED"); }} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white">Return</button>}
                   {canReceptionAllocate && record.status === "APPROVED" && <button type="button" onClick={(event) => { event.stopPropagation(); updateHousing("booking", record.id, { status: "CHECKED_IN", keyHandoverBy: "Reception Team", keyHandoverAt: new Date().toISOString() }); }} className="rounded-lg bg-lagoon px-3 py-2 text-xs font-black text-white">Allocate</button>}
+                  {["APPROVED", "CHECKED_IN", "PENDING_APPROVAL"].includes(record.status) && <button type="button" onClick={(event) => { event.stopPropagation(); setSwapBooking(record); }} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-black text-white">Swap Room</button>}
                   <button type="button" onClick={(event) => { event.stopPropagation(); updateHousing("booking", record.id, { status: "CHECKED_OUT", checkOut: new Date().toISOString() }); }} className="rounded-lg bg-ink px-3 py-2 text-xs font-black text-white">Check-out</button>
                   <button type="button" onClick={(event) => { event.stopPropagation(); updateHousing("booking", record.id, { status: "CANCELLED", cancellationReason: "Cancelled by housing admin" }); }} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white">Cancel</button>
                 </div>
@@ -10302,6 +10304,21 @@ function HousingOperations({
         <HousingReportsWorkspace rooms={rooms} bookings={bookings} />
       )}
 
+      {swapBooking && (
+        <RequestModalShell title={`Room Swap - ${swapBooking.bookingNo || swapBooking.residentName}`} onClose={() => setSwapBooking(null)}>
+          <HousingRoomSwapForm
+            booking={swapBooking}
+            rooms={rooms}
+            beds={housing.beds ?? []}
+            holds={holds}
+            saving={saving}
+            onSubmit={async (body) => {
+              await updateHousing("booking", swapBooking.id, body);
+              setSwapBooking(null);
+            }}
+          />
+        </RequestModalShell>
+      )}
       {createHousingForm && (
         <RequestModalShell title={createHousingForm === "booking" ? "Create New Booking" : createHousingForm === "hold" ? "Create New Room Hold" : createHousingForm === "inspection" ? "Create New Room Inspection" : createHousingForm === "asset" ? "Create New Housing Asset" : "Create New Inventory Item"} onClose={() => setCreateHousingForm(null)}>
           {createHousingForm === "booking" && <HousingBookingForm rooms={rooms} beds={housing.beds ?? []} residents={housing.residents ?? []} holds={holds} saving={saving} onSubmit={async (formData) => { await submitHousing(formData); setCreateHousingForm(null); }} />}
@@ -10850,6 +10867,64 @@ function HousingSetupForms({ properties, blocks, rooms, saving, onSubmit }: { pr
   );
 }
 
+function HousingRoomSwapForm({ booking, rooms, beds, holds, saving, onSubmit }: { booking: any; rooms: any[]; beds: any[]; holds: any[]; saving: boolean; onSubmit: (body: Record<string, unknown>) => Promise<void> | void }) {
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const activeHeldRoomIds = new Set(holds.filter((hold) => hold.status === "ACTIVE" && String(hold.startDate || "").slice(0, 10) <= todayKey && String(hold.endDate || "").slice(0, 10) >= todayKey).map((hold) => hold.roomId));
+  const [roomId, setRoomId] = useState("");
+  const [bedId, setBedId] = useState("");
+  const destinationRooms = useMemo(() => rooms.filter((room) => room.id && room.id !== booking.roomId && !["BLOCKED", "MAINTENANCE"].includes(room.status) && !activeHeldRoomIds.has(room.id)), [rooms, booking.roomId, activeHeldRoomIds]);
+  const selectedRoom = destinationRooms.find((room) => room.id === roomId);
+  const destinationBeds = beds.filter((bed) => bed.roomId === roomId && bed.status === "AVAILABLE");
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedRoom) return;
+    const formData = new FormData(event.currentTarget);
+    const selectedBed = destinationBeds.find((bed) => bed.id === bedId);
+    const transferReason = String(formData.get("transferReason") || "Room swapped by housing operations");
+    await onSubmit({
+      roomId,
+      bedId: bedId || undefined,
+      status: booking.status,
+      buildingNumber: selectedRoom.block?.name || selectedRoom.property?.name || booking.buildingNumber || "",
+      floorNumber: selectedRoom.floor || "",
+      roomNumber: selectedRoom.roomNumber || selectedRoom.code || "",
+      bedNumber: selectedBed?.label || "",
+      transferReason,
+      notes: transferReason,
+    });
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="grid gap-4 rounded-lg border border-white/80 bg-white p-5 shadow-lift">
+      <div className="grid gap-3 md:grid-cols-2">
+        <PreviewField label="Booking" value={booking.bookingNo} />
+        <PreviewField label="Occupant" value={`${booking.employeeId || "-"} / ${booking.residentName || "-"}`} />
+        <PreviewField label="Current room" value={[booking.buildingNumber, booking.floorNumber, booking.roomNumber, booking.bedNumber].filter(Boolean).join(" / ") || "Unassigned"} />
+        <PreviewField label="Status" value={booking.status} />
+      </div>
+      <div className="grid gap-3 rounded-lg bg-slate-50 p-3">
+        <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+          Destination room
+          <select required value={roomId} onChange={(event) => { setRoomId(event.target.value); setBedId(""); }} className={HOUSING_FIELD_CLASS}>
+            <option value="">Select available destination room ({destinationRooms.length.toLocaleString()} rooms)</option>
+            {destinationRooms.map((room) => <option key={room.id} value={room.id}>{housingRoomLabel(room)}</option>)}
+          </select>
+        </label>
+        <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+          Destination bed
+          <select value={bedId} onChange={(event) => setBedId(event.target.value)} className={HOUSING_FIELD_CLASS}>
+            <option value="">Auto-assign available bed{selectedRoom ? ` (${destinationBeds.length.toLocaleString()} available)` : ""}</option>
+            {destinationBeds.map((bed) => <option key={bed.id} value={bed.id}>{bed.label} / {bed.code}</option>)}
+          </select>
+        </label>
+        <input name="swapDate" type="datetime-local" defaultValue={new Date().toISOString().slice(0, 16)} className={HOUSING_FIELD_CLASS} />
+        <textarea name="transferReason" required placeholder="Reason for room swap / approval remarks" className="min-h-24 rounded-lg border border-slate-200 p-3 outline-none focus:border-lagoon" />
+      </div>
+      <button disabled={saving || !roomId} className="h-11 rounded-lg bg-violet-700 font-black text-white disabled:bg-slate-300">Confirm Room Swap</button>
+    </form>
+  );
+}
 function HousingBookingForm({ rooms, beds, residents, holds, saving, onSubmit }: { rooms: any[]; beds: any[]; residents: any[]; holds: any[]; saving: boolean; onSubmit: (formData: FormData) => void }) {
   const todayKey = new Date().toISOString().slice(0, 10);
   const activeHeldRoomIds = new Set(holds.filter((hold) => hold.status === "ACTIVE" && String(hold.startDate || "").slice(0, 10) <= todayKey && String(hold.endDate || "").slice(0, 10) >= todayKey).map((hold) => hold.roomId));
@@ -12096,4 +12171,8 @@ function actionFieldLabel(field: string) {
   };
   return labels[field] || field.replace(/([A-Z])/g, " $1");
 }
+
+
+
+
 

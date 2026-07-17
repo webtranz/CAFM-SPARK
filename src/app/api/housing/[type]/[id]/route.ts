@@ -74,27 +74,32 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
       if (!role.includes("reception") && role !== "admin") throw new Error("Only Reception Team can execute final room allocation.");
       if (current.status !== "APPROVED") throw new Error("Room allocation can be executed only after Camp Manager final approval.");
     }
+    const effectiveStatus = status || current.status;
     const nextRoomId = text(input.roomId) || current.roomId;
-    const nextRoom = nextRoomId !== current.roomId ? await prisma.housingRoom.findUnique({ where: { id: nextRoomId } }) : current.room;
+    const roomChanged = nextRoomId !== current.roomId;
+    const nextRoom = roomChanged ? await prisma.housingRoom.findUnique({ where: { id: nextRoomId } }) : current.room;
     if (!nextRoom) throw new Error("Selected room does not exist.");
     const nextCheckIn = input.checkIn ? new Date(String(input.checkIn)) : current.checkIn;
     const nextCheckOut = input.checkOut ? new Date(String(input.checkOut)) : current.checkOut || nextCheckIn;
-    if (["CHECKED_IN", "APPROVED", "PENDING_APPROVAL"].includes(status || current.status) && ["BLOCKED", "MAINTENANCE"].includes(nextRoom.status)) {
+    if (["CHECKED_IN", "APPROVED", "PENDING_APPROVAL"].includes(effectiveStatus) && ["BLOCKED", "MAINTENANCE"].includes(nextRoom.status)) {
       throw new Error("Blocked or under-maintenance rooms cannot be allocated.");
     }
-    if (["CHECKED_IN", "APPROVED", "PENDING_APPROVAL", "REQUESTED"].includes(status || current.status)) {
+    if (["CHECKED_IN", "APPROVED", "PENDING_APPROVAL", "REQUESTED"].includes(effectiveStatus)) {
       await assertNoOverlappingHold(nextRoom.id, nextCheckIn, nextCheckOut);
     }
-    const nextBedId = text(input.bedId) || current.bedId || undefined;
+    const requestedBedId = text(input.bedId);
+    const autoBed = !requestedBedId && roomChanged ? await prisma.housingBed.findFirst({ where: { roomId: nextRoom.id, status: "AVAILABLE" } }) : null;
+    const nextBedId = requestedBedId || autoBed?.id || (roomChanged ? undefined : current.bedId || undefined);
     const nextBed = nextBedId ? await prisma.housingBed.findUnique({ where: { id: nextBedId } }) : null;
     if (nextBed && nextBed.roomId !== nextRoom.id) throw new Error("Selected bed does not belong to the selected room.");
     if (nextBed && nextBed.id !== current.bedId && ["RESERVED", "OCCUPIED"].includes(nextBed.status)) throw new Error("Occupied beds cannot be assigned twice.");
+    if (nextRoom.capacity > 1 && !nextBed) throw new Error("No available bed found for the selected room.");
     const booking = await prisma.housingBooking.update({
       where: { id },
       data: {
         status: (status || undefined) as any,
         roomId: nextRoom.id,
-        bedId: nextBed?.id || current.bedId,
+        bedId: nextBed?.id || null,
         approvedBy: text(input.approvedBy) || undefined,
         notes: text(input.notes) || undefined,
         attachmentUrls: text(input.attachmentUrls) || undefined,
@@ -130,14 +135,15 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
       await prisma.housingBed.update({
         where: { id: booking.bedId },
         data: {
-          status: status === "CHECKED_IN" ? "OCCUPIED" : closedBookingStatuses.includes(status) ? "AVAILABLE" : status === "APPROVED" ? "RESERVED" : undefined,
-          occupant: closedBookingStatuses.includes(status) ? "" : booking.residentName,
-          occupantId: closedBookingStatuses.includes(status) ? "" : booking.residentId || "",
+          status: effectiveStatus === "CHECKED_IN" ? "OCCUPIED" : closedBookingStatuses.includes(effectiveStatus) ? "AVAILABLE" : effectiveStatus === "APPROVED" ? "RESERVED" : undefined,
+          occupant: closedBookingStatuses.includes(effectiveStatus) ? "" : booking.residentName,
+          occupantId: closedBookingStatuses.includes(effectiveStatus) ? "" : booking.residentId || "",
         },
       });
     }
+    if (roomChanged) await refreshRoomOccupancy(current.roomId);
     await refreshRoomOccupancy(booking.roomId);
-    await prisma.housingHistory.create({ data: { entity: "booking", entityId: id, bookingId: id, roomId: booking.roomId, actor, action: `Booking ${status || "updated"}`, details: text(input.notes) || text(input.remarks) || "" } });
+    await prisma.housingHistory.create({ data: { entity: "booking", entityId: id, bookingId: id, roomId: booking.roomId, actor, action: roomChanged ? "Room swapped" : `Booking ${status || "updated"}`, details: text(input.transferReason) || text(input.notes) || text(input.remarks) || "" } });
     return booking;
   }
 
@@ -609,5 +615,6 @@ async function assertNoOverlappingBooking(roomId: string, start: Date, end: Date
   });
   if (overlap) throw new Error(`Room already has booking ${overlap.bookingNo} overlapping this hold period.`);
 }
+
 
 
