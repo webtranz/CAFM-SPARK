@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/api-auth";
 import { emptyOperatingData } from "@/lib/empty-operating-data";
 import { prisma } from "@/lib/prisma";
 import { ensureDefaultRbac } from "@/lib/rbac-seed";
+import { getTotalEntryCounts } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,7 @@ export async function GET() {
       housingNotifications,
       housingHistory,
       rolePermissions,
+      totalEntries,
     ] = await Promise.all([
       prisma.serviceRequest.findMany({ where: { OR: [{ createdAt: { gte: since } }, { updatedAt: { gte: since } }, { dueAt: { gte: since, lte: now } }] }, orderBy: { updatedAt: "desc" }, take: DASHBOARD_LIMIT }),
       prisma.workOrder.findMany({ where: { OR: [{ createdAt: { gte: since } }, { updatedAt: { gte: since } }, { dueAt: { gte: since, lte: now } }, { plannedStart: { gte: since, lte: now } }] }, orderBy: { updatedAt: "desc" }, take: DASHBOARD_LIMIT }),
@@ -64,6 +66,7 @@ export async function GET() {
       prisma.housingNotification.findMany({ where: { OR: [{ createdAt: { gte: since } }, { sentAt: { gte: since } }] }, orderBy: { createdAt: "desc" }, take: DASHBOARD_LIMIT }),
       prisma.housingHistory.findMany({ where: { createdAt: { gte: since } }, orderBy: { createdAt: "desc" }, take: DASHBOARD_LIMIT }),
       prisma.rolePermission.findMany({ include: { permission: true }, orderBy: { role: "asc" } }),
+      getTotalEntryCounts(),
     ]);
 
     return NextResponse.json({
@@ -84,6 +87,7 @@ export async function GET() {
       users,
       auditLogs,
       rolePermissions,
+      totalEntries,
       housing: {
         ...emptyOperatingData.housing,
         bookings: housingBookings,

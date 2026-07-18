@@ -49,7 +49,7 @@ function countWorkOrderComments(rows: Array<{ workNotes: string | null }>) {
   }, 0);
 }
 
-async function getTotalEntryCounts() {
+export async function getTotalEntryCounts() {
   const [assetRegistry, locationList, workOrdersHistory, ppmSchedules, ppmChecklistRows, ppmChecklistHistoryRows, omManuals, serviceRequestHistory, casesAndIncidents, commentRows, rooms, guestProfiles, guestStayOccupancy] = await Promise.all([
     prisma.asset.count(),
     prisma.location.count(),
