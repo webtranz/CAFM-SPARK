@@ -470,6 +470,7 @@ model WorkOrder {
   assignedTo         User?            @relation(fields: [assignedToId], references: [id])
   inventoryIssues    InventoryIssue[]
   ppmChecklistHistory PpmChecklistHistory[]
+  commentHistory     CommentHistory[]
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
 
@@ -708,6 +709,39 @@ model IotAlert {
   detectedAt DateTime   @default(now())
 }
 
+
+model CommentHistory {
+  id                   String     @id @default(cuid())
+  sourceYear           String     @default("")
+  sourceFile           String     @default("")
+  sourceRow            Int?
+  uploadKey            String     @unique
+  woNo                 String
+  commentText          String
+  commentedAt          DateTime?
+  commentedBy          String     @default("")
+  sourceLine           String     @default("")
+  sourceUserCode       String     @default("")
+  sourceUpdateUserCode String     @default("")
+  addEntity            String     @default("")
+  addType              String     @default("")
+  addLanguage          String     @default("")
+  addPrint             String     @default("")
+  updatedAtSource      DateTime?
+  updateCount          Int?
+  systemWorkOrderMatch Boolean    @default(false)
+  linkStatus           String     @default("UNMATCHED")
+  workOrderId          String?
+  workOrder            WorkOrder? @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+
+  @@index([woNo])
+  @@index([sourceYear])
+  @@index([sourceFile])
+  @@index([linkStatus])
+  @@index([workOrderId])
+}
 model AuditLog {
   id        String   @id @default(cuid())
   actorId   String?

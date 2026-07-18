@@ -347,7 +347,7 @@ function bulkUploadPermissions(module: string) {
   if (module === "ppm") return ["ppm.manage", "assets.manage"];
   if (module === "ppmChecklistHistory") return ["ppm.manage", "work.manage", "assets.manage"];
   if (["housingAssets", "housingRooms", "housingGuests", "housingOccupancy"].includes(module)) return ["housing.manage", "assets.manage"];
-  if (["workOrders", "workOrderComments"].includes(module)) return ["work.manage", "assets.manage"];
+  if (["workOrders", "workOrderComments", "commentHistory"].includes(module)) return ["work.manage", "assets.manage"];
   if (module === "requests") return ["requests.manage"];
   if (["teams", "services", "departments", "employees"].includes(module)) return ["users.manage", "requests.manage"];
   return ["assets.manage"];
@@ -379,6 +379,7 @@ async function importRow(module: string, row: Row, context: ImportContext = {}) 
   if (module === "requests") return importRequest(row);
   if (module === "workOrders") return importWorkOrder(row, context);
   if (module === "workOrderComments") return importWorkOrderComment(row);
+  if (module === "commentHistory") return importCommentHistory(row, context);
   if (module === "teams") return importTeam(row, context);
   if (module === "services") return importService(row, context);
   if (module === "departments") return importDepartment(row, context);
@@ -443,6 +444,10 @@ async function clearExistingBulkUploadData(module: string) {
   }
   if (module === "workOrderComments") {
     add(await prisma.workOrder.updateMany({ where: { workNotes: { not: "" } }, data: { workNotes: "" } }));
+    return deleted;
+  }
+  if (module === "commentHistory") {
+    add(await prisma.commentHistory.deleteMany({}));
     return deleted;
   }
   if (module === "workOrders") {
@@ -1260,6 +1265,48 @@ async function importWorkOrder(row: Row, context: ImportContext = {}) {
   return importResult("work_order", existing ? "UPDATE" : "CREATE", workOrder, workOrder.woNo, workOrder.title);
 }
 
+
+async function importCommentHistory(row: Row, context: ImportContext = {}) {
+  const woNo = required(row, "woNo", "workOrder", "Work Order", "add_code", "ACK_EVENT");
+  const commentText = required(row, "commentText", "comment", "add_text", "Work Notes");
+  const sourceFile = value(row, "sourceFile", "SOURCE_FILE") || "Comment History";
+  const sourceRowValue = integer(value(row, "sourceRow", "SOURCE_ROW"), 0);
+  const sourceLine = value(row, "sourceLine", "add_line") || "";
+  const uploadKey = value(row, "uploadKey", "UPLOAD_KEY") || [sourceFile, sourceRowValue, woNo, sourceLine, commentText].join("|").slice(0, 500);
+  const existing = await prisma.commentHistory.findUnique({ where: { uploadKey } });
+  if (existing && !shouldReplace(context)) return existingResult("comment_history", existing, uploadKey, commentText.slice(0, 120));
+
+  const workOrder = await prisma.workOrder.findUnique({ where: { woNo } });
+  const sourceYear = value(row, "sourceYear", "SOURCE_YEAR") || (sourceFile.match(/20\d{2}/)?.[0] ?? "");
+  const data = {
+    sourceYear,
+    sourceFile,
+    sourceRow: sourceRowValue || null,
+    woNo,
+    commentText,
+    commentedAt: optionalDate(value(row, "commentedAt", "add_created", "createdAt")),
+    commentedBy: value(row, "commentedBy", "usr_desc_cre", "add_user") || "Bulk Upload",
+    sourceLine,
+    sourceUserCode: value(row, "sourceUserCode", "usr_code_cre", "add_user") || "",
+    sourceUpdateUserCode: value(row, "sourceUpdateUserCode", "usr_code_upd", "add_upduser") || "",
+    addEntity: value(row, "add_entity") || "",
+    addType: value(row, "add_type") || "",
+    addLanguage: value(row, "add_lang") || "",
+    addPrint: value(row, "add_print") || "",
+    updatedAtSource: optionalDate(value(row, "add_updated", "updatedAt")),
+    updateCount: integer(value(row, "add_updatecount"), 0) || null,
+    systemWorkOrderMatch: Boolean(workOrder),
+    linkStatus: workOrder ? "LINKED" : "WORK_ORDER_NOT_FOUND",
+    workOrderId: workOrder?.id,
+  };
+
+  const comment = await prisma.commentHistory.upsert({
+    where: { uploadKey },
+    update: data,
+    create: { uploadKey, ...data },
+  });
+  return importResult("comment_history", existing ? "UPDATE" : "CREATE", comment, uploadKey, commentText.slice(0, 120));
+}
 async function importWorkOrderComment(row: Row) {
   const woNo = required(row, "woNo", "workOrder", "Work Order", "add_code");
   const commentText = required(row, "commentText", "comment", "add_text", "Work Notes");
