@@ -8681,11 +8681,13 @@ function JobPlans({ jobPlans, jobPlansTotal, services, departments, submitJobPla
   );
 }
 
-function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSubmit: (formData: FormData) => void; initialModule: string }) {
+function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSubmit: (formData: FormData) => Promise<void>; initialModule: string }) {
   const [module, setModule] = useState(initialModule);
   const [importMode, setImportMode] = useState("keepExisting");
   const [manualProgress, setManualProgress] = useState("");
+  const [queueProgress, setQueueProgress] = useState("");
   const [manualUploading, setManualUploading] = useState(false);
+  const [queueUploading, setQueueUploading] = useState(false);
   const deleteOnly = importMode === "deleteExisting";
 
   useEffect(() => {
@@ -8699,7 +8701,39 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
-    const formData = new FormData(form);
+    const fileInput = form.elements.namedItem("file") as HTMLInputElement | null;
+    const csvFiles = Array.from(fileInput?.files ?? []);
+
+    async function queueCsvUploads() {
+      if (deleteOnly) {
+        const uploadData = new FormData();
+        uploadData.set("module", module);
+        uploadData.set("importMode", importMode);
+        await onSubmit(uploadData);
+        return;
+      }
+
+      if (!csvFiles.length) {
+        await onSubmit(new FormData(form));
+        return;
+      }
+
+      setQueueUploading(true);
+      try {
+        for (const [index, csvFile] of csvFiles.entries()) {
+          setQueueProgress(`Queueing CSV ${index + 1} of ${csvFiles.length}: ${csvFile.name}`);
+          const uploadData = new FormData();
+          uploadData.set("module", module);
+          uploadData.set("importMode", importMode);
+          uploadData.set("file", csvFile);
+          await onSubmit(uploadData);
+          setQueueProgress(`Queued CSV ${index + 1} of ${csvFiles.length}: ${csvFile.name}`);
+        }
+      } finally {
+        setQueueUploading(false);
+      }
+    }
+
     if (module === "omManuals") {
       const manualInput = form.elements.namedItem("manualFiles") as HTMLInputElement | null;
       const manualFiles = Array.from(manualInput?.files ?? []);
@@ -8719,18 +8753,12 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
           setManualUploading(false);
         }
       }
-
-      const csvFile = formData.get("file");
-      const uploadData = new FormData();
-      uploadData.set("module", module);
-      uploadData.set("importMode", importMode);
-      if (csvFile instanceof File) uploadData.set("file", csvFile);
-      await onSubmit(uploadData);
-    } else {
-      await onSubmit(formData);
     }
+
+    await queueCsvUploads();
     event.currentTarget.reset();
     setManualProgress("");
+    setQueueProgress("");
     setModule(initialModule);
   }
 
@@ -8746,9 +8774,9 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
               <option value="spaces">Spaces</option>
               <option value="assets">Assets</option>
               <option value="housingAssets">Housing Assets</option>
-                <option value="housingRooms">Housing Rooms</option>
-                <option value="housingGuests">Housing Guests</option>
-                <option value="housingOccupancy">Housing Occupancy / Bookings</option>
+              <option value="housingRooms">Housing Rooms</option>
+              <option value="housingGuests">Housing Guests</option>
+              <option value="housingOccupancy">Housing Occupancy / Bookings</option>
               <option value="categories">Asset Categories</option>
               <option value="inventory">Inventory</option>
               <option value="requests">Service Requests</option>
@@ -8778,8 +8806,9 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
             </span>
           </label>
           <label className="grid gap-1 text-sm font-bold text-slate-600">
-            CSV File
-            <input name="file" type="file" accept=".csv,text/csv" disabled={deleteOnly} className="rounded-lg border border-slate-200 bg-white p-3 disabled:bg-slate-100 disabled:text-slate-400" />
+            CSV Files
+            <input name="file" type="file" accept=".csv,text/csv" multiple disabled={deleteOnly} className="rounded-lg border border-slate-200 bg-white p-3 disabled:bg-slate-100 disabled:text-slate-400" />
+            <span className="text-xs font-bold text-slate-500">Select one CSV or multiple CSV files. Multiple files are queued and uploaded one by one.</span>
           </label>
           {module === "omManuals" && !deleteOnly && (
             <label className="grid gap-1 text-sm font-bold text-slate-600">
@@ -8789,8 +8818,9 @@ function BulkUpload({ saving, onSubmit, initialModule }: { saving: boolean; onSu
             </label>
           )}
           {manualProgress && <div className="rounded-lg border border-lagoon/20 bg-lagoon/5 p-3 text-sm font-black text-lagoon">{manualProgress}</div>}
-          <button disabled={saving || manualUploading} className="h-11 rounded-lg bg-ink font-black text-white disabled:bg-slate-400">
-            {saving || manualUploading ? (deleteOnly ? "Deleting..." : "Uploading...") : deleteOnly ? "Delete Existing Data" : module === "omManuals" ? "Upload Manuals then CSV" : "Upload CSV"}
+          {queueProgress && <div className="rounded-lg border border-lagoon/20 bg-lagoon/5 p-3 text-sm font-black text-lagoon">{queueProgress}</div>}
+          <button disabled={saving || manualUploading || queueUploading} className="h-11 rounded-lg bg-ink font-black text-white disabled:bg-slate-400">
+            {saving || manualUploading || queueUploading ? (deleteOnly ? "Deleting..." : "Uploading queue...") : deleteOnly ? "Delete Existing Data" : module === "omManuals" ? "Upload Manuals then CSV Queue" : "Upload CSV Queue"}
           </button>
         </form>
       </Panel>
