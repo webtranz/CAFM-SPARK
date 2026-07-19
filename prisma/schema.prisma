@@ -534,6 +534,7 @@ model PreventiveMaintenance {
   departmentCode       String   @default("")
   priority             Priority @default(MEDIUM)
   frequency            String
+  periodUom            String   @default("")
   nextDue              DateTime
   durationHrs          Decimal  @db.Decimal(6, 2)
   checklist            String

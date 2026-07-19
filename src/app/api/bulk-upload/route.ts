@@ -1468,7 +1468,14 @@ async function importPpm(row: Row, context: ImportContext = {}) {
   const targetKey = assetTag || locationCode || ppmCode;
   const code = value(row, "uniqueCode") || uniquePpmCode(baseCode, targetKey);
   const existing = await prisma.preventiveMaintenance.findUnique({ where: { code } });
-  if (existing && !shouldReplace(context) && !canUseCustomLocation) return existingResult("preventive_maintenance", existing, code, existing.name);
+  const periodUom = value(row, "periodUom", "PERIOD UOM", "Period UOM", "period", "PERIOD") || "";
+  if (existing && !shouldReplace(context) && !canUseCustomLocation) {
+    if (periodUom && existing.periodUom !== periodUom) {
+      const updated = await prisma.preventiveMaintenance.update({ where: { code }, data: { periodUom } });
+      return importResult("preventive_maintenance", "UPDATE", updated, code, updated.name);
+    }
+    return existingResult("preventive_maintenance", existing, code, existing.name);
+  }
   const nextDue = optionalDate(value(row, "nextDue", "DUE DATE", "dueAt")) || addDays(new Date(), 7);
   const activeValue = value(row, "active");
   const data = {
@@ -1484,6 +1491,7 @@ async function importPpm(row: Row, context: ImportContext = {}) {
     departmentCode: value(row, "departmentCode", "DEPARTMENT", "DEPARTMENT ") || asset?.departmentCode || "",
     priority: priority(value(row, "priority", "OBJECT CRITICALITY")),
     frequency: value(row, "frequency", "FREQUENCY") || "Monthly",
+    periodUom,
     nextDue,
     durationHrs: number(value(row, "durationHrs", "duration", "PPA_DURATION"), 2),
     checklist: ppmChecklistValue(row),

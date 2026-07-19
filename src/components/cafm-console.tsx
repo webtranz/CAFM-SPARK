@@ -6049,6 +6049,13 @@ function PpmCreateForm({ assets, locations, onSubmit, saving }: { assets: any[];
           <option>Semi Annual</option>
           <option>Annual</option>
         </select>
+        <select name="periodUom" className={TICKET_PLAN_FIELD_CLASS}>
+          <option value="">Select period UOM</option>
+          <option>Day</option>
+          <option>Week</option>
+          <option>Month</option>
+          <option>Year</option>
+        </select>
         <input name="nextDue" type="date" className={TICKET_PLAN_FIELD_CLASS} />
         <select name="priority" className={TICKET_PLAN_FIELD_CLASS}>
           <option value="MEDIUM">Medium priority</option>
@@ -6203,7 +6210,7 @@ function PmPreviewModal({
           <PreviewField label="Progression" value={ppm.active ? "Active" : "Paused"} />
           <PreviewField label="Time to Complete" value={`${ppm.durationHrs || 0} hrs`} />
           <PreviewField label="Work Type" value="Preventive" />
-          <PreviewField label="Schedule" value={ppm.frequency} />
+          <PreviewField label="Schedule" value={ppm.periodUom ? `${ppm.frequency} ${ppm.periodUom}` : ppm.frequency} />
           <PreviewField label="PPM Code" value={ppmGroupCode} />
           <PreviewField label="Linked Equipment" value={`${groupEquipment.length} item${groupEquipment.length === 1 ? "" : "s"}`} />
           <PreviewField label="Asset" value={ppm.assetTag} />
@@ -6275,7 +6282,7 @@ function PmPreviewModal({
                         <td className="px-3 py-2">{item.departmentCode || item.assetDetails?.departmentCode || "-"}</td>
                         <td className="px-3 py-2">{formatDateCell(item.nextDue)}</td>
                         <td className="px-3 py-2 text-right">1</td>
-                        <td className="px-3 py-2">{item.frequency || ppm.frequency || "Months"}</td>
+                        <td className="px-3 py-2">{item.periodUom || ppm.periodUom || item.frequency || ppm.frequency || "-"}</td>
                         <td className="px-3 py-2">{item.active ? "Yes" : "No"}</td>
                         <td className="px-3 py-2">Scheduled</td>
                       </tr>
