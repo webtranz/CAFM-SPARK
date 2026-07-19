@@ -5634,6 +5634,18 @@ function WorkExecutionForm({ work, inventory, onSubmit, saving }: { work: any; i
   );
 }
 
+function ppmPeriodUomValue(ppm: any) {
+  return String(
+    ppm?.periodUom ||
+    ppm?.periodUOM ||
+    ppm?.period_uom ||
+    ppm?.["Period UOM"] ||
+    ppm?.["PERIOD UOM"] ||
+    ppm?.period ||
+    ""
+  ).trim();
+}
+
 function Ppm({
   ppms,
   ppmsTotal,
@@ -5680,6 +5692,7 @@ function Ppm({
     if (key === "ppmCode") return ppm.ppmCode || String(ppm.code || "").split("-")[0] || ppm.code;
     if (key === "active") return ppm.active ? "Planned" : "Paused";
     if (key === "nextDue") return formatDateCell(ppm.nextDue);
+    if (key === "periodUom") return ppmPeriodUomValue(ppm);
     return ppm[key];
   }), [ppmRowsSource, ppmExcelColumns, ppmExcelFilters, ppmExcelSort]);
   const hasMorePpms = ppmRowsSource.length < ppmTotal;
@@ -5704,13 +5717,6 @@ function Ppm({
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
-      const defaultFilters = page === 1 && !search && statusFilter === "All";
-      if (defaultFilters && ppms.length) {
-        setPpmRowsSource(ppms);
-        setPpmTotal(ppmsTotal ?? ppms.length);
-        setPpmLoading(false);
-        return;
-      }
       setPpmLoading(true);
       try {
         const params = new URLSearchParams({
@@ -5914,7 +5920,7 @@ function Ppm({
                       <td className="px-3 py-3"><p className="font-black">{ppm.name}</p><p className="text-xs font-bold text-slate-500">Record: {ppm.code}</p></td>
                       <td className="px-3 py-3"><span className={`rounded-full border px-2 py-1 text-xs font-black ${ppm.active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>{ppm.active ? "Planned" : "Paused"}</span></td>
                       <td className="px-3 py-3">{ppm.frequency}</td>
-                      <td className="px-3 py-3">{ppm.periodUom || "-"}</td>
+                      <td className="px-3 py-3">{ppmPeriodUomValue(ppm) || "-"}</td>
                       <td className="px-3 py-3">{formatDateCell(ppm.nextDue)}</td>
                       <td className="px-3 py-3"><RequestPriorityBadge priority={ppm.priority || "MEDIUM"} /></td>
                       <td className="px-3 py-3">{ppm.departmentCode || asset?.departmentCode || "-"}</td>
@@ -6210,7 +6216,7 @@ function PmPreviewModal({
           <PreviewField label="Progression" value={ppm.active ? "Active" : "Paused"} />
           <PreviewField label="Time to Complete" value={`${ppm.durationHrs || 0} hrs`} />
           <PreviewField label="Work Type" value="Preventive" />
-          <PreviewField label="Schedule" value={ppm.periodUom ? `${ppm.frequency} ${ppm.periodUom}` : ppm.frequency} />
+          <PreviewField label="Schedule" value={ppmPeriodUomValue(ppm) ? `${ppm.frequency} ${ppmPeriodUomValue(ppm)}` : ppm.frequency} />
           <PreviewField label="PPM Code" value={ppmGroupCode} />
           <PreviewField label="Linked Equipment" value={`${groupEquipment.length} item${groupEquipment.length === 1 ? "" : "s"}`} />
           <PreviewField label="Asset" value={ppm.assetTag} />
@@ -6282,7 +6288,7 @@ function PmPreviewModal({
                         <td className="px-3 py-2">{item.departmentCode || item.assetDetails?.departmentCode || "-"}</td>
                         <td className="px-3 py-2">{formatDateCell(item.nextDue)}</td>
                         <td className="px-3 py-2 text-right">1</td>
-                        <td className="px-3 py-2">{item.periodUom || ppm.periodUom || item.frequency || ppm.frequency || "-"}</td>
+                        <td className="px-3 py-2">{ppmPeriodUomValue(item) || ppmPeriodUomValue(ppm) || item.frequency || ppm.frequency || "-"}</td>
                         <td className="px-3 py-2">{item.active ? "Yes" : "No"}</td>
                         <td className="px-3 py-2">Scheduled</td>
                       </tr>
