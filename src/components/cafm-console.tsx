@@ -5673,7 +5673,7 @@ function Ppm({
     acc[key] = [...(acc[key] ?? []), ppm];
     return acc;
   }, {});
-  const ppmExcelColumns: ExcelColumn[] = [["ppmCode", "PPM Code"], ["name", "Title"], ["active", "Status"], ["frequency", "Frequency"], ["nextDue", "Next Due"], ["priority", "Priority"], ["departmentCode", "Department"], ["assetTag", "Asset"], ["locationCode", "Location"]];
+  const ppmExcelColumns: ExcelColumn[] = [["ppmCode", "PPM Code"], ["name", "Title"], ["active", "Status"], ["frequency", "Frequency"], ["periodUom", "Period UOM"], ["nextDue", "Next Due"], ["priority", "Priority"], ["departmentCode", "Department"], ["assetTag", "Asset"], ["locationCode", "Location"]];
   const [ppmExcelFilters, setPpmExcelFilters] = useState<ExcelFilterConfig>({});
   const [ppmExcelSort, setPpmExcelSort] = useState<ExcelSort>(null);
   const filteredPpmRows = useMemo(() => applyExcelTableFilters(ppmRowsSource, ppmExcelColumns, ppmExcelFilters, ppmExcelSort, (ppm, key) => {
@@ -5864,7 +5864,7 @@ function Ppm({
               {ppmLoading && <span className="text-lagoon">Loading PPM plans...</span>}
             </div>
             <div ref={ppmScrollRef} onScroll={handlePpmScroll} className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
-              <table className="cafm-data-table min-w-[1400px] border-collapse bg-white text-sm">
+              <table className="cafm-data-table min-w-[1500px] border-collapse bg-white text-sm">
                 <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
                   <tr>
                     {isAdmin && (
@@ -5914,6 +5914,7 @@ function Ppm({
                       <td className="px-3 py-3"><p className="font-black">{ppm.name}</p><p className="text-xs font-bold text-slate-500">Record: {ppm.code}</p></td>
                       <td className="px-3 py-3"><span className={`rounded-full border px-2 py-1 text-xs font-black ${ppm.active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>{ppm.active ? "Planned" : "Paused"}</span></td>
                       <td className="px-3 py-3">{ppm.frequency}</td>
+                      <td className="px-3 py-3">{ppm.periodUom || "-"}</td>
                       <td className="px-3 py-3">{formatDateCell(ppm.nextDue)}</td>
                       <td className="px-3 py-3"><RequestPriorityBadge priority={ppm.priority || "MEDIUM"} /></td>
                       <td className="px-3 py-3">{ppm.departmentCode || asset?.departmentCode || "-"}</td>
