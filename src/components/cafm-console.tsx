@@ -9955,6 +9955,9 @@ function HousingOperations({
   const [selected, setSelected] = useState<{ type: string; record: any } | null>(null);
   const [createHousingForm, setCreateHousingForm] = useState<"booking" | "hold" | "inspection" | "asset" | "inventory" | null>(null);
   const [swapBooking, setSwapBooking] = useState<any | null>(null);
+  const [checkoutBooking, setCheckoutBooking] = useState<any | null>(null);
+  const [bulkCheckoutBookings, setBulkCheckoutBookings] = useState<any[]>([]);
+  const [housingNotice, setHousingNotice] = useState("");
   const [runningAlerts, setRunningAlerts] = useState(false);
   const rooms = housing?.rooms ?? [];
   const bookings = housing?.bookings ?? [];
@@ -10129,6 +10132,14 @@ function HousingOperations({
     if (remarks === null) return;
     updateHousing("approval", approval.id, { action, remarks, status: action });
   };
+  const checkoutNow = async (booking: any, notes = "Checked out by housing operations") => {
+    await updateHousing("booking", booking.id, { status: "CHECKED_OUT", checkOut: new Date().toISOString(), notes });
+    setHousingNotice(`${booking.bookingNo || booking.residentName || "Booking"} checked out. The room can be checked in again today if needed.`);
+  };
+  const checkInAgainToday = async (booking: any) => {
+    await updateHousing("booking", booking.id, { status: "CHECKED_IN", checkIn: new Date().toISOString(), keyHandoverBy: "Reception Team", keyHandoverAt: new Date().toISOString(), notes: "Same-day check-in after checkout" });
+    setHousingNotice(`${booking.bookingNo || booking.residentName || "Booking"} checked in again for today.`);
+  };
   const runAlertChecks = async () => {
     setRunningAlerts(true);
     await fetch("/api/housing/alerts", { method: "POST" });
@@ -10277,7 +10288,7 @@ function HousingOperations({
             {canManage && (
               <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
                 <button type="button" onClick={() => visibleBookings.filter((booking) => booking.status === "APPROVED").forEach((booking) => updateHousing("booking", booking.id, { status: "CHECKED_IN", notes: "Bulk check-in completed" }))} className="rounded-lg bg-lagoon px-4 py-2 text-xs font-black text-white">Bulk Check-in Approved</button>
-                <button type="button" onClick={() => visibleBookings.filter((booking) => booking.status === "CHECKED_IN").forEach((booking) => updateHousing("booking", booking.id, { status: "CHECKED_OUT", checkOut: new Date().toISOString(), notes: "Bulk check-out completed" }))} className="rounded-lg bg-ink px-4 py-2 text-xs font-black text-white">Bulk Check-out Active</button>
+                <button type="button" onClick={() => setBulkCheckoutBookings(visibleBookings.filter((booking) => booking.status === "CHECKED_IN"))} className="rounded-lg bg-ink px-4 py-2 text-xs font-black text-white">Bulk Check-out Active</button>
                 <button type="button" onClick={() => visibleBookings.filter((booking) => booking.status === "PENDING_APPROVAL").forEach((booking) => updateHousing("booking", booking.id, { status: "NO_SHOW", noShowAt: new Date().toISOString(), notes: "Marked no-show in bulk review" }))} className="rounded-lg bg-amber-600 px-4 py-2 text-xs font-black text-white">Mark Pending No-show</button>
               </div>
             )}
@@ -10295,7 +10306,8 @@ function HousingOperations({
                   {canApprove && currentApprovalFor(record) && <button type="button" onClick={(event) => { event.stopPropagation(); approvalAction(currentApprovalFor(record), "RETURNED"); }} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white">Return</button>}
                   {canReceptionAllocate && record.status === "APPROVED" && <button type="button" onClick={(event) => { event.stopPropagation(); updateHousing("booking", record.id, { status: "CHECKED_IN", keyHandoverBy: "Reception Team", keyHandoverAt: new Date().toISOString() }); }} className="rounded-lg bg-lagoon px-3 py-2 text-xs font-black text-white">Allocate</button>}
                   {["APPROVED", "CHECKED_IN", "PENDING_APPROVAL"].includes(record.status) && <button type="button" onClick={(event) => { event.stopPropagation(); setSwapBooking(record); }} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-black text-white">Swap Room</button>}
-                  <button type="button" onClick={(event) => { event.stopPropagation(); updateHousing("booking", record.id, { status: "CHECKED_OUT", checkOut: new Date().toISOString() }); }} className="rounded-lg bg-ink px-3 py-2 text-xs font-black text-white">Check-out</button>
+                  {record.status !== "CHECKED_OUT" && <button type="button" onClick={(event) => { event.stopPropagation(); setCheckoutBooking(record); }} className="rounded-lg bg-ink px-3 py-2 text-xs font-black text-white">Check-out</button>}
+                  {record.status === "CHECKED_OUT" && String(record.checkOut || "").slice(0, 10) === todayKey && <button type="button" onClick={(event) => { event.stopPropagation(); checkInAgainToday(record); }} className="rounded-lg bg-leaf px-3 py-2 text-xs font-black text-white">Check-in Today</button>}
                   <button type="button" onClick={(event) => { event.stopPropagation(); updateHousing("booking", record.id, { status: "CANCELLED", cancellationReason: "Cancelled by housing admin" }); }} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white">Cancel</button>
                 </div>
               )}
@@ -10458,8 +10470,39 @@ function HousingOperations({
             onSubmit={async (body) => {
               await updateHousing("booking", swapBooking.id, body);
               setSwapBooking(null);
+              setHousingNotice("Room swapped successfully. The new room is checked in and the previous room has been released.");
             }}
           />
+        </RequestModalShell>
+      )}
+      {checkoutBooking && (
+        <RequestModalShell title={`Confirm Check-out - ${checkoutBooking.bookingNo || checkoutBooking.residentName}`} onClose={() => setCheckoutBooking(null)}>
+          <div className="grid gap-4 rounded-lg border border-white/80 bg-white p-5 shadow-lift">
+            <p className="text-sm font-bold text-slate-600">Confirm checkout for this booking. The current room and bed will be released for same-day check-in after confirmation.</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <PreviewField label="Booking" value={checkoutBooking.bookingNo} />
+              <PreviewField label="Guest" value={checkoutBooking.residentName} />
+              <PreviewField label="Room" value={[checkoutBooking.buildingNumber, checkoutBooking.floorNumber, checkoutBooking.roomNumber, checkoutBooking.bedNumber].filter(Boolean).join(" / ") || "Unassigned"} />
+              <PreviewField label="Status" value={checkoutBooking.status} />
+            </div>
+            <button type="button" disabled={saving} onClick={async () => { await checkoutNow(checkoutBooking); setCheckoutBooking(null); }} className="h-11 rounded-lg bg-ink font-black text-white disabled:bg-slate-300">Confirm Check-out</button>
+          </div>
+        </RequestModalShell>
+      )}
+      {bulkCheckoutBookings.length > 0 && (
+        <RequestModalShell title="Confirm Bulk Check-out" onClose={() => setBulkCheckoutBookings([])}>
+          <div className="grid gap-4 rounded-lg border border-white/80 bg-white p-5 shadow-lift">
+            <p className="text-sm font-bold text-slate-600">Confirm checkout for {bulkCheckoutBookings.length.toLocaleString()} checked-in booking(s). Their rooms and beds will be released after processing.</p>
+            <button type="button" disabled={saving} onClick={async () => { await Promise.all(bulkCheckoutBookings.map((booking) => checkoutNow(booking, "Bulk check-out completed"))); setBulkCheckoutBookings([]); }} className="h-11 rounded-lg bg-ink font-black text-white disabled:bg-slate-300">Confirm Bulk Check-out</button>
+          </div>
+        </RequestModalShell>
+      )}
+      {housingNotice && (
+        <RequestModalShell title="Housing Update Complete" onClose={() => setHousingNotice("")}>
+          <div className="grid gap-4 rounded-lg border border-white/80 bg-white p-5 shadow-lift">
+            <p className="text-sm font-bold text-slate-700">{housingNotice}</p>
+            <button type="button" onClick={() => setHousingNotice("")} className="h-11 rounded-lg bg-lagoon font-black text-white">OK</button>
+          </div>
         </RequestModalShell>
       )}
       {createHousingForm && (
@@ -11015,7 +11058,12 @@ function HousingRoomSwapForm({ booking, rooms, beds, holds, saving, onSubmit }: 
   const activeHeldRoomIds = new Set(holds.filter((hold) => hold.status === "ACTIVE" && String(hold.startDate || "").slice(0, 10) <= todayKey && String(hold.endDate || "").slice(0, 10) >= todayKey).map((hold) => hold.roomId));
   const [roomId, setRoomId] = useState("");
   const [bedId, setBedId] = useState("");
-  const destinationRooms = useMemo(() => rooms.filter((room) => room.id && room.id !== booking.roomId && !["BLOCKED", "MAINTENANCE"].includes(room.status) && !activeHeldRoomIds.has(room.id)), [rooms, booking.roomId, activeHeldRoomIds]);
+  const destinationRooms = useMemo(() => rooms.filter((room) => {
+    const status = String(room.status || "").toUpperCase();
+    const occupancy = Number(room.occupancy || 0);
+    const capacity = Number(room.capacity || 0);
+    return room.id && room.id !== booking.roomId && status === "AVAILABLE" && occupancy === 0 && capacity > 0 && !activeHeldRoomIds.has(room.id);
+  }), [rooms, booking.roomId, activeHeldRoomIds]);
   const selectedRoom = destinationRooms.find((room) => room.id === roomId);
   const destinationBeds = beds.filter((bed) => bed.roomId === roomId && bed.status === "AVAILABLE");
 
@@ -11028,7 +11076,9 @@ function HousingRoomSwapForm({ booking, rooms, beds, holds, saving, onSubmit }: 
     await onSubmit({
       roomId,
       bedId: bedId || undefined,
-      status: booking.status,
+      status: "CHECKED_IN",
+      checkIn: String(formData.get("swapDate") || new Date().toISOString()),
+      keyHandoverAt: String(formData.get("swapDate") || new Date().toISOString()),
       buildingNumber: selectedRoom.block?.name || selectedRoom.property?.name || booking.buildingNumber || "",
       floorNumber: selectedRoom.floor || "",
       roomNumber: selectedRoom.roomNumber || selectedRoom.code || "",
@@ -11050,7 +11100,7 @@ function HousingRoomSwapForm({ booking, rooms, beds, holds, saving, onSubmit }: 
         <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
           Destination room
           <select required value={roomId} onChange={(event) => { setRoomId(event.target.value); setBedId(""); }} className={HOUSING_FIELD_CLASS}>
-            <option value="">Select available destination room ({destinationRooms.length.toLocaleString()} rooms)</option>
+            <option value="">Select vacant destination room ({destinationRooms.length.toLocaleString()} rooms)</option>
             {destinationRooms.map((room) => <option key={room.id} value={room.id}>{housingRoomLabel(room)}</option>)}
           </select>
         </label>

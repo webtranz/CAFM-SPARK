@@ -71,16 +71,20 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     if (!current) throw new Error("Booking not found.");
     if (status === "CHECKED_IN") {
       const role = String(user?.role || "").toLowerCase();
+      const requestedRoomId = text(input.roomId);
+      const isRoomSwap = Boolean(requestedRoomId && requestedRoomId !== current.roomId);
+      const isSameDayRecheckIn = current.status === "CHECKED_OUT" && current.checkOut && current.checkOut.toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10);
       if (!role.includes("reception") && role !== "admin") throw new Error("Only Reception Team can execute final room allocation.");
-      if (current.status !== "APPROVED") throw new Error("Room allocation can be executed only after Camp Manager final approval.");
+      if (current.status !== "APPROVED" && !isRoomSwap && !isSameDayRecheckIn) throw new Error("Room allocation can be executed only after Camp Manager final approval.");
+      if (!input.keyHandoverAt) input.keyHandoverAt = new Date().toISOString();
     }
     const effectiveStatus = status || current.status;
     const nextRoomId = text(input.roomId) || current.roomId;
     const roomChanged = nextRoomId !== current.roomId;
     const nextRoom = roomChanged ? await prisma.housingRoom.findUnique({ where: { id: nextRoomId } }) : current.room;
     if (!nextRoom) throw new Error("Selected room does not exist.");
-    const nextCheckIn = input.checkIn ? new Date(String(input.checkIn)) : current.checkIn;
-    const nextCheckOut = input.checkOut ? new Date(String(input.checkOut)) : current.checkOut || nextCheckIn;
+    const nextCheckIn = status === "CHECKED_IN" && !input.checkIn ? new Date() : input.checkIn ? new Date(String(input.checkIn)) : current.checkIn;
+    const nextCheckOut = status === "CHECKED_OUT" ? input.checkOut ? new Date(String(input.checkOut)) : new Date() : input.checkOut ? new Date(String(input.checkOut)) : current.checkOut || nextCheckIn;
     if (["CHECKED_IN", "APPROVED", "PENDING_APPROVAL"].includes(effectiveStatus) && ["BLOCKED", "MAINTENANCE"].includes(nextRoom.status)) {
       throw new Error("Blocked or under-maintenance rooms cannot be allocated.");
     }
@@ -103,8 +107,8 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
         approvedBy: text(input.approvedBy) || undefined,
         notes: text(input.notes) || undefined,
         attachmentUrls: text(input.attachmentUrls) || undefined,
-        checkIn: input.checkIn ? nextCheckIn : undefined,
-        checkOut: input.checkOut ? nextCheckOut : undefined,
+        checkIn: status === "CHECKED_IN" || input.checkIn ? nextCheckIn : undefined,
+        checkOut: status === "CHECKED_IN" ? null : status === "CHECKED_OUT" || input.checkOut ? nextCheckOut : undefined,
         employeeId: text(input.employeeId) || undefined,
         companyName: text(input.companyName) || undefined,
         nationality: text(input.nationality) || undefined,
