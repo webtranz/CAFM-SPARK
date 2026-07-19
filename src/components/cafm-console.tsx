@@ -332,6 +332,7 @@ async function processBulkDeleteBatches<T>(items: T[], batchSize: number, action
   }
 }
 const HOUSING_FIELD_CLASS = "h-11 rounded-lg border border-slate-200 bg-white px-3 outline-none focus:border-lagoon";
+const HOUSING_NATIONALITIES = ["Saudi Arabian", "Indian", "Pakistani", "Bangladeshi", "Nepali", "Filipino", "Egyptian", "Jordanian", "Sudanese", "Sri Lankan", "Indonesian", "Turkish", "Syrian", "Yemeni", "Other"];
 const FACILITY_FIELD_CLASS = "h-11 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 outline-none focus:border-lagoon";
 const RESOURCE_EMPLOYEE_FIELD_CLASS = "h-11 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 outline-none focus:border-lagoon";
 const TICKET_PLAN_FIELD_CLASS = "h-11 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 outline-none focus:border-lagoon";
@@ -10101,13 +10102,13 @@ function HousingOperations({
         booking.checkOut ? { ...booking, guestId, movement: "Check-Out", movementDate: booking.checkOut, roomNumber: booking.roomNumber || booking.room?.roomNumber, roomType: booking.room?.roomType || booking.roomType } : null,
       ].filter(Boolean) as any[];
     })
-    .filter((booking) => String(booking.movementDate || "").slice(0, 10) === movementDate)
+    .filter((booking) => String(booking.movementDate || "").slice(0, 10) <= movementDate)
     .filter((booking) => movementTab === "combined" || (movementTab === "checkins" ? booking.movement === "Check-In" : booking.movement === "Check-Out"))
     .filter((booking) => {
       const haystack = `${booking.guestId} ${booking.bookingNo} ${booking.residentName} ${booking.roomNumber} ${booking.room?.roomNumber} ${booking.room?.roomType} ${booking.status}`.toLowerCase();
       return !search || haystack.includes(filterText);
     })
-    .sort((left, right) => String(left.movementDate || "").localeCompare(String(right.movementDate || "")));
+    .sort((left, right) => String(right.movementDate || "").localeCompare(String(left.movementDate || "")));
   const visibleHistory = history.filter((item) => {
     const haystack = `${item.entity} ${item.action} ${item.actor} ${item.details}`.toLowerCase();
     return !search || haystack.includes(filterText);
@@ -10326,7 +10327,7 @@ function HousingOperations({
                 <button type="button" onClick={() => setMovementTab("checkouts")} className={`rounded-lg px-3 py-2 text-xs font-black ${movementTab === "checkouts" ? "bg-lagoon text-white" : "text-slate-600"}`}>Check-Outs</button>
                 <button type="button" onClick={() => setMovementTab("combined")} className={`rounded-lg px-3 py-2 text-xs font-black ${movementTab === "combined" ? "bg-lagoon text-white" : "text-slate-600"}`}>Combined</button>
               </div>
-              <span className="rounded-lg bg-slate-50 px-3 py-2 text-xs font-black text-slate-600">{movementRows.length.toLocaleString()} records</span>
+              <span className="rounded-lg bg-slate-50 px-3 py-2 text-xs font-black text-slate-600">{movementRows.length.toLocaleString()} records through selected date</span>
             </div>
             <HousingTable
               title="Scheduled Guest Movements"
@@ -10334,6 +10335,7 @@ function HousingOperations({
               columns={[["movement", "Type"], ["guestId", "Guest ID"], ["residentName", "Guest Name"], ["departmentCode", "Department"], ["bookingNo", "Booking / Reservation"], ["roomNumber", "Room Number"], ["roomType", "Room Type"], ["checkIn", "Check-In Date"], ["checkOut", "Check-Out Date"], ["status", "Booking Status"]]}
               onSelect={(record) => setSelected({ type: "booking", record })}
               reportType="housing-check-movements"
+              pageSize={50}
             />
           </Panel>
         </section>
@@ -10595,13 +10597,14 @@ function HousingSummaryTable({ title, rows }: { title: string; rows: Array<{ met
   );
 }
 
-function HousingTable({ title, rows, columns, onSelect, actions, reportType, bulkSelectable = false, onBulkDelete }: { title: string; rows: any[]; columns: [string, string][]; onSelect?: (record: any) => void; actions?: (record: any) => any; reportType: string; bulkSelectable?: boolean; onBulkDelete?: (rows: any[]) => Promise<void> | void }) {
-  const [visibleLimit, setVisibleLimit] = useState(PAGE_SIZE);
+function HousingTable({ title, rows, columns, onSelect, actions, reportType, bulkSelectable = false, onBulkDelete, pageSize = PAGE_SIZE }: { title: string; rows: any[]; columns: [string, string][]; onSelect?: (record: any) => void; actions?: (record: any) => any; reportType: string; bulkSelectable?: boolean; onBulkDelete?: (rows: any[]) => Promise<void> | void; pageSize?: number }) {
+  const [visibleLimit, setVisibleLimit] = useState(pageSize);
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
   const [excelFilters, setExcelFilters] = useState<ExcelFilterConfig>({});
   const [excelSort, setExcelSort] = useState<ExcelSort>(null);
   const filteredRows = useMemo(() => applyExcelTableFilters(rows, columns, excelFilters, excelSort), [rows, columns, excelFilters, excelSort]);
+  useEffect(() => setVisibleLimit(pageSize), [rows, reportType, pageSize]);
   const visibleRows = filteredRows.slice(0, visibleLimit);
   const hasMoreRows = visibleRows.length < filteredRows.length;
   const selectedVisibleRows = visibleRows.filter((row) => selectedRowIds.has(row.id));
@@ -10676,7 +10679,7 @@ function HousingTable({ title, rows, columns, onSelect, actions, reportType, bul
         onScroll={(event) => {
           const target = event.currentTarget;
           if (target.scrollTop + target.clientHeight >= target.scrollHeight - 160) {
-            setVisibleLimit((current) => Math.min(filteredRows.length, current + PAGE_SIZE));
+            setVisibleLimit((current) => Math.min(filteredRows.length, current + pageSize));
           }
         }}
       >
@@ -10729,7 +10732,7 @@ function HousingTable({ title, rows, columns, onSelect, actions, reportType, bul
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-600">
         <span>Showing {visibleRows.length.toLocaleString()} of {filteredRows.length.toLocaleString()} entries</span>
         <div className="flex flex-wrap gap-2">
-          <button type="button" disabled={!hasMoreRows} onClick={() => setVisibleLimit((current) => Math.min(filteredRows.length, current + PAGE_SIZE))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 disabled:opacity-50">Load More</button>
+          <button type="button" disabled={!hasMoreRows} onClick={() => setVisibleLimit((current) => Math.min(filteredRows.length, current + pageSize))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 disabled:opacity-50">Load More</button>
           <button type="button" disabled={!hasMoreRows} onClick={() => setVisibleLimit(filteredRows.length)} className="rounded-lg bg-lagoon px-3 py-2 text-white disabled:bg-slate-300">Load All</button>
         </div>
       </div>
@@ -11123,22 +11126,52 @@ function HousingBookingForm({ rooms, beds, residents, holds, saving, onSubmit }:
   const activeHeldRoomIds = new Set(holds.filter((hold) => hold.status === "ACTIVE" && String(hold.startDate || "").slice(0, 10) <= todayKey && String(hold.endDate || "").slice(0, 10) >= todayKey).map((hold) => hold.roomId));
   const allocatableRooms = rooms.filter((room) => !["BLOCKED", "MAINTENANCE"].includes(room.status) && !activeHeldRoomIds.has(room.id));
   const allocatableBeds = beds.filter((bed) => bed.status === "AVAILABLE");
+  const residentOptions = useMemo(() => residents.map((resident) => ({ value: resident.id, label: `${resident.residentNo || resident.employeeId || "-"} - ${resident.name || resident.residentName || "Unnamed"} - ${resident.companyName || resident.companyId || "Company"}` })), [residents]);
+  const [residentId, setResidentId] = useState("");
+  const [residentSearch, setResidentSearch] = useState("");
+  const [employeeId, setEmployeeId] = useState("");
+  const [employeeName, setEmployeeName] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [departmentCode, setDepartmentCode] = useState("");
+  const [nationality, setNationality] = useState("");
+  const [contactNumber, setContactNumber] = useState("");
+  const [gender, setGender] = useState("");
+  const selectResident = (option: SearchableOption) => {
+    const resident = residents.find((item) => item.id === option.value);
+    setResidentId(option.value);
+    setResidentSearch(option.label);
+    if (!resident) return;
+    setEmployeeId(resident.residentNo || resident.employeeId || "");
+    setEmployeeName(resident.name || resident.residentName || "");
+    setCompanyName(resident.companyName || resident.companyId || "");
+    setDepartmentCode(resident.departmentCode || "");
+    setNationality(resident.nationality || "");
+    setContactNumber(resident.phone || resident.contactNumber || "");
+    setGender(resident.gender || "");
+  };
   return (
     <HousingForm title="Accommodation & Booking Management" type="booking" saving={saving} onSubmit={onSubmit}>
-      <select name="residentId" className={HOUSING_FIELD_CLASS}>
-        <option value="">New employee / select existing</option>
-        {residents.map((resident) => <option key={resident.id} value={resident.id}>{resident.residentNo} - {resident.name} - {resident.companyName || resident.companyId || "Company"}</option>)}
-      </select>
+      <input type="hidden" name="residentId" value={residentId} />
+      <SearchableDropdownField
+        value={residentSearch}
+        options={residentOptions}
+        placeholder="New employee / search existing by employee ID or name"
+        onInput={(value) => { setResidentSearch(value); if (!value) setResidentId(""); }}
+        onSelect={selectResident}
+      />
       <div className="grid gap-3 md:grid-cols-2">
-        <input name="employeeId" placeholder="Employee ID" className={HOUSING_FIELD_CLASS} />
-        <input name="residentName" placeholder="Employee name" className={HOUSING_FIELD_CLASS} />
-        <input name="companyName" placeholder="Company name" className={HOUSING_FIELD_CLASS} />
-        <input name="departmentCode" placeholder="Department" className={HOUSING_FIELD_CLASS} />
-        <input name="nationality" placeholder="Nationality" className={HOUSING_FIELD_CLASS} />
-        <input name="contactNumber" placeholder="Contact number" className={HOUSING_FIELD_CLASS} />
+        <input name="employeeId" required value={employeeId} onChange={(event) => setEmployeeId(event.target.value)} placeholder="Employee ID *" className={HOUSING_FIELD_CLASS} />
+        <input name="residentName" required value={employeeName} onChange={(event) => setEmployeeName(event.target.value)} placeholder="Employee name *" className={HOUSING_FIELD_CLASS} />
+        <input name="companyName" value={companyName} onChange={(event) => setCompanyName(event.target.value)} placeholder="Company name" className={HOUSING_FIELD_CLASS} />
+        <input name="departmentCode" value={departmentCode} onChange={(event) => setDepartmentCode(event.target.value)} placeholder="Department" className={HOUSING_FIELD_CLASS} />
+        <select name="nationality" value={nationality} onChange={(event) => setNationality(event.target.value)} className={HOUSING_FIELD_CLASS}>
+          <option value="">Nationality</option>
+          {HOUSING_NATIONALITIES.map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+        <input name="contactNumber" value={contactNumber} onChange={(event) => setContactNumber(event.target.value)} placeholder="Contact number" className={HOUSING_FIELD_CLASS} />
       </div>
       <div className="grid gap-3 md:grid-cols-2">
-        <select name="gender" className={HOUSING_FIELD_CLASS}>
+        <select name="gender" value={gender} onChange={(event) => setGender(event.target.value)} className={HOUSING_FIELD_CLASS}>
           <option value="">Gender</option>
           <option>MALE</option>
           <option>FEMALE</option>

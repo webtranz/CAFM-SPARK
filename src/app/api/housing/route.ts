@@ -571,6 +571,10 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
     throw new Error("Blocked or under-maintenance rooms cannot be allocated.");
   }
   const resident = await resolveResident(input);
+  const employeeId = input.employeeId || input.residentNo || resident?.residentNo || "";
+  const employeeName = input.residentName || input.name || resident?.name || "";
+  if (!employeeId.trim()) throw new Error("Employee ID is required for accommodation bookings.");
+  if (!employeeName.trim()) throw new Error("Employee name is required for accommodation bookings.");
   if (resident?.status === "BLACKLISTED") {
     throw new Error("Blacklisted occupants cannot receive a new accommodation allocation.");
   }
@@ -605,9 +609,9 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
       data: {
         bookingNo,
         residentId: resident?.id || input.residentId,
-        residentName: input.residentName || input.name || resident?.name || "Resident",
+        residentName: employeeName,
         departmentCode: input.departmentCode || resident?.departmentCode || "",
-        employeeId: input.employeeId || input.residentNo || resident?.residentNo || "",
+        employeeId,
         companyName: input.companyName || resident?.companyName || input.companyId || "",
         nationality: input.nationality || resident?.nationality || "",
         contactNumber: input.contactNumber || input.phone || resident?.phone || "",
