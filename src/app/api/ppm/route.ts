@@ -26,6 +26,8 @@ function isInvalidChecklistValue(value: unknown) {
     normalized.includes("#value");
 }
 
+const workflowStatuses = ["DRAFT", "SCHEDULED", "ASSIGNED", "IN_PROGRESS", "ON_HOLD", "SUBMITTED", "REWORK", "COMPLETED", "CLOSED", "OVERDUE", "CANCELLED"] as const;
+
 const schema = z.object({
   code: z.string().optional(),
   ppmCode: z.string().optional(),
@@ -45,6 +47,12 @@ const schema = z.object({
   durationHrs: z.coerce.number().min(0.25).optional(),
   checklist: z.string().optional(),
   active: boolValue.optional(),
+  workflowStatus: z.enum(workflowStatuses).optional(),
+  assignedTeamCode: z.string().optional(),
+  technicianEmail: z.string().optional(),
+  supervisorEmail: z.string().optional(),
+  checklistMandatory: boolValue.optional(),
+  complianceNotes: z.string().optional(),
   applyToGroup: boolValue.optional(),
 });
 
@@ -93,6 +101,11 @@ export async function GET(request: Request) {
         durationHrs: item.durationHrs,
         nextDue: item.nextDue,
         active: item.active,
+        workflowStatus: item.workflowStatus,
+        assignedTeamCode: item.assignedTeamCode,
+        technicianEmail: item.technicianEmail,
+        supervisorEmail: item.supervisorEmail,
+        generatedWorkOrderId: item.generatedWorkOrderId,
         assetDetails: item.assetTag ? assetByTag.get(item.assetTag) || null : null,
         locationDetails: item.locationCode ? locationByCode.get(item.locationCode) || null : null,
       })),
@@ -103,11 +116,14 @@ export async function GET(request: Request) {
   const pageSizeInput = pageSizeParam === "all" ? Number.MAX_SAFE_INTEGER : Number(pageSizeParam);
   const page = Number.isFinite(pageInput) ? Math.max(1, Math.floor(pageInput)) : 1;
   const pageSize = pageSizeParam === "all" ? 20000 : Number.isFinite(pageSizeInput) ? Math.min(500, Math.max(25, Math.floor(pageSizeInput))) : 100;
+  const normalizedStatus = status.toUpperCase().replace(/[ -]/g, "_");
   const where: any = {
     ...(status === "Active" ? { active: true } : {}),
     ...(status === "Paused" ? { active: false } : {}),
+    ...(workflowStatuses.includes(normalizedStatus as any) ? { workflowStatus: normalizedStatus as any } : {}),
   };
   if (query) {
+    const workflowQuery = workflowStatuses.includes(query.toUpperCase().replace(/[ -]/g, "_") as any) ? query.toUpperCase().replace(/[ -]/g, "_") as any : null;
     where.OR = [
       { code: { contains: query, mode: "insensitive" } },
       { ppmCode: { contains: query, mode: "insensitive" } },
@@ -118,6 +134,7 @@ export async function GET(request: Request) {
       { departmentCode: { contains: query, mode: "insensitive" } },
       { frequency: { contains: query, mode: "insensitive" } },
       { periodUom: { contains: query, mode: "insensitive" } },
+      ...(workflowQuery ? [{ workflowStatus: { equals: workflowQuery } }] : []),
       { checklist: { contains: query, mode: "insensitive" } },
     ];
   }
@@ -177,7 +194,28 @@ export async function POST(request: Request) {
       checklist: input.checklist || "Checklist to be defined.",
       nextDue: input.nextDue ? new Date(input.nextDue) : addDays(new Date(), 7),
       active: input.active ?? true,
+      workflowStatus: input.workflowStatus || "DRAFT",
+      assignedTeamCode: input.assignedTeamCode || "",
+      technicianEmail: input.technicianEmail || "",
+      supervisorEmail: input.supervisorEmail || "",
+      checklistMandatory: input.checklistMandatory ?? true,
+      complianceNotes: input.complianceNotes || "",
     };
+    const duplicate = await prisma.preventiveMaintenance.findFirst({
+      where: {
+        code: { not: code },
+        assetTag: data.assetTag,
+        locationCode: data.locationCode,
+        frequency: data.frequency,
+        periodUom: data.periodUom,
+        name: data.name,
+        active: true,
+      },
+      select: { code: true },
+    });
+    if (duplicate) {
+      return NextResponse.json({ message: `Duplicate PPM schedule already exists: ${duplicate.code}` }, { status: 409 });
+    }
     const created = await prisma.preventiveMaintenance.upsert({
       where: { code },
       update: data,
@@ -218,6 +256,12 @@ export async function PATCH(request: Request) {
       durationHrs: input.durationHrs,
       checklist: input.checklist,
       active: input.active,
+      workflowStatus: input.workflowStatus,
+      assignedTeamCode: input.assignedTeamCode,
+      technicianEmail: input.technicianEmail,
+      supervisorEmail: input.supervisorEmail,
+      checklistMandatory: input.checklistMandatory,
+      complianceNotes: input.complianceNotes,
       nextDue: input.nextDue ? new Date(input.nextDue) : undefined,
     };
     const cleanData = Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));

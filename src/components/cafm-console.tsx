@@ -1251,7 +1251,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
               isAdmin={isAdmin}
             />
           )}
-          {canViewActive && active === "ppm" && <Ppm ppms={records.ppms} ppmsTotal={records.ppmsTotal} assets={records.assets} locations={records.locations} workOrders={records.workOrders} saving={saving} isAdmin={isAdmin} submitPpm={(formData) => postRecord("/api/ppm", formData, "PPM")} updatePpm={(body) => patchRecord("/api/ppm", body, "PPM updated.")} deletePpm={(id) => deleteRecord(`/api/ppm?id=${encodeURIComponent(id)}`, "PPM deleted.")} />}
+          {canViewActive && active === "ppm" && <Ppm ppms={records.ppms} ppmsTotal={records.ppmsTotal} assets={records.assets} locations={records.locations} workOrders={records.workOrders} teams={records.teams} users={records.users} saving={saving} isAdmin={isAdmin} submitPpm={(formData) => postRecord("/api/ppm", formData, "PPM")} updatePpm={(body) => patchRecord("/api/ppm", body, "PPM updated.")} deletePpm={(id) => deleteRecord(`/api/ppm?id=${encodeURIComponent(id)}`, "PPM deleted.")} />}
           {canViewActive && active === "inventory" && <Inventory inventory={records.inventory} saving={saving} isAdmin={isAdmin} submitInventory={(formData) => postRecord("/api/inventory", formData, "Inventory item")} deleteInventory={(id) => deleteRecord(`/api/inventory?id=${encodeURIComponent(id)}`, "Inventory item deleted.")} />}
           {canViewActive && active === "hse" && <Hse inspections={records.inspections} saving={saving} isAdmin={isAdmin} submitInspection={(formData) => postRecord("/api/inspections", formData, "Inspection")} deleteInspection={(id) => deleteRecord(`/api/inspections?id=${encodeURIComponent(id)}`, "Inspection deleted.")} />}
           {canViewActive && active === "compliance" && (
@@ -5652,6 +5652,8 @@ function Ppm({
   assets,
   locations,
   workOrders,
+  teams,
+  users,
   submitPpm,
   updatePpm,
   deletePpm,
@@ -5663,6 +5665,8 @@ function Ppm({
   assets: any[];
   locations: any[];
   workOrders: any[];
+  teams: any[];
+  users: any[];
   submitPpm: (formData: FormData) => void;
   updatePpm: (body: Record<string, unknown>) => Promise<void> | void;
   deletePpm: (id: string) => void;
@@ -5685,11 +5689,12 @@ function Ppm({
     acc[key] = [...(acc[key] ?? []), ppm];
     return acc;
   }, {});
-  const ppmExcelColumns: ExcelColumn[] = [["ppmCode", "PPM Code"], ["name", "Title"], ["active", "Status"], ["frequency", "Frequency"], ["periodUom", "Period UOM"], ["nextDue", "Next Due"], ["priority", "Priority"], ["departmentCode", "Department"], ["assetTag", "Asset"], ["locationCode", "Location"]];
+  const ppmExcelColumns: ExcelColumn[] = [["ppmCode", "PPM Code"], ["name", "Title"], ["workflowStatus", "Workflow"], ["active", "Status"], ["frequency", "Frequency"], ["periodUom", "Period UOM"], ["nextDue", "Next Due"], ["priority", "Priority"], ["departmentCode", "Department"], ["assetTag", "Asset"], ["locationCode", "Location"]];
   const [ppmExcelFilters, setPpmExcelFilters] = useState<ExcelFilterConfig>({});
   const [ppmExcelSort, setPpmExcelSort] = useState<ExcelSort>(null);
   const filteredPpmRows = useMemo(() => applyExcelTableFilters(ppmRowsSource, ppmExcelColumns, ppmExcelFilters, ppmExcelSort, (ppm, key) => {
     if (key === "ppmCode") return ppm.ppmCode || String(ppm.code || "").split("-")[0] || ppm.code;
+    if (key === "workflowStatus") return String(ppm.workflowStatus || "DRAFT").replaceAll("_", " ");
     if (key === "active") return ppm.active ? "Planned" : "Paused";
     if (key === "nextDue") return formatDateCell(ppm.nextDue);
     if (key === "periodUom") return ppmPeriodUomValue(ppm);
@@ -5699,6 +5704,12 @@ function Ppm({
   const selectedVisiblePpms = filteredPpmRows.filter((ppm) => selectedPpmIds.has(ppm.id));
   const allVisiblePpmsSelected = isAdmin && Boolean(filteredPpmRows.length) && selectedVisiblePpms.length === filteredPpmRows.length;
   const someVisiblePpmsSelected = isAdmin && selectedVisiblePpms.length > 0 && !allVisiblePpmsSelected;
+  const ppmCompliance = useMemo(() => {
+    const total = ppmRowsSource.length;
+    const closed = ppmRowsSource.filter((ppm) => ["COMPLETED", "CLOSED"].includes(String(ppm.workflowStatus || ""))).length;
+    const overdue = ppmRowsSource.filter((ppm) => new Date(ppm.nextDue).getTime() < Date.now() && !["COMPLETED", "CLOSED", "CANCELLED"].includes(String(ppm.workflowStatus || ""))).length;
+    return { total, closed, overdue, compliance: total ? Math.round((closed / total) * 100) : 0 };
+  }, [ppmRowsSource]);
 
   useEffect(() => {
     setPage(1);
@@ -5834,6 +5845,14 @@ function Ppm({
   return (
     <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,380px)]">
       <Panel title="Preventive Maintenance Planner" icon={CalendarCheck}>
+        <div className="mb-4 grid gap-3 md:grid-cols-4">
+          {[["Total PPM", ppmCompliance.total], ["Completed / Closed", ppmCompliance.closed], ["Overdue", ppmCompliance.overdue], ["Compliance", `${ppmCompliance.compliance}%`]].map(([label, value]) => (
+            <div key={String(label)} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs font-black uppercase text-slate-500">{label}</p>
+              <p className="mt-1 text-2xl font-black text-ink">{value}</p>
+            </div>
+          ))}
+        </div>
         <ReportButtons type="ppm" label="PPM report" />
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
           <div className="flex gap-2">
@@ -5918,6 +5937,7 @@ function Ppm({
                       <td className="px-3 py-3 font-black text-slate-500">{index + 1}</td>
                       <td className="px-3 py-3 font-black text-lagoon">{ppm.ppmCode || String(ppm.code || "").split("-")[0] || ppm.code}</td>
                       <td className="px-3 py-3"><p className="font-black">{ppm.name}</p><p className="text-xs font-bold text-slate-500">Record: {ppm.code}</p></td>
+                      <td className="px-3 py-3"><span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-black text-slate-700">{String(ppm.workflowStatus || "DRAFT").replaceAll("_", " ")}</span></td>
                       <td className="px-3 py-3"><span className={`rounded-full border px-2 py-1 text-xs font-black ${ppm.active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>{ppm.active ? "Planned" : "Paused"}</span></td>
                       <td className="px-3 py-3">{ppm.frequency}</td>
                       <td className="px-3 py-3">{ppmPeriodUomValue(ppm) || "-"}</td>
@@ -5961,13 +5981,15 @@ function Ppm({
           </div>
         )}
       </Panel>
-      <PpmCreateForm assets={assets} locations={locations} onSubmit={submitPpm} saving={saving} />
+      <PpmCreateForm assets={assets} locations={locations} teams={teams} users={users} onSubmit={submitPpm} saving={saving} />
       {previewPpm && (
         <PmPreviewModal
           ppm={previewPpm}
           asset={assets.find((asset) => asset.tag === previewPpm.assetTag)}
           location={locations.find((location) => location.code === previewPpm.locationCode)}
           locations={locations}
+          teams={teams}
+          users={users}
           workOrders={workOrders.filter((work) => work.asset?.tag === previewPpm.assetTag || work.assetTag === previewPpm.assetTag)}
           saving={saving}
           onClose={() => setPreviewPpm(null)}
@@ -5981,7 +6003,7 @@ function Ppm({
   );
 }
 
-function PpmCreateForm({ assets, locations, onSubmit, saving }: { assets: any[]; locations: any[]; onSubmit: (formData: FormData) => void; saving: boolean }) {
+function PpmCreateForm({ assets, locations, teams, users, onSubmit, saving }: { assets: any[]; locations: any[]; teams: any[]; users: any[]; onSubmit: (formData: FormData) => void; saving: boolean }) {
   const [ppmCodeValue, setPpmCodeValue] = useState("");
   const [selectedAssetTag, setSelectedAssetTag] = useState("");
   const [customLocationCode, setCustomLocationCode] = useState("");
@@ -6086,6 +6108,8 @@ function PmPreviewModal({
   location,
   locations,
   workOrders,
+  teams,
+  users,
   saving,
   onClose,
   onUpdate,
@@ -6095,6 +6119,8 @@ function PmPreviewModal({
   location?: any;
   locations: any[];
   workOrders: any[];
+  teams: any[];
+  users: any[];
   saving: boolean;
   onClose: () => void;
   onUpdate: (body: Record<string, unknown>) => Promise<void> | void;
@@ -6139,6 +6165,18 @@ function PmPreviewModal({
   const [tab, setTab] = useState<"comments" | "history">("history");
   const [quickForm, setQuickForm] = useState<"" | "procedure" | "part">("");
   const [quickValue, setQuickValue] = useState("");
+  const [workflowPpm, setWorkflowPpm] = useState<any | null>(null);
+  const [workflowWorkOrder, setWorkflowWorkOrder] = useState<any | null>(null);
+  const [workflowBusy, setWorkflowBusy] = useState<string | null>(null);
+  const [workflowError, setWorkflowError] = useState("");
+  const [checklistCompleted, setChecklistCompleted] = useState(false);
+  const [workflowRemarks, setWorkflowRemarks] = useState("");
+  const [workflowReadings, setWorkflowReadings] = useState("");
+  const [workflowPhotos, setWorkflowPhotos] = useState("");
+  const [workflowLabor, setWorkflowLabor] = useState("");
+  const [workflowMaterials, setWorkflowMaterials] = useState("");
+  const [workflowDefect, setWorkflowDefect] = useState("");
+  const workflowRecord = workflowPpm || ppm;
   const priority = ppm.priority || (ppm.durationHrs >= 8 ? "CRITICAL" : ppm.durationHrs >= 4 ? "HIGH" : "MEDIUM");
   const historyData = workOrders.slice(0, 8).map((work) => ({
     name: String(formatDateCell(work.createdAt)).slice(0, 10),
@@ -6188,6 +6226,41 @@ function PmPreviewModal({
     setQuickForm("");
   }
 
+  async function runPpmWorkflow(action: string) {
+    setWorkflowBusy(action);
+    setWorkflowError("");
+    try {
+      const response = await fetch("/api/ppm/workflow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ppmId: workflowRecord.id,
+          action,
+          assignedTeamCode: workflowRecord.assignedTeamCode || "",
+          technicianEmail: workflowRecord.technicianEmail || "",
+          supervisorEmail: workflowRecord.supervisorEmail || "",
+          checklistCompleted,
+          remarks: workflowRemarks,
+          readings: workflowReadings,
+          photoUrls: workflowPhotos,
+          labor: workflowLabor,
+          materials: workflowMaterials,
+          defectDescription: workflowDefect,
+          supervisorDecision: workflowRemarks,
+          rejectionReason: workflowRemarks,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || "PPM workflow action failed.");
+      if (result.ppm) setWorkflowPpm(result.ppm);
+      if (result.workOrder) setWorkflowWorkOrder(result.workOrder);
+      if (result.corrective) setWorkflowError(`Corrective work order created: ${result.corrective.woNo}`);
+    } catch (error: any) {
+      setWorkflowError(error?.message || "PPM workflow action failed.");
+    } finally {
+      setWorkflowBusy(null);
+    }
+  }
   async function deletePpmChecklistItem(indexToDelete: number) {
     const nextItems = checklist.filter((_, index) => index !== indexToDelete);
     await savePpmChecklist(nextItems);
@@ -6225,7 +6298,45 @@ function PmPreviewModal({
           <PreviewField label="Category" value={asset?.assetGroup || asset?.category} />
           <PreviewField label="Location" value={location?.description || asset?.locationDesc || [asset?.buildingCode, asset?.floor, asset?.room].filter(Boolean).join(" / ")} />
         </div>
-        {customLocationAllowed && (
+        <div className="rounded-lg border border-lagoon/20 bg-white p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h4 className="font-black">PPM Workflow</h4>
+              <p className="mt-1 text-xs font-bold text-slate-500">Draft ? Scheduled ? Assigned ? In Progress ? Submitted ? Completed ? Closed</p>
+            </div>
+            <span className="rounded-full bg-lagoon/10 px-3 py-1 text-xs font-black text-lagoon">{String(workflowRecord.workflowStatus || "DRAFT").replaceAll("_", " ")}</span>
+          </div>
+          {workflowError && <p className={`mt-3 rounded-lg p-3 text-sm font-black ${workflowError.includes("created") ? "bg-emerald-50 text-emerald-700" : "bg-coral/10 text-coral"}`}>{workflowError}</p>}
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <select value={workflowRecord.assignedTeamCode || ""} onChange={(event) => setWorkflowPpm((current: any) => ({ ...(current || workflowRecord), assignedTeamCode: event.target.value }))} className={TICKET_PLAN_FIELD_CLASS}>
+              <option value="">Team</option>
+              {teams.map((team) => <option key={team.id ?? team.code} value={team.code}>{team.code} - {team.name}</option>)}
+            </select>
+            <select value={workflowRecord.technicianEmail || ""} onChange={(event) => setWorkflowPpm((current: any) => ({ ...(current || workflowRecord), technicianEmail: event.target.value }))} className={TICKET_PLAN_FIELD_CLASS}>
+              <option value="">Technician</option>
+              {users.filter((item) => String(item.role || "").toLowerCase().includes("technician") || String(item.role || "").toLowerCase().includes("service team")).map((item) => <option key={item.id ?? item.email} value={item.email}>{item.name} - {item.email}</option>)}
+            </select>
+            <select value={workflowRecord.supervisorEmail || ""} onChange={(event) => setWorkflowPpm((current: any) => ({ ...(current || workflowRecord), supervisorEmail: event.target.value }))} className={TICKET_PLAN_FIELD_CLASS}>
+              <option value="">Supervisor</option>
+              {users.filter((item) => String(item.role || "").toLowerCase().includes("supervisor") || String(item.role || "").toLowerCase().includes("manager") || String(item.role || "").toLowerCase().includes("admin")).map((item) => <option key={item.id ?? item.email} value={item.email}>{item.name} - {item.email}</option>)}
+            </select>
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <textarea value={workflowReadings} onChange={(event) => setWorkflowReadings(event.target.value)} placeholder="Readings" className={`${TICKET_PLAN_TEXTAREA_CLASS} min-h-20`} />
+            <textarea value={workflowRemarks} onChange={(event) => setWorkflowRemarks(event.target.value)} placeholder="Remarks / supervisor decision / rework reason" className={`${TICKET_PLAN_TEXTAREA_CLASS} min-h-20`} />
+            <textarea value={workflowPhotos} onChange={(event) => setWorkflowPhotos(event.target.value)} placeholder="Photo URLs" className={`${TICKET_PLAN_TEXTAREA_CLASS} min-h-20`} />
+            <textarea value={workflowLabor} onChange={(event) => setWorkflowLabor(event.target.value)} placeholder="Labor used" className={`${TICKET_PLAN_TEXTAREA_CLASS} min-h-20`} />
+            <textarea value={workflowMaterials} onChange={(event) => setWorkflowMaterials(event.target.value)} placeholder="Materials used" className={`${TICKET_PLAN_TEXTAREA_CLASS} min-h-20`} />
+            <textarea value={workflowDefect} onChange={(event) => setWorkflowDefect(event.target.value)} placeholder="Defect report for linked corrective work order" className={`${TICKET_PLAN_TEXTAREA_CLASS} min-h-20`} />
+          </div>
+          <label className="mt-3 flex items-center gap-2 text-sm font-black text-slate-700"><input type="checkbox" checked={checklistCompleted} onChange={(event) => setChecklistCompleted(event.target.checked)} /> Mandatory checklist completed</label>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {[["schedule", "Schedule"], ["generate", "Generate WO"], ["assign", "Assign"], ["accept", "Technician Accept"], ["start", "Start Work"], ["hold", "On Hold"], ["submit", "Submit Review"], ["approve", "Approve"], ["rework", "Return Rework"], ["close", "Close"], ["cancel", "Cancel"], ["defect", "Create Corrective WO"]].map(([action, label]) => (
+              <button key={action} type="button" disabled={Boolean(workflowBusy)} onClick={() => runPpmWorkflow(action)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 hover:border-lagoon hover:text-lagoon disabled:bg-slate-100 disabled:text-slate-400">{workflowBusy === action ? "Working..." : label}</button>
+            ))}
+          </div>
+          {(workflowWorkOrder || workflowRecord.generatedWorkOrderId) && <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-600">Linked PPM Work Order: {workflowWorkOrder?.woNo || workflowRecord.generatedWorkOrderId}</p>}
+        </div>        {customLocationAllowed && (
           <div className="rounded-lg border border-lagoon/20 bg-lagoon/5 p-4">
             <div className="flex flex-wrap items-end gap-3">
               <label className="grid min-w-[260px] flex-1 gap-1 text-xs font-black uppercase text-slate-500">
@@ -8878,7 +8989,7 @@ function Templates() {
     ["workOrders", "Work Orders", "woNo,title,type,assetType,departmentCode,serviceCode,assignedTeamCode,jobPlanCode,priority,status,assetTag,plannedStart,dueAt,finishedAt,resolutionAt,dateTimeCreated,estimatedHours,actualHours,cost,jobPlan,safetyNotes,workNotes,materialRequest,photoUrls,assetsUsed,inventoryUsed,supervisorDecision,sourceYear,sourceWorkOrder,sourceServiceRequest,sourceEquipmentLocation,sourceLocation,matchSource"],
     ["workOrderComments", "Work Order Comments", "woNo,commentText,commentedAt,commentedBy,sourceYear,sourceLine,sourceUserCode"],
     ["commentHistory", "Comment History", "woNo,commentText,commentedAt,commentedBy,sourceYear,sourceFile,sourceRow,sourceLine,sourceUserCode,sourceUpdateUserCode,add_entity,add_type,add_lang,add_print,add_updated,add_updatecount,uploadKey"],
-    ["ppm", "PPM Schedule", "code,ppmCode,uniqueCode,name,assetTag,locationCode,equipmentDescription,objectType,objectClass,objectCategory,frequency,periodUom,nextDue,durationHrs,departmentCode,priority,criticalityDescription,workType,nestingCode,activityCode,checklistLink,checklist,checklistItemCount,active"],
+    ["ppm", "PPM Schedule", "code,ppmCode,uniqueCode,name,assetTag,locationCode,equipmentDescription,objectType,objectClass,objectCategory,frequency,periodUom,nextDue,durationHrs,departmentCode,priority,assignedTeamCode,technicianEmail,supervisorEmail,workflowStatus,criticalityDescription,workType,nestingCode,activityCode,checklistLink,checklist,checklistItemCount,active"],
     ["ppmChecklistHistory", "PPM Checklist History", "SOURCE_YEAR,SOURCE_FILE,LINK_STATUS,SYSTEM_WORK_ORDER_MATCH,SYSTEM_ASSET_MATCH,SYSTEM_PPM_MATCH,UPLOAD_KEY,ACK_EVENT,EVT_CREATED,EVT_DESC,ACK_OBJECT,ACK_TYPE,ACK_CODE,ACK_ACT,ACK_SEQUENCE,ACK_DESC,ACK_NOTES,ACK_UPDATED,ACK_UPDATEDBY,ACK_UPDATECOUNT,ACK_OBJECT_ORG,ACK_YES,ACK_NO,ACK_FINDING,ACK_VALUE,ACK_UOM,ACK_FOLLOWUP,ACK_FOLLOWUPEVENT,ACK_LASTSAVED"],
     ["omManuals", "O&M Manual Index", "category,assetTag,sourcePath,fileName,manualCode,manualTitle,matchField,assetClass,assetCategory,assetPrimarySystem,department"],
     ["jobPlans", "Job Plans", "code,name,assetType,departmentCode,serviceCode,estimatedHours,priority,steps,safetyNotes"],

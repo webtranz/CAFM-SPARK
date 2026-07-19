@@ -32,6 +32,20 @@ enum WorkStatus {
   CLOSED
 }
 
+enum PpmWorkflowStatus {
+  DRAFT
+  SCHEDULED
+  ASSIGNED
+  IN_PROGRESS
+  ON_HOLD
+  SUBMITTED
+  REWORK
+  COMPLETED
+  CLOSED
+  OVERDUE
+  CANCELLED
+}
+
 enum AssetStatus {
   ACTIVE
   STANDBY
@@ -470,6 +484,8 @@ model WorkOrder {
   assignedTo         User?            @relation(fields: [assignedToId], references: [id])
   inventoryIssues    InventoryIssue[]
   ppmChecklistHistory PpmChecklistHistory[]
+  ppmPlan         PreventiveMaintenance? @relation(fields: [ppmId], references: [id], onDelete: SetNull)
+  ppmId           String?
   commentHistory     CommentHistory[]
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
@@ -478,6 +494,7 @@ model WorkOrder {
   @@index([departmentCode, dueAt])
   @@index([assignedTeamCode, dueAt])
   @@index([assignedToId, dueAt])
+  @@index([ppmId])
 }
 
 model Location {
@@ -539,10 +556,23 @@ model PreventiveMaintenance {
   durationHrs          Decimal  @db.Decimal(6, 2)
   checklist            String
   active               Boolean  @default(true)
+  workflowStatus       PpmWorkflowStatus @default(DRAFT)
+  assignedTeamCode     String   @default("")
+  technicianEmail      String   @default("")
+  supervisorEmail      String   @default("")
+  generatedWorkOrderId String   @default("")
+  lastGeneratedAt      DateTime?
+  lastCompletedAt      DateTime?
+  checklistMandatory   Boolean  @default(true)
+  complianceNotes      String   @default("")
+  escalationLevel      Int      @default(0)
+  workOrders           WorkOrder[]
   checklistHistory     PpmChecklistHistory[]
 
   @@index([assetTag, locationCode, frequency, name], map: "ppm_plans_asset_location_frequency_name_idx")
   @@index([ppmCode])
+  @@index([workflowStatus, nextDue])
+  @@index([assignedTeamCode, technicianEmail, supervisorEmail])
 }
 
 model PpmChecklistHistory {

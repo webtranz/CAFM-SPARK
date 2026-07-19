@@ -1469,9 +1469,21 @@ async function importPpm(row: Row, context: ImportContext = {}) {
   const code = value(row, "uniqueCode") || uniquePpmCode(baseCode, targetKey);
   const existing = await prisma.preventiveMaintenance.findUnique({ where: { code } });
   const periodUom = value(row, "periodUom", "PERIOD UOM", "Period UOM", "period", "PERIOD") || "";
+  const workflowStatus = value(row, "workflowStatus", "WORKFLOW STATUS", "PPM STATUS").toUpperCase().replace(/[ -]/g, "_");
+  const workflowStatusValue = ["DRAFT", "SCHEDULED", "ASSIGNED", "IN_PROGRESS", "ON_HOLD", "SUBMITTED", "REWORK", "COMPLETED", "CLOSED", "OVERDUE", "CANCELLED"].includes(workflowStatus) ? workflowStatus : undefined;
+  const assignedTeamCode = value(row, "assignedTeamCode", "TEAM", "TEAM CODE", "ASSIGNED TEAM");
+  const technicianEmail = value(row, "technicianEmail", "TECHNICIAN", "TECHNICIAN EMAIL");
+  const supervisorEmail = value(row, "supervisorEmail", "SUPERVISOR", "SUPERVISOR EMAIL");
   if (existing && !shouldReplace(context) && !canUseCustomLocation) {
-    if (periodUom && existing.periodUom !== periodUom) {
-      const updated = await prisma.preventiveMaintenance.update({ where: { code }, data: { periodUom } });
+    const existingUpdate = Object.fromEntries(Object.entries({
+      periodUom: periodUom && existing.periodUom !== periodUom ? periodUom : undefined,
+      workflowStatus: workflowStatusValue as any,
+      assignedTeamCode: assignedTeamCode || undefined,
+      technicianEmail: technicianEmail || undefined,
+      supervisorEmail: supervisorEmail || undefined,
+    }).filter(([, next]) => next !== undefined));
+    if (Object.keys(existingUpdate).length) {
+      const updated = await prisma.preventiveMaintenance.update({ where: { code }, data: existingUpdate });
       return importResult("preventive_maintenance", "UPDATE", updated, code, updated.name);
     }
     return existingResult("preventive_maintenance", existing, code, existing.name);
@@ -1496,6 +1508,11 @@ async function importPpm(row: Row, context: ImportContext = {}) {
     durationHrs: number(value(row, "durationHrs", "duration", "PPA_DURATION"), 2),
     checklist: ppmChecklistValue(row),
     active: activeValue ? yesNo(activeValue, true) : true,
+    workflowStatus: (workflowStatusValue || "DRAFT") as any,
+    assignedTeamCode,
+    technicianEmail,
+    supervisorEmail,
+    checklistMandatory: true,
   };
   const ppm = await prisma.preventiveMaintenance.upsert({
     where: { code },
