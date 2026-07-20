@@ -62,7 +62,8 @@ export async function getOperatingData(user: OperatingUser = null) {
     const kind = accessRole(user);
     const roleName = String(user?.role ?? "").toLowerCase();
     const isManagerRole = roleName.includes("facility manager") || roleName.includes("maintenance manager");
-    const departmentsForUser = departmentValues(user);
+  const departmentsForUser = departmentValues(user);
+  const isGenericSupervisor = roleName === "supervisor" && (!departmentsForUser.length || departmentsForUser.some((department) => ["general", "all", "fbc"].includes(String(department).trim().toLowerCase())));
     const teamCode = user?.team?.code;
     const supervisorWorkConditions = [
       departmentsForUser.length ? { departmentCode: { in: departmentsForUser } } : null,
@@ -86,7 +87,7 @@ export async function getOperatingData(user: OperatingUser = null) {
         ? { OR: [{ assignedTeamCode: teamCode || "" }, { assignedSupervisorEmail: user?.email || "" }] }
         : { requester: user?.name || user?.email || "" };
     const visibleWorkWhere =
-      kind === "admin" || kind === "readonly" || isManagerRole
+      kind === "admin" || kind === "readonly" || isManagerRole || isGenericSupervisor
         ? {}
         : kind === "supervisor"
         ? supervisorWorkConditions.length
@@ -204,6 +205,7 @@ export async function getOperatingData(user: OperatingUser = null) {
     return { ...fallbackData, live: false };
   }
 }
+
 
 
 

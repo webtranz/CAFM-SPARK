@@ -21,8 +21,9 @@ function visibleWorkWhere(user: DashboardUser) {
   const roleName = String(user?.role ?? "").toLowerCase();
   const isManagerRole = roleName.includes("facility manager") || roleName.includes("maintenance manager");
   const departmentsForUser = departmentValues(user);
+  const isGenericSupervisor = roleName === "supervisor" && (!departmentsForUser.length || departmentsForUser.some((department) => ["general", "all", "fbc"].includes(String(department).trim().toLowerCase())));
   const teamCode = user?.team?.code;
-  if (role === "admin" || role === "readonly" || isManagerRole) return {};
+  if (role === "admin" || role === "readonly" || isManagerRole || isGenericSupervisor) return {};
   if (role === "supervisor") {
     const conditions = [
       departmentsForUser.length ? { departmentCode: { in: departmentsForUser } } : null,
@@ -49,6 +50,7 @@ export async function GET() {
     const [
       requests,
       workOrders,
+      workOrdersTotal,
       assets,
       inventory,
       inspections,
@@ -73,6 +75,7 @@ export async function GET() {
     ] = await Promise.all([
       prisma.serviceRequest.findMany({ where: { OR: [{ createdAt: { gte: since } }, { updatedAt: { gte: since } }, { dueAt: { gte: since, lte: now } }] }, orderBy: { updatedAt: "desc" }, take: DASHBOARD_LIMIT }),
       prisma.workOrder.findMany({ where: { AND: [workScope, { OR: [{ createdAt: { gte: since } }, { updatedAt: { gte: since } }, { dueAt: { gte: since, lte: now } }, { plannedStart: { gte: since, lte: now } }] }] }, orderBy: { updatedAt: "desc" }, take: DASHBOARD_LIMIT }),
+      prisma.workOrder.count({ where: workScope }),
       prisma.asset.findMany({ orderBy: { tag: "asc" }, take: DASHBOARD_LIMIT }),
       prisma.inventoryItem.findMany({ orderBy: { sku: "asc" }, take: DASHBOARD_LIMIT }),
       prisma.inspection.findMany({ where: { dueAt: { gte: since, lte: now } }, orderBy: { dueAt: "desc" }, take: DASHBOARD_LIMIT }),
@@ -101,6 +104,7 @@ export async function GET() {
       live: true,
       requests,
       workOrders,
+      workOrdersTotal,
       assets,
       inventory,
       inspections,
@@ -130,6 +134,9 @@ export async function GET() {
     return NextResponse.json({ ...emptyOperatingData, live: false }, { status: 200 });
   }
 }
+
+
+
 
 
 

@@ -45,8 +45,9 @@ function visibleWorkWhere(user: Awaited<ReturnType<typeof getCurrentUser>>) {
   const roleName = String(user?.role ?? "").toLowerCase();
   const isManagerRole = roleName.includes("facility manager") || roleName.includes("maintenance manager");
   const departmentsForUser = departmentValues(user);
+  const isGenericSupervisor = roleName === "supervisor" && (!departmentsForUser.length || departmentsForUser.some((department) => ["general", "all", "fbc"].includes(String(department).trim().toLowerCase())));
   const teamCode = user?.team?.code;
-  if (role === "admin" || role === "readonly" || isManagerRole) return {};
+  if (role === "admin" || role === "readonly" || isManagerRole || isGenericSupervisor) return {};
   if (role === "supervisor") {
     const conditions = [
       departmentsForUser.length ? { departmentCode: { in: departmentsForUser } } : null,
@@ -208,5 +209,6 @@ export async function POST(request: Request) {
     );
   }
 }
+
 
 
