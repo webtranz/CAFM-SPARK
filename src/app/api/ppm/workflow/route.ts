@@ -15,6 +15,7 @@ const schema = z.object({
   workflowStatus: z.enum(workflowStatuses).optional(),
   effectiveDate: z.string().optional(),
   dueMonth: z.string().optional(),
+  ppmIds: z.array(z.string()).optional(),
   assignedTeamCode: z.string().optional(),
   technicianEmail: z.string().optional(),
   supervisorEmail: z.string().optional(),
@@ -136,8 +137,17 @@ function rowIsInsidePlanningWindow(row: PpmRecord, input?: Pick<z.infer<typeof s
   return Number.isFinite(nextDueTime) && nextDueTime >= planningWindow.dateFilter.gte.getTime() && nextDueTime < planningWindow.dateFilter.lt.getTime();
 }
 
-async function loadPpmGroup(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth">) {
+async function loadPpmGroup(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth" | "ppmIds">) {
   const orderBy = [{ locationCode: "asc" as const }, { assetTag: "asc" as const }, { nextDue: "asc" as const }];
+  const selectedIds = Array.from(new Set((input?.ppmIds || []).filter(Boolean)));
+  if (selectedIds.length) {
+    return prisma.preventiveMaintenance.findMany({
+      where: { id: { in: selectedIds } },
+      orderBy,
+      take: 20000,
+    });
+  }
+
   const rows = await prisma.preventiveMaintenance.findMany({
     where: ppmGroupWhere(ppm, input),
     orderBy,
