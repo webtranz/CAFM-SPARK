@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api-response";
-import { accessRole, canManageDepartmentRecord } from "@/lib/access-control";
-import { requireAdmin } from "@/lib/api-auth";
+import { accessRole, canManageDepartmentRecord, scopeAllows } from "@/lib/access-control";
+import { requireAdmin, requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
-import { getCurrentUser } from "@/lib/auth";
+import { defaultPermissionScopeForRole, expandPermissionCode } from "@/lib/default-role-permissions";
 import { prisma } from "@/lib/prisma";
 
 const booleanInput = z.preprocess((value) => {
@@ -55,6 +55,14 @@ function parseParts(value?: string) {
     .filter((item) => item.sku);
 }
 
+async function workOrderPermissionScope(role: string | null | undefined, code: string) {
+  const roleName = role || "";
+  const assigned = await prisma.rolePermission.findFirst({
+    where: { role: roleName, permission: { code: { in: expandPermissionCode(code) } } },
+    select: { scope: true },
+  });
+  return assigned?.scope ?? defaultPermissionScopeForRole(roleName, code);
+}
 function partQuantities(value?: string) {
   return parseParts(value).reduce((acc, part) => {
     acc.set(part.sku, (acc.get(part.sku) ?? 0) + part.quantity);
@@ -68,18 +76,22 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const input = schema.parse(await request.json());
     const current = await prisma.workOrder.findUnique({ where: { id }, include: { asset: true } });
     if (!current) throw new Error("Work order not found");
-    const user = await getCurrentUser();
+    const priority = input.priority && ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(input.priority) ? input.priority as any : undefined;
+    const status = input.status && ["OPEN", "NEW", "TRIAGED", "APPROVED", "REJECTED", "PENDING_ASSIGNMENT", "ASSIGNED", "ACCEPTED", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "PENDING_SUPERVISOR_REVIEW", "VERIFIED", "REOPENED", "CLOSED"].includes(input.status) ? input.status as any : undefined;
+    const reviewStatus = status && ["CLOSED", "REOPENED", "VERIFIED"].includes(status);
+    const permissionCode = reviewStatus ? "workorders.approve" : "workorders.edit";
+    const { error: permissionError, user } = await requirePermission(permissionCode);
+    if (permissionError) return permissionError;
     const role = accessRole(user);
-    const isAssignedTechnician = role === "technician" && (current.assignedToId === user?.id || current.assignedTeamCode === user?.team?.code);
-    const isSupervisorOrAdmin = canManageDepartmentRecord(user, current.departmentCode);
-    if (!canManageDepartmentRecord(user, current.departmentCode) && !isAssignedTechnician) {
+    const isAssignedTechnician = role === "technician" && (current.assignedToId === user?.id || Boolean(current.assignedTeamCode && current.assignedTeamCode === user?.team?.code));
+    const reviewScope = reviewStatus ? await workOrderPermissionScope(user?.role, "workorders.approve") : null;
+    const isSupervisorOrAdmin = canManageDepartmentRecord(user, current.departmentCode) || Boolean(reviewStatus && scopeAllows(reviewScope, "Facility"));
+    if (!isSupervisorOrAdmin && !isAssignedTechnician) {
       return apiError(new Error("You do not have permission for this work order."), "Access denied", 403);
     }
     if (current.status === "CLOSED") {
       return apiError(new Error("Closed work orders are read-only."), "Closed work order is read-only", 403);
     }
-    const priority = input.priority && ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(input.priority) ? input.priority as any : undefined;
-    const status = input.status && ["OPEN", "NEW", "TRIAGED", "APPROVED", "REJECTED", "PENDING_ASSIGNMENT", "ASSIGNED", "ACCEPTED", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "PENDING_SUPERVISOR_REVIEW", "VERIFIED", "REOPENED", "CLOSED"].includes(input.status) ? input.status as any : undefined;
     const nextStatus = status === "COMPLETED" ? "PENDING_SUPERVISOR_REVIEW" as any : status;
     const [asset] = await Promise.all([
       input.assetTag ? prisma.asset.findUnique({ where: { tag: input.assetTag } }) : null,

@@ -5,25 +5,30 @@ export type AccessUser = {
   department?: string | null;
 };
 
+function comparable(value?: string | null) {
+  return String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
 export function accessRole(user: AccessUser | null) {
   const role = String(user?.role ?? "").toLowerCase();
   if (role === "admin" || role.includes("super admin")) return "admin";
-  if (role.includes("supervisor")) return "supervisor";
+  if (role.includes("supervisor") || role.includes("facility manager") || role.includes("maintenance manager")) return "supervisor";
   if (role.includes("technician") || role.includes("service team")) return "technician";
   if (role.includes("read") || role.includes("viewer") || role.includes("view only")) return "readonly";
   return "requester";
 }
 
 export function sameDepartment(user: AccessUser | null, departmentCode?: string | null) {
-  if (!departmentCode) return false;
-  return String(user?.department ?? "").toLowerCase() === String(departmentCode).toLowerCase();
+  const userDepartment = comparable(user?.department);
+  const recordDepartment = comparable(departmentCode);
+  if (!userDepartment || !recordDepartment) return false;
+  return userDepartment === recordDepartment || userDepartment.includes(recordDepartment) || recordDepartment.includes(userDepartment);
 }
 
 export function canManageDepartmentRecord(user: AccessUser | null, departmentCode?: string | null) {
   const role = accessRole(user);
-  return role === "admin" || (role === "supervisor" && sameDepartment(user, departmentCode));
+  return role === "admin" || (role === "supervisor" && (!departmentCode || sameDepartment(user, departmentCode)));
 }
-
 export function canExecuteAssignedRecord(user: AccessUser | null, assignedToId?: string | null) {
   const role = accessRole(user);
   return role === "admin" || role === "supervisor" || (role === "technician" && assignedToId === user?.id);
