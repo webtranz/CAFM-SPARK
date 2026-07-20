@@ -34,7 +34,6 @@ export async function getTotalEntryCounts() {
     prisma.location.count(),
     prisma.workOrder.count(),
     prisma.preventiveMaintenance.count(),
-    prisma.preventiveMaintenance.findMany({ select: { checklist: true } }),
     prisma.ppmChecklistHistory.count(),
     prisma.documentUpload.count({ where: { category: "OM_MANUAL" } }),
     prisma.serviceRequest.count({ where: { isIncidentCase: false } }),
@@ -204,3 +203,4 @@ export async function getOperatingData(user: OperatingUser = null) {
     return { ...fallbackData, live: false };
   }
 }
+

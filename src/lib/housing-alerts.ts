@@ -126,7 +126,7 @@ export async function runHousingAlertChecks(actor = "Housing Alert Scheduler") {
   const contractLikeBookings = await prisma.housingBooking.findMany({ where: { bookingType: { contains: "CONTRACT", mode: "insensitive" }, checkOut: { lt: now }, status: { notIn: ["CHECKED_OUT", "CANCELLED", "REJECTED"] as any } } });
   for (const booking of contractLikeBookings) await pushAlert("EXPIRED_CONTRACT", "Housing contract expired", `${booking.bookingNo} contract/long-stay allocation requires renewal review.`, "booking", booking.id, "HIGH", booking.id);
 
-  const complaints = await prisma.serviceRequest.findMany({ where: { OR: [{ category: { contains: "Housing", mode: "insensitive" } }, { departmentCode: "HOUSING" }], status: { notIn: ["CLOSED", "CANCELLED", "REJECTED"] as any } }, take: 100 });
+  const complaints = await prisma.serviceRequest.findMany({ where: { OR: [{ category: { contains: "Housing", mode: "insensitive" } }, { departmentCode: "HOUSING" }], status: { notIn: ["CLOSED", "REJECTED"] as any } }, take: 100 });
   for (const request of complaints) {
     await pushAlert("UNRESOLVED_COMPLAINT", "Unresolved housing complaint", `${request.ticketNo} / ${request.title} is still ${request.status}.`, "service-request", request.id, request.priority);
     if (request.dueAt < now) await pushAlert("DELAYED_TICKET_CLOSURE", "Delayed housing ticket closure", `${request.ticketNo} passed SLA due date ${request.dueAt.toISOString().slice(0, 10)}.`, "service-request", request.id, "HIGH");
@@ -155,3 +155,4 @@ function addDays(date: Date, days: number) {
 function startOfDay(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
+
