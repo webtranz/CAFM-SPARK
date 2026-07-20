@@ -6237,7 +6237,21 @@ function PmPreviewModal({
     created: 1,
     completed: ["CLOSED", "COMPLETED", "PENDING_SUPERVISOR_REVIEW"].includes(work.status) ? 1 : 0,
   }));
-
+  const workflowMessageIsSuccess = /created|generated|linked/i.test(workflowError);
+  const workflowActionButtons: Array<[string, string]> = [
+    ["schedule", "Schedule"],
+    ["generate", groupEquipment.length > 1 ? `Generate ${groupEquipment.length.toLocaleString()} WOs` : "Generate WO"],
+    ["assign", "Assign"],
+    ["accept", "Technician Accept"],
+    ["start", "Start Work"],
+    ["hold", "On Hold"],
+    ["submit", "Submit Review"],
+    ["approve", "Approve"],
+    ["rework", "Return Rework"],
+    ["close", "Close"],
+    ["cancel", "Cancel"],
+    ["defect", "Create Corrective WO"],
+  ];
   useEffect(() => {
     let mounted = true;
     setPpmGroup(null);
@@ -6307,6 +6321,20 @@ function PmPreviewModal({
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.message || "PPM workflow action failed.");
       if (result.ppm) setWorkflowPpm(result.ppm);
+      if (Array.isArray(result.generatedRows)) {
+        const generatedByPpmId = new Map(result.generatedRows.map((item: any) => [item.ppmId, item]));
+        setPpmGroup((current: any) => current ? {
+          ...current,
+          equipment: (current.equipment || []).map((item: any) => {
+            const generated: any = generatedByPpmId.get(item.id);
+            return generated ? { ...item, generatedWorkOrderId: generated.workOrderId, workflowStatus: result.ppm?.workflowStatus || item.workflowStatus } : item;
+          }),
+        } : current);
+        const total = Number(result.totalWorkOrders ?? result.generatedRows.length);
+        const created = Number(result.generatedCount ?? result.generatedRows.filter((item: any) => item.created).length);
+        const reused = Number(result.reusedCount ?? Math.max(0, total - created));
+        setWorkflowError(`Generated ${created.toLocaleString()} new PPM work orders and linked ${total.toLocaleString()} separate work orders for ${result.groupCode || ppmGroupCode}.${reused ? ` ${reused.toLocaleString()} already existed and were reused.` : ""}`);
+      }
       if (result.workOrder) setWorkflowWorkOrder(result.workOrder);
       if (result.corrective) setWorkflowError(`Corrective work order created: ${result.corrective.woNo}`);
     } catch (error: any) {
@@ -6360,7 +6388,7 @@ function PmPreviewModal({
             </div>
             <span className="rounded-full bg-lagoon/10 px-3 py-1 text-xs font-black text-lagoon">{String(workflowRecord.workflowStatus || "DRAFT").replaceAll("_", " ")}</span>
           </div>
-          {workflowError && <p className={`mt-3 rounded-lg p-3 text-sm font-black ${workflowError.includes("created") ? "bg-emerald-50 text-emerald-700" : "bg-coral/10 text-coral"}`}>{workflowError}</p>}
+          {workflowError && <p className={`mt-3 rounded-lg p-3 text-sm font-black ${workflowMessageIsSuccess ? "bg-emerald-50 text-emerald-700" : "bg-coral/10 text-coral"}`}>{workflowError}</p>}
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             <select value={workflowRecord.assignedTeamCode || ""} onChange={(event) => setWorkflowPpm((current: any) => ({ ...(current || workflowRecord), assignedTeamCode: event.target.value }))} className={TICKET_PLAN_FIELD_CLASS}>
               <option value="">Team</option>
@@ -6385,11 +6413,11 @@ function PmPreviewModal({
           </div>
           <label className="mt-3 flex items-center gap-2 text-sm font-black text-slate-700"><input type="checkbox" checked={checklistCompleted} onChange={(event) => setChecklistCompleted(event.target.checked)} /> Mandatory checklist completed</label>
           <div className="mt-4 flex flex-wrap gap-2">
-            {[["schedule", "Schedule"], ["generate", "Generate WO"], ["assign", "Assign"], ["accept", "Technician Accept"], ["start", "Start Work"], ["hold", "On Hold"], ["submit", "Submit Review"], ["approve", "Approve"], ["rework", "Return Rework"], ["close", "Close"], ["cancel", "Cancel"], ["defect", "Create Corrective WO"]].map(([action, label]) => (
+            {workflowActionButtons.map(([action, label]) => (
               <button key={action} type="button" disabled={Boolean(workflowBusy)} onClick={() => runPpmWorkflow(action)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 hover:border-lagoon hover:text-lagoon disabled:bg-slate-100 disabled:text-slate-400">{workflowBusy === action ? "Working..." : label}</button>
             ))}
           </div>
-          {(workflowWorkOrder || workflowRecord.generatedWorkOrderId) && <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-600">Linked PPM Work Order: {workflowWorkOrder?.woNo || workflowRecord.generatedWorkOrderId}</p>}
+          {(workflowWorkOrder || workflowRecord.generatedWorkOrderId) && <p className="mt-3 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-600">Linked PPM Work Order: {workflowWorkOrder?.woNo || workflowRecord.generatedWorkOrderId}{groupEquipment.length > 1 ? ` (selected row, ${groupEquipment.length.toLocaleString()} rows can have separate work orders)` : ""}</p>}
         </div>        {customLocationAllowed && (
           <div className="rounded-lg border border-lagoon/20 bg-lagoon/5 p-4">
             <div className="flex flex-wrap items-end gap-3">
