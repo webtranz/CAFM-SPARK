@@ -6163,7 +6163,39 @@ function ppmMonthInputValue(value: unknown) {
   if (Number.isNaN(date.getTime())) return "2026-01";
   return date.toISOString().slice(0, 7);
 }
+function ppmPeriodStartInputValue(value: unknown) {
+  const month = ppmMonthInputValue(value);
+  return `${month}-01`;
+}
 
+function ppmPeriodEndInputValue(value: unknown) {
+  const month = ppmMonthInputValue(value);
+  const [year, monthNumber] = month.split("-").map(Number);
+  return new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
+}
+
+function ppmFrequencyInterval(frequency: unknown, periodUom: unknown) {
+  const rawFrequency = String(frequency || "").trim();
+  const numeric = Number(rawFrequency.match(/\d+(?:\.\d+)?/)?.[0] || "");
+  const amount = Number.isFinite(numeric) && numeric > 0 ? Math.max(1, Math.floor(numeric)) : 1;
+  const label = `${frequency || ""} ${periodUom || ""}`.toLowerCase();
+  if (label.includes("daily") || label.includes(" day")) return { amount, unit: "day" };
+  if (label.includes("weekly") || label.includes(" week")) return { amount, unit: "week" };
+  if (label.includes("quarter")) return { amount: numeric > 0 ? amount : 3, unit: "month" };
+  if (label.includes("semi")) return { amount: numeric > 0 ? amount : 6, unit: "month" };
+  if (label.includes("annual") || label.includes("year")) return { amount, unit: "year" };
+  return { amount, unit: "month" };
+}
+
+function ppmNextOccurrenceDate(date: Date, frequency: unknown, periodUom: unknown) {
+  const interval = ppmFrequencyInterval(frequency, periodUom);
+  const next = new Date(date);
+  if (interval.unit === "day") next.setUTCDate(next.getUTCDate() + interval.amount);
+  else if (interval.unit === "week") next.setUTCDate(next.getUTCDate() + interval.amount * 7);
+  else if (interval.unit === "year") next.setUTCFullYear(next.getUTCFullYear() + interval.amount);
+  else next.setUTCMonth(next.getUTCMonth() + interval.amount);
+  return next;
+}
 function PmPreviewModal({
   ppm,
   asset,
@@ -6233,6 +6265,8 @@ function PmPreviewModal({
   const [workflowError, setWorkflowError] = useState("");
   const [workflowEffectiveDate, setWorkflowEffectiveDate] = useState(PPM_WORK_ORDER_EFFECTIVE_DATE);
   const [workflowDueMonth, setWorkflowDueMonth] = useState(ppmMonthInputValue(ppm.nextDue));
+  const [workflowPeriodStart, setWorkflowPeriodStart] = useState(ppmPeriodStartInputValue(ppm.nextDue));
+  const [workflowPeriodEnd, setWorkflowPeriodEnd] = useState(ppmPeriodEndInputValue(ppm.nextDue));
   const [workflowPreview, setWorkflowPreview] = useState<any | null>(null);
   const [workflowPreviewLoading, setWorkflowPreviewLoading] = useState(false);
   const [checklistCompleted, setChecklistCompleted] = useState(false);
@@ -6251,24 +6285,50 @@ function PmPreviewModal({
   }));
   const fallbackWorkflowPreview = useMemo(() => {
     const selectedMonth = workflowDueMonth || ppmMonthInputValue(workflowRecord.nextDue);
-    const dueRows = groupEquipment.filter((item: any) => ppmMonthInputValue(item.nextDue) === selectedMonth);
-    const rows = dueRows.map((item: any) => ({
-      ppmId: item.id,
-      ppmCode: ppmGroupCode,
-      code: item.code,
-      title: ppm.name,
-      assetTag: item.assetTag,
-      locationCode: item.locationCode,
-      departmentCode: item.departmentCode,
-      equipmentDescription: item.equipmentDescription,
-      nextDue: item.nextDue,
-      existingWorkOrderNo: "",
-      existingStatus: "",
-      willCreate: !item.generatedWorkOrderId,
-    }));
+    const rangeStart = new Date(`${workflowPeriodStart || ppmPeriodStartInputValue(workflowRecord.nextDue)}T00:00:00.000Z`);
+    const rangeEnd = new Date(`${workflowPeriodEnd || ppmPeriodEndInputValue(workflowRecord.nextDue)}T00:00:00.000Z`);
+    rangeEnd.setUTCDate(rangeEnd.getUTCDate() + 1);
+    const rows = groupEquipment.flatMap((item: any) => {
+      const itemRows: any[] = [];
+      let scheduledDate = new Date(item.nextDue);
+      let guard = 0;
+      while (scheduledDate < rangeStart && guard < 500) {
+        const next = ppmNextOccurrenceDate(scheduledDate, item.frequency, item.periodUom);
+        if (next.getTime() <= scheduledDate.getTime()) break;
+        scheduledDate = next;
+        guard += 1;
+      }
+      while (scheduledDate >= rangeStart && scheduledDate < rangeEnd && guard < 1000) {
+        const scheduledDateText = scheduledDate.toISOString().slice(0, 10);
+        itemRows.push({
+          ppmId: item.id,
+          ppmCode: ppmGroupCode,
+          code: item.code,
+          title: ppm.name,
+          assetTag: item.assetTag,
+          locationCode: item.locationCode,
+          departmentCode: item.departmentCode,
+          equipmentDescription: item.equipmentDescription,
+          frequency: item.frequency,
+          periodUom: item.periodUom,
+          nextDue: scheduledDate.toISOString(),
+          scheduledDate: scheduledDateText,
+          existingWorkOrderNo: "",
+          existingStatus: "",
+          willCreate: true,
+        });
+        const next = ppmNextOccurrenceDate(scheduledDate, item.frequency, item.periodUom);
+        if (next.getTime() <= scheduledDate.getTime()) break;
+        scheduledDate = next;
+        guard += 1;
+      }
+      return itemRows;
+    });
     return {
       groupCode: ppmGroupCode,
       dueMonth: selectedMonth,
+      periodStart: workflowPeriodStart,
+      periodEnd: workflowPeriodEnd,
       total: rows.length,
       createCount: rows.filter((row: any) => row.willCreate).length,
       reuseCount: rows.filter((row: any) => !row.willCreate).length,
@@ -6276,14 +6336,15 @@ function PmPreviewModal({
       limited: rows.length > 300,
       localFallback: true,
     };
-  }, [groupEquipment, ppm.name, ppmGroupCode, workflowDueMonth, workflowRecord.nextDue]);
+  }, [groupEquipment, ppm.name, ppmGroupCode, workflowDueMonth, workflowPeriodEnd, workflowPeriodStart, workflowRecord.nextDue]);
+  const previewPpmIds = useMemo(() => Array.from(new Set(fallbackWorkflowPreview.rows.map((row: any) => row.ppmId).filter(Boolean))), [fallbackWorkflowPreview.rows]);
   const displayWorkflowPreview = workflowPreview?.total ? workflowPreview : fallbackWorkflowPreview;
   const workflowMessageIsSuccess = /created|generated|linked|preview ready/i.test(workflowError);
   const canCreatePreviewedWorkOrders = Boolean(displayWorkflowPreview?.total);
   const previewRows = Array.isArray(displayWorkflowPreview?.rows) ? displayWorkflowPreview.rows : [];
   const workflowActionButtons: Array<[string, string]> = [
     ["schedule", "Schedule"],
-    ["preview", "Preview Month WOs"],
+    ["preview", "Preview Period WOs"],
     ["generate", canCreatePreviewedWorkOrders ? `Create ${Number(displayWorkflowPreview.createCount || 0).toLocaleString()} New WOs` : "Create Previewed WOs"],
     ["assign", "Assign"],
     ["accept", "Technician Accept"],
@@ -6312,7 +6373,9 @@ function PmPreviewModal({
           action: "preview",
           effectiveDate: workflowEffectiveDate || PPM_WORK_ORDER_EFFECTIVE_DATE,
           dueMonth: workflowDueMonth || ppmMonthInputValue(workflowRecord.nextDue),
-          ppmIds: fallbackWorkflowPreview.rows.map((row: any) => row.ppmId).filter(Boolean),
+          periodStart: workflowPeriodStart || ppmPeriodStartInputValue(workflowRecord.nextDue),
+          periodEnd: workflowPeriodEnd || ppmPeriodEndInputValue(workflowRecord.nextDue),
+          ppmIds: previewPpmIds,
           assignedTeamCode: workflowRecord.assignedTeamCode || "",
           technicianEmail: workflowRecord.technicianEmail || "",
           supervisorEmail: workflowRecord.supervisorEmail || "",
@@ -6322,7 +6385,7 @@ function PmPreviewModal({
       if (!response.ok) throw new Error(result.message || "Unable to load PPM work order preview.");
       setWorkflowPreview(result.preview || null);
       if (!silent && result.preview) {
-        setWorkflowError(`Preview ready: ${Number(result.preview.total || 0).toLocaleString()} total work orders for ${result.preview.dueMonth}, ${Number(result.preview.createCount || 0).toLocaleString()} new and ${Number(result.preview.reuseCount || 0).toLocaleString()} already linked.`);
+        setWorkflowError(`Preview ready: ${Number(result.preview.total || 0).toLocaleString()} total work orders for ${result.preview.periodStart || workflowPeriodStart} to ${result.preview.periodEnd || workflowPeriodEnd}, ${Number(result.preview.createCount || 0).toLocaleString()} new and ${Number(result.preview.reuseCount || 0).toLocaleString()} already linked.`);
       }
       if (!silent && !result.preview) setWorkflowError("No PPM work orders are due for the selected month.");
     } catch (error: any) {
@@ -6332,7 +6395,7 @@ function PmPreviewModal({
       setWorkflowPreviewLoading(false);
       if (!silent) setWorkflowBusy(null);
     }
-  }, [workflowEffectiveDate, workflowDueMonth, workflowRecord.id, workflowRecord.nextDue, workflowRecord.assignedTeamCode, workflowRecord.technicianEmail, workflowRecord.supervisorEmail]);
+  }, [workflowEffectiveDate, workflowDueMonth, workflowPeriodStart, workflowPeriodEnd, previewPpmIds, workflowRecord.id, workflowRecord.nextDue, workflowRecord.assignedTeamCode, workflowRecord.technicianEmail, workflowRecord.supervisorEmail]);
   useEffect(() => {
     let mounted = true;
     setPpmGroup(null);
@@ -6340,6 +6403,8 @@ function PmPreviewModal({
     setEditableLocationCode(ppm.locationCode || asset?.locationCode || "");
     setWorkflowEffectiveDate(PPM_WORK_ORDER_EFFECTIVE_DATE);
     setWorkflowDueMonth(ppmMonthInputValue(ppm.nextDue));
+    setWorkflowPeriodStart(ppmPeriodStartInputValue(ppm.nextDue));
+    setWorkflowPeriodEnd(ppmPeriodEndInputValue(ppm.nextDue));
     setWorkflowPreview(null);
     if (!ppmGroupCode) return () => { mounted = false; };
     fetch(`/api/ppm?groupCode=${encodeURIComponent(ppmGroupCode)}`)
@@ -6391,7 +6456,7 @@ function PmPreviewModal({
       return;
     }
     if (action === "generate" && !canCreatePreviewedWorkOrders) {
-      setWorkflowError("No due PPM equipment is available for the selected month to create work orders.");
+      setWorkflowError("No due PPM equipment is available for the selected period to create work orders.");
       return;
     }
     setWorkflowBusy(action);
@@ -6405,7 +6470,9 @@ function PmPreviewModal({
           action,
           effectiveDate: workflowEffectiveDate || PPM_WORK_ORDER_EFFECTIVE_DATE,
           dueMonth: workflowDueMonth || ppmMonthInputValue(workflowRecord.nextDue),
-          ppmIds: fallbackWorkflowPreview.rows.map((row: any) => row.ppmId).filter(Boolean),
+          periodStart: workflowPeriodStart || ppmPeriodStartInputValue(workflowRecord.nextDue),
+          periodEnd: workflowPeriodEnd || ppmPeriodEndInputValue(workflowRecord.nextDue),
+          ppmIds: previewPpmIds,
           assignedTeamCode: workflowRecord.assignedTeamCode || "",
           technicianEmail: workflowRecord.technicianEmail || "",
           supervisorEmail: workflowRecord.supervisorEmail || "",
@@ -6426,7 +6493,7 @@ function PmPreviewModal({
       if (result.preview) {
         setWorkflowPreview(result.preview);
         if (action === "preview") {
-          setWorkflowError(`Preview ready: ${Number(result.preview.total || 0).toLocaleString()} total work orders for ${result.preview.dueMonth}, ${Number(result.preview.createCount || 0).toLocaleString()} new and ${Number(result.preview.reuseCount || 0).toLocaleString()} already linked.`);
+          setWorkflowError(`Preview ready: ${Number(result.preview.total || 0).toLocaleString()} total work orders for ${result.preview.periodStart || workflowPeriodStart} to ${result.preview.periodEnd || workflowPeriodEnd}, ${Number(result.preview.createCount || 0).toLocaleString()} new and ${Number(result.preview.reuseCount || 0).toLocaleString()} already linked.`);
         }
       }
       if (Array.isArray(result.generatedRows)) {
@@ -6441,7 +6508,7 @@ function PmPreviewModal({
         const total = Number(result.totalWorkOrders ?? result.generatedRows.length);
         const created = Number(result.generatedCount ?? result.generatedRows.filter((item: any) => item.created).length);
         const reused = Number(result.reusedCount ?? Math.max(0, total - created));
-        setWorkflowError(`Generated ${created.toLocaleString()} new PPM work orders and linked ${total.toLocaleString()} separate work orders for ${result.groupCode || ppmGroupCode} in ${result.dueMonth || workflowDueMonth}.${reused ? ` ${reused.toLocaleString()} already existed and were reused.` : ""}`);
+        setWorkflowError(`Generated ${created.toLocaleString()} new PPM work orders and linked ${total.toLocaleString()} separate work orders for ${result.groupCode || ppmGroupCode} for ${result.periodStart || workflowPeriodStart} to ${result.periodEnd || workflowPeriodEnd}.${reused ? ` ${reused.toLocaleString()} already existed and were reused.` : ""}`);
       }
       if (result.workOrder) setWorkflowWorkOrder(result.workOrder);
       if (result.corrective) setWorkflowError(`Corrective work order created: ${result.corrective.woNo}`);
@@ -6496,22 +6563,30 @@ function PmPreviewModal({
             <span className="rounded-full bg-lagoon/10 px-3 py-1 text-xs font-black text-lagoon">{String(workflowRecord.workflowStatus || "DRAFT").replaceAll("_", " ")}</span>
           </div>
           {workflowError && <p className={`mt-3 rounded-lg p-3 text-sm font-black ${workflowMessageIsSuccess ? "bg-emerald-50 text-emerald-700" : "bg-coral/10 text-coral"}`}>{workflowError}</p>}
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
             <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
               Due Month
-              <input type="month" value={workflowDueMonth} onChange={(event) => { setWorkflowDueMonth(event.target.value); setWorkflowPreview(null); }} className={`${TICKET_PLAN_FIELD_CLASS} normal-case`} />
+              <input type="month" value={workflowDueMonth} onChange={(event) => { const value = event.target.value; setWorkflowDueMonth(value); setWorkflowPeriodStart(value ? `${value}-01` : ppmPeriodStartInputValue(workflowRecord.nextDue)); setWorkflowPeriodEnd(value ? ppmPeriodEndInputValue(`${value}-01`) : ppmPeriodEndInputValue(workflowRecord.nextDue)); setWorkflowPreview(null); }} className={`${TICKET_PLAN_FIELD_CLASS} normal-case`} />
+            </label>
+            <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+              Period Start
+              <input type="date" value={workflowPeriodStart} onChange={(event) => { setWorkflowPeriodStart(event.target.value); setWorkflowPreview(null); }} className={`${TICKET_PLAN_FIELD_CLASS} normal-case`} />
+            </label>
+            <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+              Period End
+              <input type="date" value={workflowPeriodEnd} onChange={(event) => { setWorkflowPeriodEnd(event.target.value); setWorkflowPreview(null); }} className={`${TICKET_PLAN_FIELD_CLASS} normal-case`} />
             </label>
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
               <p className="text-xs font-black uppercase text-slate-500">Total Work Orders Preview</p>
               <p className="mt-1 text-2xl font-black text-ink">{workflowPreviewLoading && !displayWorkflowPreview?.total ? "Loading..." : Number(displayWorkflowPreview?.total || 0).toLocaleString()}</p>
-              <p className="text-xs font-bold text-slate-500">Preview refreshes automatically for the selected due month.</p>
+              <p className="text-xs font-bold text-slate-500">Uses Perform Every and Period UOM inside the selected period.</p>
             </div>
           </div>
           <div className="mt-4 rounded-lg border border-lagoon/20 bg-lagoon/5 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-black uppercase text-slate-500">Work Order Generation Preview</p>
-                <h5 className="mt-1 font-black text-ink">{displayWorkflowPreview?.groupCode || ppmGroupCode} / {displayWorkflowPreview?.dueMonth || workflowDueMonth || "Selected month"}</h5>
+                <h5 className="mt-1 font-black text-ink">{displayWorkflowPreview?.groupCode || ppmGroupCode} / {displayWorkflowPreview?.periodStart || workflowPeriodStart} to {displayWorkflowPreview?.periodEnd || workflowPeriodEnd}</h5>
               </div>
               <div className="flex flex-wrap gap-2 text-xs font-black">
                 <span className="rounded-full bg-white px-3 py-1 text-lagoon">Total {workflowPreviewLoading && !displayWorkflowPreview?.total ? "Loading..." : Number(displayWorkflowPreview?.total || 0).toLocaleString()}</span>
@@ -6522,11 +6597,11 @@ function PmPreviewModal({
             <div className="mt-3 max-h-72 overflow-auto rounded-lg border border-white/70 bg-white">
               <table className="w-full min-w-[900px] text-left text-xs">
                 <thead className="sticky top-0 bg-slate-700 text-white">
-                  <tr><th className="px-3 py-2">#</th><th className="px-3 py-2">PPM Row</th><th className="px-3 py-2">Asset / Location</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Due Date</th><th className="px-3 py-2">Action</th></tr>
+                  <tr><th className="px-3 py-2">#</th><th className="px-3 py-2">PPM Row</th><th className="px-3 py-2">Asset / Location</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Perform Every</th><th className="px-3 py-2">Due Date</th><th className="px-3 py-2">Action</th></tr>
                 </thead>
                 <tbody>
                   {workflowPreviewLoading ? (
-                    <tr><td colSpan={6} className="px-3 py-6 text-center font-black text-slate-500">Loading PPM work order preview...</td></tr>
+                    <tr><td colSpan={7} className="px-3 py-6 text-center font-black text-slate-500">Loading PPM work order preview...</td></tr>
                   ) : previewRows.length ? (
                     previewRows.map((row: any, index: number) => (
                       <tr key={row.ppmId || row.code || index} className="border-t border-slate-100">
@@ -6534,17 +6609,18 @@ function PmPreviewModal({
                         <td className="px-3 py-2 font-bold">{row.code}</td>
                         <td className="px-3 py-2"><p className="font-black text-lagoon">{row.assetTag || row.locationCode || "-"}</p><p className="text-slate-500">{row.equipmentDescription || "-"}</p></td>
                         <td className="px-3 py-2">{row.departmentCode || "-"}</td>
-                        <td className="px-3 py-2">{formatDateCell(row.nextDue)}</td>
+                        <td className="px-3 py-2">{[row.frequency, row.periodUom].filter(Boolean).join(" ") || "-"}</td>
+                        <td className="px-3 py-2">{formatDateCell(row.scheduledDate || row.nextDue)}</td>
                         <td className="px-3 py-2"><span className={`rounded-full px-2 py-1 font-black ${row.willCreate ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{row.willCreate ? "Create WO" : `Linked ${row.existingWorkOrderNo || row.workOrderNo || "WO"}`}</span></td>
                       </tr>
                     ))
                   ) : (
-                    <tr><td colSpan={6} className="px-3 py-6 text-center font-black text-slate-500">No PPM work orders are due for this PPM code and selected month.</td></tr>
+                    <tr><td colSpan={7} className="px-3 py-6 text-center font-black text-slate-500">No PPM work orders are due for this PPM code and selected period.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
-            {displayWorkflowPreview?.localFallback && <p className="mt-2 text-xs font-bold text-amber-700">Preview is using the loaded equipment list for this selected due month.</p>}
+            {displayWorkflowPreview?.localFallback && <p className="mt-2 text-xs font-bold text-amber-700">Preview is using the loaded equipment list and frequency rules for this selected period.</p>}
             {displayWorkflowPreview?.limited && <p className="mt-2 text-xs font-bold text-slate-500">Preview shows first 300 rows only. Total count above will be used for creation.</p>}
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
@@ -12812,6 +12888,8 @@ function actionFieldLabel(field: string) {
   };
   return labels[field] || field.replace(/([A-Z])/g, " $1");
 }
+
+
 
 
 

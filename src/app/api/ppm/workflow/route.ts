@@ -15,6 +15,8 @@ const schema = z.object({
   workflowStatus: z.enum(workflowStatuses).optional(),
   effectiveDate: z.string().optional(),
   dueMonth: z.string().optional(),
+  periodStart: z.string().optional(),
+  periodEnd: z.string().optional(),
   ppmIds: z.array(z.string()).optional(),
   assignedTeamCode: z.string().optional(),
   technicianEmail: z.string().optional(),
@@ -44,14 +46,25 @@ function dueHours(priority: string) {
   return 72;
 }
 
-function nextDueDate(current: Date, frequency: string, periodUom?: string) {
+function frequencyInterval(frequency: string, periodUom?: string) {
+  const rawFrequency = String(frequency || "").trim();
+  const numeric = Number(rawFrequency.match(/\d+(?:\.\d+)?/)?.[0] || "");
+  const amount = Number.isFinite(numeric) && numeric > 0 ? Math.max(1, Math.floor(numeric)) : 1;
   const label = `${frequency || ""} ${periodUom || ""}`.toLowerCase();
-  if (label.includes("daily") || label.includes(" day")) return addDays(current, 1);
-  if (label.includes("weekly") || label.includes(" week")) return addWeeks(current, 1);
-  if (label.includes("quarter")) return addMonths(current, 3);
-  if (label.includes("semi")) return addMonths(current, 6);
-  if (label.includes("annual") || label.includes("year")) return addYears(current, 1);
-  return addMonths(current, 1);
+  if (label.includes("daily") || label.includes(" day")) return { amount, unit: "day" as const };
+  if (label.includes("weekly") || label.includes(" week")) return { amount, unit: "week" as const };
+  if (label.includes("quarter")) return { amount: numeric > 0 ? amount : 3, unit: "month" as const };
+  if (label.includes("semi")) return { amount: numeric > 0 ? amount : 6, unit: "month" as const };
+  if (label.includes("annual") || label.includes("year")) return { amount, unit: "year" as const };
+  return { amount, unit: "month" as const };
+}
+
+function nextDueDate(current: Date, frequency: string, periodUom?: string) {
+  const interval = frequencyInterval(frequency, periodUom);
+  if (interval.unit === "day") return addDays(current, interval.amount);
+  if (interval.unit === "week") return addWeeks(current, interval.amount);
+  if (interval.unit === "year") return addYears(current, interval.amount);
+  return addMonths(current, interval.amount);
 }
 
 function workflowNote(input: z.infer<typeof schema>) {
@@ -92,18 +105,27 @@ function monthStartFromInput(value: string | undefined, fallbackDate: Date) {
   return new Date(Date.UTC(fallbackDate.getUTCFullYear(), fallbackDate.getUTCMonth(), 1));
 }
 
-function ppmPlanningWindow(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth">) {
+function addOneDay(date: Date) {
+  return addDays(date, 1);
+}
+
+function ppmPlanningWindow(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth" | "periodStart" | "periodEnd">) {
   const effectiveDate = utcDateFromInput(input?.effectiveDate);
   const selectedMonthStart = monthStartFromInput(input?.dueMonth, new Date(ppm.nextDue));
   const selectedMonthEnd = new Date(Date.UTC(selectedMonthStart.getUTCFullYear(), selectedMonthStart.getUTCMonth() + 1, 1));
-  const rangeStart = effectiveDate.getTime() > selectedMonthStart.getTime() ? effectiveDate : selectedMonthStart;
+  const rawPeriodStart = input?.periodStart ? utcDateFromInput(input.periodStart, selectedMonthStart.toISOString().slice(0, 10)) : selectedMonthStart;
+  const rawPeriodEnd = input?.periodEnd ? addOneDay(utcDateFromInput(input.periodEnd, addDays(selectedMonthEnd, -1).toISOString().slice(0, 10))) : selectedMonthEnd;
+  const rangeStart = effectiveDate.getTime() > rawPeriodStart.getTime() ? effectiveDate : rawPeriodStart;
+  const rangeEnd = rawPeriodEnd.getTime() > rangeStart.getTime() ? rawPeriodEnd : addOneDay(rangeStart);
   return {
     effectiveDate,
     effectiveDateText: effectiveDate.toISOString().slice(0, 10),
     dueMonth: monthKey(selectedMonthStart),
-    monthStart: selectedMonthStart,
-    monthEnd: selectedMonthEnd,
-    dateFilter: { gte: rangeStart, lt: selectedMonthEnd },
+    monthStart: rawPeriodStart,
+    monthEnd: rangeEnd,
+    periodStartText: rangeStart.toISOString().slice(0, 10),
+    periodEndText: addDays(rangeEnd, -1).toISOString().slice(0, 10),
+    dateFilter: { gte: rangeStart, lt: rangeEnd },
   };
 }
 
@@ -122,14 +144,14 @@ function ppmGroupBaseWhere(ppm: PpmRecord) {
   };
 }
 
-function ppmGroupWhere(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth">) {
+function ppmGroupWhere(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth" | "periodStart" | "periodEnd">) {
   return {
     ...ppmGroupBaseWhere(ppm),
     nextDue: ppmPlanningWindow(ppm, input).dateFilter,
   };
 }
 
-function rowIsInsidePlanningWindow(row: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth">) {
+function rowIsInsidePlanningWindow(row: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth" | "periodStart" | "periodEnd">) {
   if (!input?.effectiveDate && !input?.dueMonth) return true;
   const planningWindow = ppmPlanningWindow(row, input);
   const nextDue = new Date(row.nextDue);
@@ -137,7 +159,7 @@ function rowIsInsidePlanningWindow(row: PpmRecord, input?: Pick<z.infer<typeof s
   return Number.isFinite(nextDueTime) && nextDueTime >= planningWindow.dateFilter.gte.getTime() && nextDueTime < planningWindow.dateFilter.lt.getTime();
 }
 
-async function loadPpmGroup(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth" | "ppmIds">) {
+async function loadPpmGroup(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth" | "periodStart" | "periodEnd" | "ppmIds">) {
   const orderBy = [{ locationCode: "asc" as const }, { assetTag: "asc" as const }, { nextDue: "asc" as const }];
   const selectedIds = Array.from(new Set((input?.ppmIds || []).filter(Boolean)));
   if (selectedIds.length) {
@@ -173,16 +195,14 @@ async function nextPpmWorkOrderNumber() {
   return `PPM-WO-${Date.now().toString(36).toUpperCase()}`;
 }
 
-async function ensurePpmWorkOrder(ppm: PpmRecord, input: z.infer<typeof schema>, user: any) {
-  if (ppm.generatedWorkOrderId) {
-    const existing = await prisma.workOrder.findUnique({ where: { id: ppm.generatedWorkOrderId } });
-    if (existing && ![...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE].includes(existing.status as any)) return { workOrder: existing, created: false };
-  }
-  const existingByPpm = await prisma.workOrder.findFirst({
-    where: { ppmId: ppm.id, status: { notIn: [...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE] as any } },
+async function ensurePpmWorkOrder(ppm: PpmRecord, input: z.infer<typeof schema>, user: any, scheduledDate = ppm.nextDue) {
+  const scheduledStart = new Date(scheduledDate);
+  const scheduledEnd = addDays(scheduledStart, 1);
+  const existingByPpmAndDate = await prisma.workOrder.findFirst({
+    where: { ppmId: ppm.id, plannedStart: { gte: scheduledStart, lt: scheduledEnd }, status: { notIn: [...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE] as any } },
     orderBy: { createdAt: "desc" },
   });
-  if (existingByPpm) return { workOrder: existingByPpm, created: false };
+  if (existingByPpmAndDate) return { workOrder: existingByPpmAndDate, created: false };
 
   const [asset, team, technicianId, woNo] = await Promise.all([
     ppm.assetTag ? prisma.asset.findUnique({ where: { tag: ppm.assetTag } }) : null,
@@ -195,7 +215,7 @@ async function ensurePpmWorkOrder(ppm: PpmRecord, input: z.infer<typeof schema>,
   const created = await prisma.workOrder.create({
     data: {
       woNo,
-      title: `PPM | ${ppm.ppmCode || ppm.code} | ${target} | ${ppm.name}`.trim(),
+      title: `PPM | ${ppm.ppmCode || ppm.code} | ${target} | ${scheduledStart.toISOString().slice(0, 10)} | ${ppm.name}`.trim(),
       type: "Preventive",
       assetType: asset?.assetGroup || asset?.category || ppm.objectCategory || null,
       departmentCode: ppm.departmentCode || asset?.departmentCode || null,
@@ -207,13 +227,13 @@ async function ensurePpmWorkOrder(ppm: PpmRecord, input: z.infer<typeof schema>,
       assetId: asset?.id,
       assignedToId: technicianId,
       ppmId: ppm.id,
-      plannedStart: ppm.nextDue,
-      dueAt: addDays(ppm.nextDue, Math.max(1, Math.ceil(dueHours(priority) / 24))),
+      plannedStart: scheduledStart,
+      dueAt: addDays(scheduledStart, Math.max(1, Math.ceil(dueHours(priority) / 24))),
       estimatedHours: ppm.durationHrs,
       cost: 0,
       jobPlan: ppm.checklist || "PPM checklist to be completed before submission.",
       safetyNotes: "Verify isolation, access, permits and asset condition before starting PPM.",
-      workNotes: `Generated from PPM ${ppm.ppmCode || ppm.code}. PPM row: ${ppm.code}. Target: ${target}.`,
+      workNotes: `Generated from PPM ${ppm.ppmCode || ppm.code}. PPM row: ${ppm.code}. Target: ${target}. Scheduled date: ${scheduledStart.toISOString().slice(0, 10)}.`,
     },
   });
   if (asset?.id) {
@@ -226,14 +246,43 @@ async function createPpmWorkOrder(ppm: PpmRecord, input: z.infer<typeof schema>,
   return (await ensurePpmWorkOrder(ppm, input, user)).workOrder;
 }
 
+type PpmOccurrence = {
+  row: PpmRecord;
+  scheduledDate: Date;
+};
+
+function ppmOccurrencesForPeriod(rows: PpmRecord[], input: z.infer<typeof schema>) {
+  return rows.flatMap((row) => {
+    const planningWindow = ppmPlanningWindow(row, input);
+    const occurrences: PpmOccurrence[] = [];
+    let scheduledDate = new Date(row.nextDue);
+    let guard = 0;
+    while (scheduledDate < planningWindow.dateFilter.gte && guard < 500) {
+      const next = nextDueDate(scheduledDate, row.frequency, row.periodUom);
+      if (next.getTime() <= scheduledDate.getTime()) break;
+      scheduledDate = next;
+      guard += 1;
+    }
+    while (scheduledDate >= planningWindow.dateFilter.gte && scheduledDate < planningWindow.dateFilter.lt && guard < 1000) {
+      occurrences.push({ row, scheduledDate: new Date(scheduledDate) });
+      const next = nextDueDate(scheduledDate, row.frequency, row.periodUom);
+      if (next.getTime() <= scheduledDate.getTime()) break;
+      scheduledDate = next;
+      guard += 1;
+    }
+    return occurrences;
+  });
+}
 async function createPpmWorkOrdersForGroup(ppm: PpmRecord, input: z.infer<typeof schema>, user: any) {
   const planningWindow = ppmPlanningWindow(ppm, input);
   const rows = await loadPpmGroup(ppm, input);
+  const occurrences = ppmOccurrencesForPeriod(rows, input);
   const generatedAt = new Date();
   const workflowStatus = input.assignedTeamCode || input.technicianEmail ? "ASSIGNED" : "SCHEDULED";
-  const results: Array<{ ppmId: string; ppmCode: string; code: string; assetTag?: string; locationCode?: string; departmentCode?: string; equipmentDescription?: string | null; nextDue?: Date; workOrder: any; created: boolean }> = [];
-  for (const row of rows) {
-    const result = await ensurePpmWorkOrder(row, input, user);
+  const results: Array<{ ppmId: string; ppmCode: string; code: string; assetTag?: string; locationCode?: string; departmentCode?: string; equipmentDescription?: string | null; frequency?: string; periodUom?: string; nextDue?: Date; scheduledDate: Date; workOrder: any; created: boolean }> = [];
+  for (const occurrence of occurrences) {
+    const row = occurrence.row;
+    const result = await ensurePpmWorkOrder(row, input, user, occurrence.scheduledDate);
     await prisma.preventiveMaintenance.update({
       where: { id: row.id },
       data: {
@@ -245,33 +294,35 @@ async function createPpmWorkOrdersForGroup(ppm: PpmRecord, input: z.infer<typeof
         workflowStatus,
       },
     });
-    results.push({ ppmId: row.id, ppmCode: row.ppmCode || ppmGroupCode(row), code: row.code, assetTag: row.assetTag, locationCode: row.locationCode, departmentCode: row.departmentCode, equipmentDescription: row.equipmentDescription, nextDue: row.nextDue, workOrder: result.workOrder, created: result.created });
+    results.push({ ppmId: row.id, ppmCode: row.ppmCode || ppmGroupCode(row), code: row.code, assetTag: row.assetTag, locationCode: row.locationCode, departmentCode: row.departmentCode, equipmentDescription: row.equipmentDescription, frequency: row.frequency, periodUom: row.periodUom, nextDue: row.nextDue, scheduledDate: occurrence.scheduledDate, workOrder: result.workOrder, created: result.created });
   }
   return {
     groupCode: ppmGroupCode(ppm),
     effectiveDate: planningWindow.effectiveDateText,
     dueMonth: planningWindow.dueMonth,
-    total: rows.length,
+    periodStart: planningWindow.periodStartText,
+    periodEnd: planningWindow.periodEndText,
+    total: occurrences.length,
     createdCount: results.filter((item) => item.created).length,
     reusedCount: results.filter((item) => !item.created).length,
     results,
   };
 }
+
 async function buildPpmWorkOrderPreview(ppm: PpmRecord, input: z.infer<typeof schema>) {
   const planningWindow = ppmPlanningWindow(ppm, input);
   const rows = await loadPpmGroup(ppm, input);
+  const occurrences = ppmOccurrencesForPeriod(rows, input);
   const rowIds = rows.map((row) => row.id);
-  const generatedIds = rows.map((row) => row.generatedWorkOrderId).filter(Boolean);
-  const orFilters: any[] = rowIds.length ? [{ ppmId: { in: rowIds } }] : [];
-  if (generatedIds.length) orFilters.push({ id: { in: generatedIds } });
-  const existingWorkOrders = orFilters.length ? await prisma.workOrder.findMany({
-    where: { OR: orFilters, status: { notIn: [...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE] as any } },
+  const existingWorkOrders = rowIds.length ? await prisma.workOrder.findMany({
+    where: { ppmId: { in: rowIds }, plannedStart: planningWindow.dateFilter, status: { notIn: [...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE] as any } },
     select: { id: true, ppmId: true, woNo: true, status: true, plannedStart: true, dueAt: true },
   }) : [];
-  const existingByPpmId = new Map(existingWorkOrders.filter((workOrder) => workOrder.ppmId).map((workOrder) => [workOrder.ppmId, workOrder]));
-  const existingById = new Map(existingWorkOrders.map((workOrder) => [workOrder.id, workOrder]));
-  const previewRows = rows.map((row) => {
-    const existing = existingByPpmId.get(row.id) || (row.generatedWorkOrderId ? existingById.get(row.generatedWorkOrderId) : null);
+  const existingByPpmDate = new Map(existingWorkOrders.map((workOrder) => [`${workOrder.ppmId || ""}|${workOrder.plannedStart.toISOString().slice(0, 10)}`, workOrder]));
+  const previewRows = occurrences.map((occurrence) => {
+    const row = occurrence.row;
+    const scheduledDateText = occurrence.scheduledDate.toISOString().slice(0, 10);
+    const existing = existingByPpmDate.get(`${row.id}|${scheduledDateText}`);
     return {
       ppmId: row.id,
       ppmCode: row.ppmCode || ppmGroupCode(row),
@@ -281,8 +332,11 @@ async function buildPpmWorkOrderPreview(ppm: PpmRecord, input: z.infer<typeof sc
       locationCode: row.locationCode,
       departmentCode: row.departmentCode,
       equipmentDescription: row.equipmentDescription,
-      nextDue: row.nextDue,
-      plannedStart: row.nextDue,
+      frequency: row.frequency,
+      periodUom: row.periodUom,
+      nextDue: occurrence.scheduledDate,
+      plannedStart: occurrence.scheduledDate,
+      scheduledDate: scheduledDateText,
       existingWorkOrderNo: existing?.woNo || "",
       existingStatus: existing?.status || "",
       willCreate: !existing,
@@ -292,8 +346,10 @@ async function buildPpmWorkOrderPreview(ppm: PpmRecord, input: z.infer<typeof sc
     groupCode: ppmGroupCode(ppm),
     effectiveDate: planningWindow.effectiveDateText,
     dueMonth: planningWindow.dueMonth,
-    monthStart: planningWindow.monthStart.toISOString().slice(0, 10),
-    monthEnd: addDays(planningWindow.monthEnd, -1).toISOString().slice(0, 10),
+    periodStart: planningWindow.periodStartText,
+    periodEnd: planningWindow.periodEndText,
+    monthStart: planningWindow.periodStartText,
+    monthEnd: planningWindow.periodEndText,
     total: previewRows.length,
     createCount: previewRows.filter((row) => row.willCreate).length,
     reuseCount: previewRows.filter((row) => !row.willCreate).length,
@@ -301,6 +357,7 @@ async function buildPpmWorkOrderPreview(ppm: PpmRecord, input: z.infer<typeof sc
     limited: previewRows.length > 300,
   };
 }
+
 export async function POST(request: Request) {
   try {
     const input = schema.parse(await request.json());
@@ -334,6 +391,8 @@ export async function POST(request: Request) {
         groupCode: generation.groupCode,
         effectiveDate: generation.effectiveDate,
         dueMonth: generation.dueMonth,
+        periodStart: generation.periodStart,
+        periodEnd: generation.periodEnd,
         total: generation.total,
         createCount: generation.createdCount,
         reuseCount: generation.reusedCount,
@@ -345,7 +404,10 @@ export async function POST(request: Request) {
           locationCode: item.locationCode,
           departmentCode: item.departmentCode,
           equipmentDescription: item.equipmentDescription,
-          nextDue: item.nextDue,
+          nextDue: item.scheduledDate || item.nextDue,
+          scheduledDate: item.scheduledDate?.toISOString?.().slice(0, 10) || "",
+          frequency: item.frequency,
+          periodUom: item.periodUom,
           workOrderNo: item.workOrder.woNo,
           willCreate: item.created,
         })),
@@ -356,13 +418,13 @@ export async function POST(request: Request) {
         action: "PPM_WORKFLOW_GENERATE",
         entity: "preventive_maintenance",
         entityId: ppm.id,
-        details: { before: ppm, input, groupCode: generation.groupCode, dueMonth: generation.dueMonth, effectiveDate: generation.effectiveDate, total: generation.total, createdCount: generation.createdCount, reusedCount: generation.reusedCount },
+        details: { before: ppm, input, groupCode: generation.groupCode, dueMonth: generation.dueMonth, periodStart: generation.periodStart, periodEnd: generation.periodEnd, effectiveDate: generation.effectiveDate, total: generation.total, createdCount: generation.createdCount, reusedCount: generation.reusedCount },
       });
       return NextResponse.json({
         ppm: updatedPpm,
         workOrder,
         workOrders: generation.results.map((item) => item.workOrder),
-        generatedRows: generation.results.map((item: any) => ({ ppmId: item.ppmId, code: item.code, workOrderId: item.workOrder.id, woNo: item.workOrder.woNo, created: item.created, nextDue: item.nextDue })),
+        generatedRows: generation.results.map((item: any) => ({ ppmId: item.ppmId, code: item.code, workOrderId: item.workOrder.id, woNo: item.workOrder.woNo, created: item.created, nextDue: item.scheduledDate || item.nextDue, scheduledDate: item.scheduledDate?.toISOString?.().slice(0, 10) || "", frequency: item.frequency, periodUom: item.periodUom })),
         preview,
         groupCode: generation.groupCode,
         effectiveDate: generation.effectiveDate,
@@ -370,6 +432,8 @@ export async function POST(request: Request) {
         totalWorkOrders: generation.total,
         generatedCount: generation.createdCount,
         reusedCount: generation.reusedCount,
+        periodStart: generation.periodStart,
+        periodEnd: generation.periodEnd,
       });
     }
     if (input.action === "assign") {
@@ -451,3 +515,5 @@ export async function POST(request: Request) {
     return apiError(error, "Unable to process PPM workflow");
   }
 }
+
+
