@@ -6,8 +6,40 @@ import { requireAnyPermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 
-const actions = ["schedule", "preview", "generate", "assign", "accept", "start", "hold", "submit", "approve", "reject", "rework", "close", "cancel", "defect"] as const;
-const workflowStatuses = ["DRAFT", "SCHEDULED", "ASSIGNED", "IN_PROGRESS", "ON_HOLD", "SUBMITTED", "REWORK", "COMPLETED", "CLOSED", "OVERDUE", "CANCELLED"] as const;
+const actions = [
+  "schedule",
+  "preview",
+  "generate",
+  "assign",
+  "accept",
+  "start",
+  "hold",
+  "submit",
+  "approve",
+  "reject",
+  "rework",
+  "close",
+  "cancel",
+  "defect",
+] as const;
+const workflowStatuses = [
+  "DRAFT",
+  "SCHEDULED",
+  "ASSIGNED",
+  "IN_PROGRESS",
+  "ON_HOLD",
+  "SUBMITTED",
+  "REWORK",
+  "COMPLETED",
+  "CLOSED",
+  "OVERDUE",
+  "CANCELLED",
+] as const;
+
+const previewRowSchema = z.object({
+  ppmId: z.string().min(1),
+  scheduledDate: z.string().optional(),
+});
 
 const schema = z.object({
   ppmId: z.string().min(1),
@@ -18,6 +50,7 @@ const schema = z.object({
   periodStart: z.string().optional(),
   periodEnd: z.string().optional(),
   ppmIds: z.array(z.string()).optional(),
+  previewRows: z.array(previewRowSchema).optional(),
   assignedTeamCode: z.string().optional(),
   technicianEmail: z.string().optional(),
   supervisorEmail: z.string().optional(),
@@ -49,13 +82,21 @@ function dueHours(priority: string) {
 function frequencyInterval(frequency: string, periodUom?: string) {
   const rawFrequency = String(frequency || "").trim();
   const numeric = Number(rawFrequency.match(/\d+(?:\.\d+)?/)?.[0] || "");
-  const amount = Number.isFinite(numeric) && numeric > 0 ? Math.max(1, Math.floor(numeric)) : 1;
+  const amount =
+    Number.isFinite(numeric) && numeric > 0
+      ? Math.max(1, Math.floor(numeric))
+      : 1;
   const label = `${frequency || ""} ${periodUom || ""}`.toLowerCase();
-  if (label.includes("daily") || label.includes(" day")) return { amount, unit: "day" as const };
-  if (label.includes("weekly") || label.includes(" week")) return { amount, unit: "week" as const };
-  if (label.includes("quarter")) return { amount: numeric > 0 ? amount : 3, unit: "month" as const };
-  if (label.includes("semi")) return { amount: numeric > 0 ? amount : 6, unit: "month" as const };
-  if (label.includes("annual") || label.includes("year")) return { amount, unit: "year" as const };
+  if (label.includes("daily") || label.includes(" day"))
+    return { amount, unit: "day" as const };
+  if (label.includes("weekly") || label.includes(" week"))
+    return { amount, unit: "week" as const };
+  if (label.includes("quarter"))
+    return { amount: numeric > 0 ? amount : 3, unit: "month" as const };
+  if (label.includes("semi"))
+    return { amount: numeric > 0 ? amount : 6, unit: "month" as const };
+  if (label.includes("annual") || label.includes("year"))
+    return { amount, unit: "year" as const };
   return { amount, unit: "month" as const };
 }
 
@@ -75,7 +116,9 @@ function workflowNote(input: z.infer<typeof schema>) {
     input.labor ? `Labor:\n${input.labor}` : "",
     input.materials ? `Materials:\n${input.materials}` : "",
     input.defectDescription ? `Defects:\n${input.defectDescription}` : "",
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 async function findUserId(email?: string) {
@@ -85,12 +128,22 @@ async function findUserId(email?: string) {
 }
 
 const DEFAULT_PPM_EFFECTIVE_DATE = "2026-01-01";
-const OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE = ["CLOSED", "CANCELLED", "REJECTED"] as const;
+const OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE = [
+  "CLOSED",
+  "CANCELLED",
+  "REJECTED",
+] as const;
 
-function utcDateFromInput(value?: string, fallback = DEFAULT_PPM_EFFECTIVE_DATE) {
+function utcDateFromInput(
+  value?: string,
+  fallback = DEFAULT_PPM_EFFECTIVE_DATE,
+) {
   const raw = String(value || fallback || DEFAULT_PPM_EFFECTIVE_DATE).trim();
   const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (match) return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (match)
+    return new Date(
+      Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
+    );
   const date = new Date(raw);
   return Number.isNaN(date.getTime()) ? new Date(Date.UTC(2026, 0, 1)) : date;
 }
@@ -101,22 +154,58 @@ function monthKey(date: Date) {
 
 function monthStartFromInput(value: string | undefined, fallbackDate: Date) {
   const match = String(value || "").match(/^(\d{4})-(\d{2})$/);
-  if (match) return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1));
-  return new Date(Date.UTC(fallbackDate.getUTCFullYear(), fallbackDate.getUTCMonth(), 1));
+  if (match)
+    return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1));
+  return new Date(
+    Date.UTC(fallbackDate.getUTCFullYear(), fallbackDate.getUTCMonth(), 1),
+  );
 }
 
 function addOneDay(date: Date) {
   return addDays(date, 1);
 }
 
-function ppmPlanningWindow(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth" | "periodStart" | "periodEnd">) {
+function ppmPlanningWindow(
+  ppm: PpmRecord,
+  input?: Pick<
+    z.infer<typeof schema>,
+    "effectiveDate" | "dueMonth" | "periodStart" | "periodEnd"
+  >,
+) {
   const effectiveDate = utcDateFromInput(input?.effectiveDate);
-  const selectedMonthStart = monthStartFromInput(input?.dueMonth, new Date(ppm.nextDue));
-  const selectedMonthEnd = new Date(Date.UTC(selectedMonthStart.getUTCFullYear(), selectedMonthStart.getUTCMonth() + 1, 1));
-  const rawPeriodStart = input?.periodStart ? utcDateFromInput(input.periodStart, selectedMonthStart.toISOString().slice(0, 10)) : selectedMonthStart;
-  const rawPeriodEnd = input?.periodEnd ? addOneDay(utcDateFromInput(input.periodEnd, addDays(selectedMonthEnd, -1).toISOString().slice(0, 10))) : selectedMonthEnd;
-  const rangeStart = effectiveDate.getTime() > rawPeriodStart.getTime() ? effectiveDate : rawPeriodStart;
-  const rangeEnd = rawPeriodEnd.getTime() > rangeStart.getTime() ? rawPeriodEnd : addOneDay(rangeStart);
+  const selectedMonthStart = monthStartFromInput(
+    input?.dueMonth,
+    new Date(ppm.nextDue),
+  );
+  const selectedMonthEnd = new Date(
+    Date.UTC(
+      selectedMonthStart.getUTCFullYear(),
+      selectedMonthStart.getUTCMonth() + 1,
+      1,
+    ),
+  );
+  const rawPeriodStart = input?.periodStart
+    ? utcDateFromInput(
+        input.periodStart,
+        selectedMonthStart.toISOString().slice(0, 10),
+      )
+    : selectedMonthStart;
+  const rawPeriodEnd = input?.periodEnd
+    ? addOneDay(
+        utcDateFromInput(
+          input.periodEnd,
+          addDays(selectedMonthEnd, -1).toISOString().slice(0, 10),
+        ),
+      )
+    : selectedMonthEnd;
+  const rangeStart =
+    effectiveDate.getTime() > rawPeriodStart.getTime()
+      ? effectiveDate
+      : rawPeriodStart;
+  const rangeEnd =
+    rawPeriodEnd.getTime() > rangeStart.getTime()
+      ? rawPeriodEnd
+      : addOneDay(rangeStart);
   return {
     effectiveDate,
     effectiveDateText: effectiveDate.toISOString().slice(0, 10),
@@ -144,24 +233,52 @@ function ppmGroupBaseWhere(ppm: PpmRecord) {
   };
 }
 
-function ppmGroupWhere(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth" | "periodStart" | "periodEnd">) {
+function ppmGroupWhere(
+  ppm: PpmRecord,
+  input?: Pick<
+    z.infer<typeof schema>,
+    "effectiveDate" | "dueMonth" | "periodStart" | "periodEnd"
+  >,
+) {
   return {
     ...ppmGroupBaseWhere(ppm),
     nextDue: ppmPlanningWindow(ppm, input).dateFilter,
   };
 }
 
-function rowIsInsidePlanningWindow(row: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth" | "periodStart" | "periodEnd">) {
+function rowIsInsidePlanningWindow(
+  row: PpmRecord,
+  input?: Pick<
+    z.infer<typeof schema>,
+    "effectiveDate" | "dueMonth" | "periodStart" | "periodEnd"
+  >,
+) {
   if (!input?.effectiveDate && !input?.dueMonth) return true;
   const planningWindow = ppmPlanningWindow(row, input);
   const nextDue = new Date(row.nextDue);
   const nextDueTime = nextDue.getTime();
-  return Number.isFinite(nextDueTime) && nextDueTime >= planningWindow.dateFilter.gte.getTime() && nextDueTime < planningWindow.dateFilter.lt.getTime();
+  return (
+    Number.isFinite(nextDueTime) &&
+    nextDueTime >= planningWindow.dateFilter.gte.getTime() &&
+    nextDueTime < planningWindow.dateFilter.lt.getTime()
+  );
 }
 
-async function loadPpmGroup(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth" | "periodStart" | "periodEnd" | "ppmIds">) {
-  const orderBy = [{ locationCode: "asc" as const }, { assetTag: "asc" as const }, { nextDue: "asc" as const }];
-  const selectedIds = Array.from(new Set((input?.ppmIds || []).filter(Boolean)));
+async function loadPpmGroup(
+  ppm: PpmRecord,
+  input?: Pick<
+    z.infer<typeof schema>,
+    "effectiveDate" | "dueMonth" | "periodStart" | "periodEnd" | "ppmIds"
+  >,
+) {
+  const orderBy = [
+    { locationCode: "asc" as const },
+    { assetTag: "asc" as const },
+    { nextDue: "asc" as const },
+  ];
+  const selectedIds = Array.from(
+    new Set((input?.ppmIds || []).filter(Boolean)),
+  );
   if (selectedIds.length) {
     return prisma.preventiveMaintenance.findMany({
       where: { id: { in: selectedIds } },
@@ -175,7 +292,8 @@ async function loadPpmGroup(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>,
     orderBy,
     take: 20000,
   });
-  if (rows.length || (!input?.effectiveDate && !input?.dueMonth)) return rows.length ? rows : [ppm];
+  if (rows.length || (!input?.effectiveDate && !input?.dueMonth))
+    return rows.length ? rows : [ppm];
 
   const unfilteredRows = await prisma.preventiveMaintenance.findMany({
     where: ppmGroupBaseWhere(ppm),
@@ -186,69 +304,137 @@ async function loadPpmGroup(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>,
 }
 
 async function nextPpmWorkOrderNumber() {
-  const count = await prisma.workOrder.count();
-  for (let offset = 0; offset < 50; offset += 1) {
-    const woNo = `PPM-WO-${String(count + 81001 + offset).padStart(5, "0")}`;
-    const existing = await prisma.workOrder.findUnique({ where: { woNo }, select: { id: true } });
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const suffix =
+      `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
+    const woNo = `PPM-WO-${suffix}`;
+    const existing = await prisma.workOrder.findUnique({
+      where: { woNo },
+      select: { id: true },
+    });
     if (!existing) return woNo;
   }
-  return `PPM-WO-${Date.now().toString(36).toUpperCase()}`;
+  return `PPM-WO-${crypto.randomUUID().slice(0, 12).toUpperCase()}`;
 }
 
-async function ensurePpmWorkOrder(ppm: PpmRecord, input: z.infer<typeof schema>, user: any, scheduledDate = ppm.nextDue) {
+async function ensurePpmWorkOrder(
+  ppm: PpmRecord,
+  input: z.infer<typeof schema>,
+  user: any,
+  scheduledDate = ppm.nextDue,
+) {
   const scheduledStart = new Date(scheduledDate);
   const scheduledEnd = addDays(scheduledStart, 1);
   const existingByPpmAndDate = await prisma.workOrder.findFirst({
-    where: { ppmId: ppm.id, plannedStart: { gte: scheduledStart, lt: scheduledEnd }, status: { notIn: [...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE] as any } },
+    where: {
+      ppmId: ppm.id,
+      plannedStart: { gte: scheduledStart, lt: scheduledEnd },
+      status: { notIn: [...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE] as any },
+    },
     orderBy: { createdAt: "desc" },
   });
-  if (existingByPpmAndDate) return { workOrder: existingByPpmAndDate, created: false };
+  if (existingByPpmAndDate)
+    return { workOrder: existingByPpmAndDate, created: false };
 
-  const [asset, team, technicianId, woNo] = await Promise.all([
-    ppm.assetTag ? prisma.asset.findUnique({ where: { tag: ppm.assetTag } }) : null,
-    (input.assignedTeamCode || ppm.assignedTeamCode) ? prisma.team.findUnique({ where: { code: input.assignedTeamCode || ppm.assignedTeamCode } }) : null,
+  const [asset, team, technicianId] = await Promise.all([
+    ppm.assetTag
+      ? prisma.asset.findUnique({ where: { tag: ppm.assetTag } })
+      : null,
+    input.assignedTeamCode || ppm.assignedTeamCode
+      ? prisma.team.findUnique({
+          where: { code: input.assignedTeamCode || ppm.assignedTeamCode },
+        })
+      : null,
     findUserId(input.technicianEmail || ppm.technicianEmail),
-    nextPpmWorkOrderNumber(),
   ]);
   const priority = ppm.priority;
   const target = ppm.assetTag || ppm.locationCode || ppm.code;
-  const created = await prisma.workOrder.create({
-    data: {
-      woNo,
-      title: `PPM | ${ppm.ppmCode || ppm.code} | ${target} | ${scheduledStart.toISOString().slice(0, 10)} | ${ppm.name}`.trim(),
-      type: "Preventive",
-      assetType: asset?.assetGroup || asset?.category || ppm.objectCategory || null,
-      departmentCode: ppm.departmentCode || asset?.departmentCode || null,
-      serviceCode: ppm.objectClass || null,
-      assignedTeamCode: input.assignedTeamCode || ppm.assignedTeamCode || team?.code || null,
-      jobPlanCode: ppm.ppmCode || ppm.code,
-      priority,
-      status: (input.assignedTeamCode || ppm.assignedTeamCode || technicianId) ? "ASSIGNED" : "PENDING_ASSIGNMENT",
-      assetId: asset?.id,
-      assignedToId: technicianId,
-      ppmId: ppm.id,
-      plannedStart: scheduledStart,
-      dueAt: addDays(scheduledStart, Math.max(1, Math.ceil(dueHours(priority) / 24))),
-      estimatedHours: ppm.durationHrs,
-      cost: 0,
-      jobPlan: ppm.checklist || "PPM checklist to be completed before submission.",
-      safetyNotes: "Verify isolation, access, permits and asset condition before starting PPM.",
-      workNotes: `Generated from PPM ${ppm.ppmCode || ppm.code}. PPM row: ${ppm.code}. Target: ${target}. Scheduled date: ${scheduledStart.toISOString().slice(0, 10)}.`,
-    },
-  });
+  let created: Awaited<ReturnType<typeof prisma.workOrder.create>> | null =
+    null;
+  let lastCreateError: unknown = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const woNo = await nextPpmWorkOrderNumber();
+    try {
+      created = await prisma.workOrder.create({
+        data: {
+          woNo,
+          title:
+            `PPM | ${ppm.ppmCode || ppm.code} | ${target} | ${scheduledStart.toISOString().slice(0, 10)} | ${ppm.name}`.trim(),
+          type: "Preventive",
+          assetType:
+            asset?.assetGroup || asset?.category || ppm.objectCategory || null,
+          departmentCode: ppm.departmentCode || asset?.departmentCode || null,
+          serviceCode: ppm.objectClass || null,
+          assignedTeamCode:
+            input.assignedTeamCode ||
+            ppm.assignedTeamCode ||
+            team?.code ||
+            null,
+          jobPlanCode: ppm.ppmCode || ppm.code,
+          priority,
+          status:
+            input.assignedTeamCode || ppm.assignedTeamCode || technicianId
+              ? "ASSIGNED"
+              : "PENDING_ASSIGNMENT",
+          assetId: asset?.id,
+          assignedToId: technicianId,
+          ppmId: ppm.id,
+          plannedStart: scheduledStart,
+          dueAt: addDays(
+            scheduledStart,
+            Math.max(1, Math.ceil(dueHours(priority) / 24)),
+          ),
+          estimatedHours: ppm.durationHrs,
+          cost: 0,
+          jobPlan:
+            ppm.checklist || "PPM checklist to be completed before submission.",
+          safetyNotes:
+            "Verify isolation, access, permits and asset condition before starting PPM.",
+          workNotes: `Generated from PPM ${ppm.ppmCode || ppm.code}. PPM row: ${ppm.code}. Target: ${target}. Scheduled date: ${scheduledStart.toISOString().slice(0, 10)}.`,
+        },
+      });
+      break;
+    } catch (error: any) {
+      lastCreateError = error;
+      if (error?.code !== "P2002") throw error;
+    }
+  }
+  if (!created)
+    throw lastCreateError instanceof Error
+      ? lastCreateError
+      : new Error(
+          "Unable to create PPM work order after retrying work order numbers.",
+        );
   if (asset?.id) {
-    await prisma.assetHistory.create({ data: { assetId: asset.id, eventType: "PPM_WORK_ORDER_CREATED", title: `${created.woNo} generated`, details: `PPM ${ppm.ppmCode || ppm.code} generated for ${ppm.assetTag || ppm.locationCode}.`, actor: user?.name || user?.email || "System" } });
+    await prisma.assetHistory.create({
+      data: {
+        assetId: asset.id,
+        eventType: "PPM_WORK_ORDER_CREATED",
+        title: `${created.woNo} generated`,
+        details: `PPM ${ppm.ppmCode || ppm.code} generated for ${ppm.assetTag || ppm.locationCode}.`,
+        actor: user?.name || user?.email || "System",
+      },
+    });
   }
   return { workOrder: created, created: true };
 }
 
-async function createPpmWorkOrder(ppm: PpmRecord, input: z.infer<typeof schema>, user: any) {
+async function createPpmWorkOrder(
+  ppm: PpmRecord,
+  input: z.infer<typeof schema>,
+  user: any,
+) {
   return (await ensurePpmWorkOrder(ppm, input, user)).workOrder;
 }
 
-async function findWorkflowWorkOrder(ppm: PpmRecord, input: z.infer<typeof schema>) {
+async function findWorkflowWorkOrder(
+  ppm: PpmRecord,
+  input: z.infer<typeof schema>,
+) {
   if (ppm.generatedWorkOrderId) {
-    const generated = await prisma.workOrder.findUnique({ where: { id: ppm.generatedWorkOrderId } });
+    const generated = await prisma.workOrder.findUnique({
+      where: { id: ppm.generatedWorkOrderId },
+    });
     if (generated) return generated;
   }
   const planningWindow = ppmPlanningWindow(ppm, input);
@@ -266,7 +452,23 @@ type PpmOccurrence = {
   scheduledDate: Date;
 };
 
-function ppmOccurrencesForPeriod(rows: PpmRecord[], input: z.infer<typeof schema>) {
+function ppmOccurrencesForPeriod(
+  rows: PpmRecord[],
+  input: z.infer<typeof schema>,
+) {
+  const explicitRows = input.previewRows || [];
+  if (explicitRows.length) {
+    const rowById = new Map(rows.map((row) => [row.id, row]));
+    return explicitRows.flatMap((previewRow) => {
+      const row = rowById.get(previewRow.ppmId);
+      if (!row) return [];
+      const scheduledDate = utcDateFromInput(
+        previewRow.scheduledDate,
+        row.nextDue.toISOString().slice(0, 10),
+      );
+      return [{ row, scheduledDate }];
+    });
+  }
   return rows.flatMap((row) => {
     const planningWindow = ppmPlanningWindow(row, input);
     const occurrences: PpmOccurrence[] = [];
@@ -278,7 +480,11 @@ function ppmOccurrencesForPeriod(rows: PpmRecord[], input: z.infer<typeof schema
       scheduledDate = next;
       guard += 1;
     }
-    while (scheduledDate >= planningWindow.dateFilter.gte && scheduledDate < planningWindow.dateFilter.lt && guard < 1000) {
+    while (
+      scheduledDate >= planningWindow.dateFilter.gte &&
+      scheduledDate < planningWindow.dateFilter.lt &&
+      guard < 1000
+    ) {
       occurrences.push({ row, scheduledDate: new Date(scheduledDate) });
       const next = nextDueDate(scheduledDate, row.frequency, row.periodUom);
       if (next.getTime() <= scheduledDate.getTime()) break;
@@ -288,16 +494,45 @@ function ppmOccurrencesForPeriod(rows: PpmRecord[], input: z.infer<typeof schema
     return occurrences;
   });
 }
-async function createPpmWorkOrdersForGroup(ppm: PpmRecord, input: z.infer<typeof schema>, user: any) {
+async function createPpmWorkOrdersForGroup(
+  ppm: PpmRecord,
+  input: z.infer<typeof schema>,
+  user: any,
+) {
   const planningWindow = ppmPlanningWindow(ppm, input);
   const rows = await loadPpmGroup(ppm, input);
   const occurrences = ppmOccurrencesForPeriod(rows, input);
+  if (!occurrences.length) {
+    throw new Error(
+      `No PPM work orders are due for ${ppmGroupCode(ppm)} in the selected period. Click Preview Period WOs and then Create again.`,
+    );
+  }
   const generatedAt = new Date();
-  const workflowStatus = input.assignedTeamCode || input.technicianEmail ? "ASSIGNED" : "SCHEDULED";
-  const results: Array<{ ppmId: string; ppmCode: string; code: string; assetTag?: string; locationCode?: string; departmentCode?: string; equipmentDescription?: string | null; frequency?: string; periodUom?: string; nextDue?: Date; scheduledDate: Date; workOrder: any; created: boolean }> = [];
+  const workflowStatus =
+    input.assignedTeamCode || input.technicianEmail ? "ASSIGNED" : "SCHEDULED";
+  const results: Array<{
+    ppmId: string;
+    ppmCode: string;
+    code: string;
+    assetTag?: string;
+    locationCode?: string;
+    departmentCode?: string;
+    equipmentDescription?: string | null;
+    frequency?: string;
+    periodUom?: string;
+    nextDue?: Date;
+    scheduledDate: Date;
+    workOrder: any;
+    created: boolean;
+  }> = [];
   for (const occurrence of occurrences) {
     const row = occurrence.row;
-    const result = await ensurePpmWorkOrder(row, input, user, occurrence.scheduledDate);
+    const result = await ensurePpmWorkOrder(
+      row,
+      input,
+      user,
+      occurrence.scheduledDate,
+    );
     await prisma.preventiveMaintenance.update({
       where: { id: row.id },
       data: {
@@ -309,7 +544,21 @@ async function createPpmWorkOrdersForGroup(ppm: PpmRecord, input: z.infer<typeof
         workflowStatus,
       },
     });
-    results.push({ ppmId: row.id, ppmCode: row.ppmCode || ppmGroupCode(row), code: row.code, assetTag: row.assetTag, locationCode: row.locationCode, departmentCode: row.departmentCode, equipmentDescription: row.equipmentDescription, frequency: row.frequency, periodUom: row.periodUom, nextDue: row.nextDue, scheduledDate: occurrence.scheduledDate, workOrder: result.workOrder, created: result.created });
+    results.push({
+      ppmId: row.id,
+      ppmCode: row.ppmCode || ppmGroupCode(row),
+      code: row.code,
+      assetTag: row.assetTag,
+      locationCode: row.locationCode,
+      departmentCode: row.departmentCode,
+      equipmentDescription: row.equipmentDescription,
+      frequency: row.frequency,
+      periodUom: row.periodUom,
+      nextDue: row.nextDue,
+      scheduledDate: occurrence.scheduledDate,
+      workOrder: result.workOrder,
+      created: result.created,
+    });
   }
   return {
     groupCode: ppmGroupCode(ppm),
@@ -324,19 +573,42 @@ async function createPpmWorkOrdersForGroup(ppm: PpmRecord, input: z.infer<typeof
   };
 }
 
-async function buildPpmWorkOrderPreview(ppm: PpmRecord, input: z.infer<typeof schema>) {
+async function buildPpmWorkOrderPreview(
+  ppm: PpmRecord,
+  input: z.infer<typeof schema>,
+) {
   const planningWindow = ppmPlanningWindow(ppm, input);
   const rows = await loadPpmGroup(ppm, input);
   const occurrences = ppmOccurrencesForPeriod(rows, input);
   const rowIds = rows.map((row) => row.id);
-  const existingWorkOrders = rowIds.length ? await prisma.workOrder.findMany({
-    where: { ppmId: { in: rowIds }, plannedStart: planningWindow.dateFilter, status: { notIn: [...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE] as any } },
-    select: { id: true, ppmId: true, woNo: true, status: true, plannedStart: true, dueAt: true },
-  }) : [];
-  const existingByPpmDate = new Map(existingWorkOrders.map((workOrder) => [`${workOrder.ppmId || ""}|${workOrder.plannedStart.toISOString().slice(0, 10)}`, workOrder]));
+  const existingWorkOrders = rowIds.length
+    ? await prisma.workOrder.findMany({
+        where: {
+          ppmId: { in: rowIds },
+          plannedStart: planningWindow.dateFilter,
+          status: { notIn: [...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE] as any },
+        },
+        select: {
+          id: true,
+          ppmId: true,
+          woNo: true,
+          status: true,
+          plannedStart: true,
+          dueAt: true,
+        },
+      })
+    : [];
+  const existingByPpmDate = new Map(
+    existingWorkOrders.map((workOrder) => [
+      `${workOrder.ppmId || ""}|${workOrder.plannedStart.toISOString().slice(0, 10)}`,
+      workOrder,
+    ]),
+  );
   const previewRows = occurrences.map((occurrence) => {
     const row = occurrence.row;
-    const scheduledDateText = occurrence.scheduledDate.toISOString().slice(0, 10);
+    const scheduledDateText = occurrence.scheduledDate
+      .toISOString()
+      .slice(0, 10);
     const existing = existingByPpmDate.get(`${row.id}|${scheduledDateText}`);
     return {
       ppmId: row.id,
@@ -376,8 +648,17 @@ async function buildPpmWorkOrderPreview(ppm: PpmRecord, input: z.infer<typeof sc
 export async function POST(request: Request) {
   try {
     const input = schema.parse(await request.json());
-    const requiredPermission = ["accept", "start", "hold", "submit"].includes(input.action) ? "ppm.execute" : ["approve", "reject", "rework", "close"].includes(input.action) ? "ppm.approve" : "ppm.manage";
-    const { error, user } = await requireAnyPermission([requiredPermission, "ppm.manage"]);
+    const requiredPermission = ["accept", "start", "hold", "submit"].includes(
+      input.action,
+    )
+      ? "ppm.execute"
+      : ["approve", "reject", "rework", "close"].includes(input.action)
+        ? "ppm.approve"
+        : "ppm.manage";
+    const { error, user } = await requireAnyPermission([
+      requiredPermission,
+      "ppm.manage",
+    ]);
     if (error) return error;
     const ppm = await loadPpm(input.ppmId);
     if (!ppm) throw new Error("PPM plan not found");
@@ -388,20 +669,29 @@ export async function POST(request: Request) {
       supervisorEmail: input.supervisorEmail ?? ppm.supervisorEmail,
     };
     let workOrder = await findWorkflowWorkOrder(ppm, input);
-    let workflowStatus: typeof workflowStatuses[number] | undefined;
+    let workflowStatus: (typeof workflowStatuses)[number] | undefined;
     const workUpdate: any = {};
     const ppmUpdate: any = { ...assignmentData };
 
     if (input.action === "schedule") workflowStatus = "SCHEDULED";
     if (input.action === "preview") {
       const preview = await buildPpmWorkOrderPreview(ppm, input);
-      return NextResponse.json({ ppm, preview, groupCode: preview.groupCode, totalWorkOrders: preview.total });
+      return NextResponse.json({
+        ppm,
+        preview,
+        groupCode: preview.groupCode,
+        totalWorkOrders: preview.total,
+      });
     }
     if (input.action === "generate") {
       const generation = await createPpmWorkOrdersForGroup(ppm, input, user);
-      const selectedResult = generation.results.find((item) => item.ppmId === ppm.id) || generation.results[0];
+      const selectedResult =
+        generation.results.find((item) => item.ppmId === ppm.id) ||
+        generation.results[0];
       workOrder = selectedResult?.workOrder || null;
-      const updatedPpm = await prisma.preventiveMaintenance.findUnique({ where: { id: ppm.id } });
+      const updatedPpm = await prisma.preventiveMaintenance.findUnique({
+        where: { id: ppm.id },
+      });
       const preview = {
         groupCode: generation.groupCode,
         effectiveDate: generation.effectiveDate,
@@ -433,13 +723,34 @@ export async function POST(request: Request) {
         action: "PPM_WORKFLOW_GENERATE",
         entity: "preventive_maintenance",
         entityId: ppm.id,
-        details: { before: ppm, input, groupCode: generation.groupCode, dueMonth: generation.dueMonth, periodStart: generation.periodStart, periodEnd: generation.periodEnd, effectiveDate: generation.effectiveDate, total: generation.total, createdCount: generation.createdCount, reusedCount: generation.reusedCount },
+        details: {
+          before: ppm,
+          input,
+          groupCode: generation.groupCode,
+          dueMonth: generation.dueMonth,
+          periodStart: generation.periodStart,
+          periodEnd: generation.periodEnd,
+          effectiveDate: generation.effectiveDate,
+          total: generation.total,
+          createdCount: generation.createdCount,
+          reusedCount: generation.reusedCount,
+        },
       });
       return NextResponse.json({
         ppm: updatedPpm,
         workOrder,
         workOrders: generation.results.map((item) => item.workOrder),
-        generatedRows: generation.results.map((item: any) => ({ ppmId: item.ppmId, code: item.code, workOrderId: item.workOrder.id, woNo: item.workOrder.woNo, created: item.created, nextDue: item.scheduledDate || item.nextDue, scheduledDate: item.scheduledDate?.toISOString?.().slice(0, 10) || "", frequency: item.frequency, periodUom: item.periodUom })),
+        generatedRows: generation.results.map((item: any) => ({
+          ppmId: item.ppmId,
+          code: item.code,
+          workOrderId: item.workOrder.id,
+          woNo: item.workOrder.woNo,
+          created: item.created,
+          nextDue: item.scheduledDate || item.nextDue,
+          scheduledDate: item.scheduledDate?.toISOString?.().slice(0, 10) || "",
+          frequency: item.frequency,
+          periodUom: item.periodUom,
+        })),
         preview,
         groupCode: generation.groupCode,
         effectiveDate: generation.effectiveDate,
@@ -449,48 +760,95 @@ export async function POST(request: Request) {
         reusedCount: generation.reusedCount,
         periodStart: generation.periodStart,
         periodEnd: generation.periodEnd,
-        message: `Created ${generation.createdCount.toLocaleString()} new PPM work orders and linked ${generation.total.toLocaleString()} work orders for ${generation.periodStart} to ${generation.periodEnd}.`, 
+        message: `Created ${generation.createdCount.toLocaleString()} new PPM work orders and linked ${generation.total.toLocaleString()} work orders for ${generation.periodStart} to ${generation.periodEnd}.`,
       });
     }
     if (input.action === "assign") {
       workOrder = await createPpmWorkOrder(ppm, input, user);
-      workflowStatus = assignmentData.assignedTeamCode || assignmentData.technicianEmail ? "ASSIGNED" : "SCHEDULED";
+      workflowStatus =
+        assignmentData.assignedTeamCode || assignmentData.technicianEmail
+          ? "ASSIGNED"
+          : "SCHEDULED";
       ppmUpdate.generatedWorkOrderId = workOrder.id;
       ppmUpdate.lastGeneratedAt = new Date();
       if (workOrder) {
         workUpdate.assignedTeamCode = assignmentData.assignedTeamCode || null;
-        workUpdate.assignedToId = await findUserId(assignmentData.technicianEmail) || null;
+        workUpdate.assignedToId =
+          (await findUserId(assignmentData.technicianEmail)) || null;
         workUpdate.status = "ASSIGNED";
       }
     }
-    if (!workOrder && !["schedule", "cancel"].includes(input.action)) throw new Error("Generate the PPM work order first, then run this workflow action.");
-    if (input.action === "accept") { workflowStatus = "ASSIGNED"; workUpdate.status = "ACCEPTED"; workUpdate.responseAt = new Date(); }
-    if (input.action === "start") { workflowStatus = "IN_PROGRESS"; workUpdate.status = "IN_PROGRESS"; workUpdate.responseAt = workOrder?.responseAt || new Date(); }
-    if (input.action === "hold") { workflowStatus = "ON_HOLD"; workUpdate.status = "ON_HOLD"; }
+    if (!workOrder && !["schedule", "cancel"].includes(input.action))
+      throw new Error(
+        "Generate the PPM work order first, then run this workflow action.",
+      );
+    if (input.action === "accept") {
+      workflowStatus = "ASSIGNED";
+      workUpdate.status = "ACCEPTED";
+      workUpdate.responseAt = new Date();
+    }
+    if (input.action === "start") {
+      workflowStatus = "IN_PROGRESS";
+      workUpdate.status = "IN_PROGRESS";
+      workUpdate.responseAt = workOrder?.responseAt || new Date();
+    }
+    if (input.action === "hold") {
+      workflowStatus = "ON_HOLD";
+      workUpdate.status = "ON_HOLD";
+    }
     if (input.action === "submit") {
-      if (ppm.checklistMandatory && !input.checklistCompleted) throw new Error("Mandatory checklist must be completed before submitting for supervisor review.");
+      if (ppm.checklistMandatory && !input.checklistCompleted)
+        throw new Error(
+          "Mandatory checklist must be completed before submitting for supervisor review.",
+        );
       workflowStatus = "SUBMITTED";
       workUpdate.status = "PENDING_SUPERVISOR_REVIEW";
       workUpdate.resolutionAt = new Date();
-      workUpdate.workNotes = [workOrder?.workNotes, workflowNote(input)].filter(Boolean).join("\n\n");
+      workUpdate.workNotes = [workOrder?.workNotes, workflowNote(input)]
+        .filter(Boolean)
+        .join("\n\n");
       workUpdate.photoUrls = input.photoUrls || workOrder?.photoUrls;
       workUpdate.assetsUsed = input.labor || workOrder?.assetsUsed;
       workUpdate.inventoryUsed = input.materials || workOrder?.inventoryUsed;
-      workUpdate.materialRequest = input.materials || workOrder?.materialRequest;
+      workUpdate.materialRequest =
+        input.materials || workOrder?.materialRequest;
     }
-    if (input.action === "approve") { workflowStatus = "COMPLETED"; workUpdate.status = "VERIFIED"; workUpdate.verifiedAt = new Date(); workUpdate.supervisorDecision = input.supervisorDecision || "Approved by supervisor."; }
-    if (input.action === "reject" || input.action === "rework") { workflowStatus = "REWORK"; workUpdate.status = "REOPENED"; workUpdate.rejectionReason = input.rejectionReason || input.supervisorDecision || "Returned for rework."; workUpdate.supervisorDecision = input.supervisorDecision || "Returned for rework."; }
+    if (input.action === "approve") {
+      workflowStatus = "COMPLETED";
+      workUpdate.status = "VERIFIED";
+      workUpdate.verifiedAt = new Date();
+      workUpdate.supervisorDecision =
+        input.supervisorDecision || "Approved by supervisor.";
+    }
+    if (input.action === "reject" || input.action === "rework") {
+      workflowStatus = "REWORK";
+      workUpdate.status = "REOPENED";
+      workUpdate.rejectionReason =
+        input.rejectionReason ||
+        input.supervisorDecision ||
+        "Returned for rework.";
+      workUpdate.supervisorDecision =
+        input.supervisorDecision || "Returned for rework.";
+    }
     if (input.action === "close") {
       workflowStatus = "CLOSED";
       workUpdate.status = "CLOSED";
       workUpdate.finishedAt = new Date();
       workUpdate.verifiedAt = workOrder?.verifiedAt || new Date();
       ppmUpdate.lastCompletedAt = new Date();
-      ppmUpdate.nextDue = nextDueDate(new Date(ppm.nextDue), ppm.frequency, ppm.periodUom);
+      ppmUpdate.nextDue = nextDueDate(
+        new Date(ppm.nextDue),
+        ppm.frequency,
+        ppm.periodUom,
+      );
     }
-    if (input.action === "cancel") { workflowStatus = "CANCELLED"; if (workOrder) workUpdate.status = "REJECTED"; }
+    if (input.action === "cancel") {
+      workflowStatus = "CANCELLED";
+      if (workOrder) workUpdate.status = "REJECTED";
+    }
     if (input.action === "defect") {
-      if (!input.defectDescription?.trim()) throw new Error("Defect description is required.");
+      if (!input.defectDescription?.trim())
+        throw new Error("Defect description is required.");
       const corrective = await prisma.workOrder.create({
         data: {
           woNo: `CWO-${String((await prisma.workOrder.count()) + 81001).padStart(5, "0")}`,
@@ -501,7 +859,14 @@ export async function POST(request: Request) {
           assignedTeamCode: ppm.assignedTeamCode || null,
           priority: "HIGH",
           status: "PENDING_ASSIGNMENT",
-          assetId: ppm.assetTag ? (await prisma.asset.findUnique({ where: { tag: ppm.assetTag }, select: { id: true } }))?.id : undefined,
+          assetId: ppm.assetTag
+            ? (
+                await prisma.asset.findUnique({
+                  where: { tag: ppm.assetTag },
+                  select: { id: true },
+                })
+              )?.id
+            : undefined,
           ppmId: ppm.id,
           plannedStart: new Date(),
           dueAt: addDays(new Date(), 3),
@@ -512,29 +877,56 @@ export async function POST(request: Request) {
           workNotes: `Linked PPM: ${ppm.ppmCode || ppm.code}\nLinked PPM WO: ${workOrder?.woNo || "Not generated"}`,
         },
       });
-      await auditAction({ user, action: "PPM_DEFECT_CORRECTIVE_WO_CREATE", entity: "work_order", entityId: corrective.id, details: { ppm, input, corrective } });
+      await auditAction({
+        user,
+        action: "PPM_DEFECT_CORRECTIVE_WO_CREATE",
+        entity: "work_order",
+        entityId: corrective.id,
+        details: { ppm, input, corrective },
+      });
       return NextResponse.json({ ppm, workOrder, corrective });
     }
 
     if (workOrder && Object.keys(workUpdate).length) {
-      workOrder = await prisma.workOrder.update({ where: { id: workOrder.id }, data: workUpdate });
+      workOrder = await prisma.workOrder.update({
+        where: { id: workOrder.id },
+        data: workUpdate,
+      });
     }
-    const updatedPpm = await prisma.preventiveMaintenance.update({ where: { id: ppm.id }, data: { ...ppmUpdate, ...(workflowStatus ? { workflowStatus } : {}) } });
+    const updatedPpm = await prisma.preventiveMaintenance.update({
+      where: { id: ppm.id },
+      data: { ...ppmUpdate, ...(workflowStatus ? { workflowStatus } : {}) },
+    });
 
     if (input.action === "close" && workOrder?.assetId) {
-      await prisma.assetHistory.create({ data: { assetId: workOrder.assetId, eventType: "PPM_CLOSED", title: `${workOrder.woNo} closed`, details: `PPM ${updatedPpm.ppmCode || updatedPpm.code} closed. Next due: ${updatedPpm.nextDue.toISOString().slice(0, 10)}.`, actor: user?.name || user?.email || "System" } });
+      await prisma.assetHistory.create({
+        data: {
+          assetId: workOrder.assetId,
+          eventType: "PPM_CLOSED",
+          title: `${workOrder.woNo} closed`,
+          details: `PPM ${updatedPpm.ppmCode || updatedPpm.code} closed. Next due: ${updatedPpm.nextDue.toISOString().slice(0, 10)}.`,
+          actor: user?.name || user?.email || "System",
+        },
+      });
     }
 
-    await auditAction({ user, action: `PPM_WORKFLOW_${input.action.toUpperCase()}`, entity: "preventive_maintenance", entityId: ppm.id, details: { before: ppm, input, after: updatedPpm, workOrder } });
+    await auditAction({
+      user,
+      action: `PPM_WORKFLOW_${input.action.toUpperCase()}`,
+      entity: "preventive_maintenance",
+      entityId: ppm.id,
+      details: { before: ppm, input, after: updatedPpm, workOrder },
+    });
     return NextResponse.json({
       ppm: updatedPpm,
       workOrder,
-      message: `PPM workflow action ${input.action.replace(/_/g, " ")} completed successfully.`, 
+      message: `PPM workflow action ${input.action.replace(/_/g, " ")} completed successfully.`,
     });
   } catch (error) {
-    return apiError(error, "Unable to process PPM workflow");
+    return apiError(
+      error,
+      error instanceof Error ? error.message : "Unable to process PPM workflow",
+      error instanceof Error ? 400 : 500,
+    );
   }
 }
-
-
-
