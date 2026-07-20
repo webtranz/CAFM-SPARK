@@ -76,8 +76,8 @@ export async function GET(request: Request) {
     const assetTags = [...new Set(groupedPpms.map((item) => item.assetTag).filter(Boolean))];
     const locationCodes = [...new Set(groupedPpms.map((item) => item.locationCode).filter(Boolean))];
     const [assets, locations] = await Promise.all([
-      assetTags.length ? prisma.asset.findMany({ where: { tag: { in: assetTags } } }) : [],
-      locationCodes.length ? prisma.location.findMany({ where: { code: { in: locationCodes } } }) : [],
+      assetTags.length ? prisma.asset.findMany({ where: { tag: { in: assetTags } }, select: { id: true, tag: true, name: true, assetDescription: true, locationCode: true, locationDesc: true, departmentCode: true, category: true, categoryDesc: true, buildingCode: true, floor: true, room: true, status: true } }) : [],
+      locationCodes.length ? prisma.location.findMany({ where: { code: { in: locationCodes } }, select: { id: true, code: true, site: true, zone: true, building: true, floor: true, room: true, type: true, description: true, parentLocation: true, locationClass: true, active: true } }) : [],
     ]);
     const assetByTag = new Map(assets.map((asset) => [asset.tag, asset]));
     const locationByCode = new Map(locations.map((location) => [location.code, location]));
@@ -135,7 +135,6 @@ export async function GET(request: Request) {
       { frequency: { contains: query, mode: "insensitive" } },
       { periodUom: { contains: query, mode: "insensitive" } },
       ...(workflowQuery ? [{ workflowStatus: { equals: workflowQuery } }] : []),
-      { checklist: { contains: query, mode: "insensitive" } },
     ];
   }
   const [total, ppms] = await Promise.all([

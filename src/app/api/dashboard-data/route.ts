@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 import { emptyOperatingData } from "@/lib/empty-operating-data";
 import { prisma } from "@/lib/prisma";
-import { ensureDefaultRbac } from "@/lib/rbac-seed";
+import { ensureDefaultRbacOnce } from "@/lib/rbac-runtime";
 import { getTotalEntryCounts } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,7 @@ export async function GET() {
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
   try {
-    await ensureDefaultRbac();
+    await ensureDefaultRbacOnce();
 
     const [
       requests,

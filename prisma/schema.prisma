@@ -442,6 +442,8 @@ model ServiceRequest {
   @@index([departmentCode, createdAt])
   @@index([assignedTeamCode, createdAt])
   @@index([status, createdAt])
+  @@index([createdAt])
+  @@index([updatedAt])
 }
 
 model WorkOrder {
@@ -495,6 +497,8 @@ model WorkOrder {
   @@index([assignedTeamCode, dueAt])
   @@index([assignedToId, dueAt])
   @@index([ppmId])
+  @@index([createdAt])
+  @@index([updatedAt])
 }
 
 model Location {
@@ -517,6 +521,7 @@ model Location {
   @@index([parentLocation])
   @@index([locationClass])
   @@index([residential])
+  @@index([code, createdAt])
 }
 
 model JobPlan {
@@ -573,6 +578,10 @@ model PreventiveMaintenance {
   @@index([ppmCode])
   @@index([workflowStatus, nextDue])
   @@index([assignedTeamCode, technicianEmail, supervisorEmail])
+  @@index([nextDue])
+  @@index([active, nextDue])
+  @@index([departmentCode, nextDue])
+  @@index([locationCode, nextDue])
 }
 
 model PpmChecklistHistory {
@@ -623,6 +632,7 @@ model PpmChecklistHistory {
   @@index([workOrderId])
   @@index([assetId])
   @@index([ppmId])
+  @@index([createdAt])
 }
 model InventoryItem {
   id           String           @id @default(cuid())
@@ -772,6 +782,7 @@ model CommentHistory {
   @@index([sourceFile])
   @@index([linkStatus])
   @@index([workOrderId])
+  @@index([createdAt])
 }
 model AuditLog {
   id        String   @id @default(cuid())
@@ -862,6 +873,7 @@ model HousingRoom {
   holds             HousingRoomHold[]
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
+  @@index([status, roomNumber])
 }
 
 model HousingBed {
@@ -893,6 +905,8 @@ model HousingResident {
   bookings       HousingBooking[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
+  @@index([name])
+  @@index([residentNo, name])
 }
 
 model HousingBooking {
@@ -947,6 +961,9 @@ model HousingBooking {
   @@index([departmentCode, createdAt])
   @@index([checkIn])
   @@index([checkOut])
+  @@index([checkIn, status])
+  @@index([checkOut, status])
+  @@index([employeeId])
 }
 
 model HousingInspection {
@@ -1201,4 +1218,3 @@ model HousingHistory {
   @@index([roomId, createdAt])
   @@index([bookingId, createdAt])
 }
-

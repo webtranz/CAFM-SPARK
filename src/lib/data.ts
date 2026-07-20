@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { fallbackData } from "@/lib/demo-data";
-import { ensureDefaultRbac } from "@/lib/rbac-seed";
+import { ensureDefaultRbacOnce } from "@/lib/rbac-runtime";
 
 type OperatingUser = {
   id?: string;
@@ -27,30 +27,9 @@ function departmentValues(user: OperatingUser) {
 const INITIAL_LOAD_LIMIT = 50;
 const INITIAL_REFERENCE_LIMIT = 150;
 
-function countChecklistItems(plans: Array<{ checklist: string | null }>) {
-  return plans.reduce((total, plan) => {
-    const checklist = String(plan.checklist ?? "").trim();
-    if (!checklist) return total;
-    try {
-      const parsed = JSON.parse(checklist);
-      if (Array.isArray(parsed)) return total + parsed.length;
-    } catch {
-      // Uploaded legacy checklists are usually plain text lines.
-    }
-    return total + checklist.split(/\r?\n|;/).map((item) => item.trim()).filter(Boolean).length;
-  }, 0);
-}
-
-function countWorkOrderComments(rows: Array<{ workNotes: string | null }>) {
-  return rows.reduce((total, row) => {
-    const notes = String(row.workNotes ?? "").trim();
-    if (!notes) return total;
-    return total + notes.split(/\r?\n/).map((note) => note.trim()).filter(Boolean).length;
-  }, 0);
-}
 
 export async function getTotalEntryCounts() {
-  const [assetRegistry, locationList, workOrdersHistory, ppmSchedules, ppmChecklistRows, ppmChecklistHistoryRows, omManuals, serviceRequestHistory, casesAndIncidents, commentRows, commentHistoryRows, rooms, guestProfiles, guestStayOccupancy] = await Promise.all([
+  const [assetRegistry, locationList, workOrdersHistory, ppmSchedules, ppmChecklistHistoryRows, omManuals, serviceRequestHistory, casesAndIncidents, commentHistoryRows, rooms, guestProfiles, guestStayOccupancy] = await Promise.all([
     prisma.asset.count(),
     prisma.location.count(),
     prisma.workOrder.count(),
@@ -60,7 +39,6 @@ export async function getTotalEntryCounts() {
     prisma.documentUpload.count({ where: { category: "OM_MANUAL" } }),
     prisma.serviceRequest.count({ where: { isIncidentCase: false } }),
     prisma.serviceRequest.count({ where: { isIncidentCase: true } }),
-    prisma.workOrder.findMany({ where: { NOT: { workNotes: null } }, select: { workNotes: true } }),
     prisma.commentHistory.count(),
     prisma.housingRoom.count(),
     prisma.housingResident.count(),
@@ -72,11 +50,11 @@ export async function getTotalEntryCounts() {
     locationList,
     workOrdersHistory,
     ppmSchedules,
-    ppmWoChecklistItemsHistory: countChecklistItems(ppmChecklistRows) + ppmChecklistHistoryRows,
+    ppmWoChecklistItemsHistory: ppmChecklistHistoryRows,
     omManuals,
     serviceRequestHistory,
     casesAndIncidents,
-    commentHistory: commentHistoryRows || countWorkOrderComments(commentRows),
+    commentHistory: commentHistoryRows,
     rooms,
     guestProfiles,
     guestStayOccupancy,
@@ -88,7 +66,7 @@ export async function getOperatingData(user: OperatingUser = null) {
   }
 
   try {
-    await ensureDefaultRbac();
+    await ensureDefaultRbacOnce();
 
     const kind = roleKind(user);
     const departmentsForUser = departmentValues(user);
