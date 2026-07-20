@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode, UIEvent } from "react";
 import Image from "next/image";
 import {
@@ -6234,6 +6234,7 @@ function PmPreviewModal({
   const [workflowEffectiveDate, setWorkflowEffectiveDate] = useState(PPM_WORK_ORDER_EFFECTIVE_DATE);
   const [workflowDueMonth, setWorkflowDueMonth] = useState(ppmMonthInputValue(ppm.nextDue));
   const [workflowPreview, setWorkflowPreview] = useState<any | null>(null);
+  const [workflowPreviewLoading, setWorkflowPreviewLoading] = useState(false);
   const [checklistCompleted, setChecklistCompleted] = useState(false);
   const [workflowRemarks, setWorkflowRemarks] = useState("");
   const [workflowReadings, setWorkflowReadings] = useState("");
@@ -6250,6 +6251,7 @@ function PmPreviewModal({
   }));
   const workflowMessageIsSuccess = /created|generated|linked|preview ready/i.test(workflowError);
   const canCreatePreviewedWorkOrders = Boolean(workflowPreview?.total);
+  const previewRows = Array.isArray(workflowPreview?.rows) ? workflowPreview.rows : [];
   const workflowActionButtons: Array<[string, string]> = [
     ["schedule", "Schedule"],
     ["preview", "Preview Month WOs"],
@@ -6265,6 +6267,42 @@ function PmPreviewModal({
     ["cancel", "Cancel"],
     ["defect", "Create Corrective WO"],
   ];
+  const loadPpmWorkOrderPreview = useCallback(async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (!workflowRecord.id) return;
+    if (!silent) {
+      setWorkflowBusy("preview");
+      setWorkflowError("");
+    }
+    setWorkflowPreviewLoading(true);
+    try {
+      const response = await fetch("/api/ppm/workflow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ppmId: workflowRecord.id,
+          action: "preview",
+          effectiveDate: workflowEffectiveDate || PPM_WORK_ORDER_EFFECTIVE_DATE,
+          dueMonth: workflowDueMonth || ppmMonthInputValue(workflowRecord.nextDue),
+          assignedTeamCode: workflowRecord.assignedTeamCode || "",
+          technicianEmail: workflowRecord.technicianEmail || "",
+          supervisorEmail: workflowRecord.supervisorEmail || "",
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || "Unable to load PPM work order preview.");
+      setWorkflowPreview(result.preview || null);
+      if (!silent && result.preview) {
+        setWorkflowError(`Preview ready: ${Number(result.preview.total || 0).toLocaleString()} total work orders for ${result.preview.dueMonth}, ${Number(result.preview.createCount || 0).toLocaleString()} new and ${Number(result.preview.reuseCount || 0).toLocaleString()} already linked.`);
+      }
+      if (!silent && !result.preview) setWorkflowError("No PPM work orders are due for the selected month.");
+    } catch (error: any) {
+      setWorkflowPreview(null);
+      if (!silent) setWorkflowError(error?.message || "Unable to load PPM work order preview.");
+    } finally {
+      setWorkflowPreviewLoading(false);
+      if (!silent) setWorkflowBusy(null);
+    }
+  }, [workflowEffectiveDate, workflowDueMonth, workflowRecord.id, workflowRecord.nextDue, workflowRecord.assignedTeamCode, workflowRecord.technicianEmail, workflowRecord.supervisorEmail]);
   useEffect(() => {
     let mounted = true;
     setPpmGroup(null);
@@ -6280,6 +6318,13 @@ function PmPreviewModal({
       .catch(() => { if (mounted) setPpmGroup(null); });
     return () => { mounted = false; };
   }, [ppm.id, ppmGroupCode, ppm.locationCode, asset?.locationCode]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadPpmWorkOrderPreview({ silent: true });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [loadPpmWorkOrderPreview]);
 
   async function savePpmLocation() {
     const nextLocationCode = editableLocationCode.trim();
@@ -6311,6 +6356,10 @@ function PmPreviewModal({
   }
 
   async function runPpmWorkflow(action: string) {
+    if (action === "preview") {
+      await loadPpmWorkOrderPreview();
+      return;
+    }
     if (action === "generate" && !canCreatePreviewedWorkOrders) {
       setWorkflowError("Preview ready is required before creating monthly PPM work orders.");
       return;
@@ -6428,30 +6477,32 @@ function PmPreviewModal({
             </label>
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
               <p className="text-xs font-black uppercase text-slate-500">Total Work Orders Preview</p>
-              <p className="mt-1 text-2xl font-black text-ink">{workflowPreview ? Number(workflowPreview.total || 0).toLocaleString() : "-"}</p>
+              <p className="mt-1 text-2xl font-black text-ink">{workflowPreviewLoading && !workflowPreview ? "Loading..." : workflowPreview ? Number(workflowPreview.total || 0).toLocaleString() : "0"}</p>
               <p className="text-xs font-bold text-slate-500">Default effective date is 01/01/2026.</p>
             </div>
           </div>
-          {workflowPreview && (
-            <div className="mt-4 rounded-lg border border-lagoon/20 bg-lagoon/5 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-black uppercase text-slate-500">Work Order Generation Preview</p>
-                  <h5 className="mt-1 font-black text-ink">{workflowPreview.groupCode} / {workflowPreview.dueMonth} / Effective {formatDateCell(workflowPreview.effectiveDate)}</h5>
-                </div>
-                <div className="flex flex-wrap gap-2 text-xs font-black">
-                  <span className="rounded-full bg-white px-3 py-1 text-lagoon">Total {Number(workflowPreview.total || 0).toLocaleString()}</span>
-                  <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">New {Number(workflowPreview.createCount || 0).toLocaleString()}</span>
-                  <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">Already linked {Number(workflowPreview.reuseCount || 0).toLocaleString()}</span>
-                </div>
+          <div className="mt-4 rounded-lg border border-lagoon/20 bg-lagoon/5 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase text-slate-500">Work Order Generation Preview</p>
+                <h5 className="mt-1 font-black text-ink">{workflowPreview?.groupCode || ppmGroupCode} / {workflowPreview?.dueMonth || workflowDueMonth || "Selected month"} / Effective {formatDateCell(workflowPreview?.effectiveDate || workflowEffectiveDate || PPM_WORK_ORDER_EFFECTIVE_DATE)}</h5>
               </div>
-              <div className="mt-3 max-h-72 overflow-auto rounded-lg border border-white/70 bg-white">
-                <table className="w-full min-w-[900px] text-left text-xs">
-                  <thead className="sticky top-0 bg-slate-700 text-white">
-                    <tr><th className="px-3 py-2">#</th><th className="px-3 py-2">PPM Row</th><th className="px-3 py-2">Asset / Location</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Due Date</th><th className="px-3 py-2">Action</th></tr>
-                  </thead>
-                  <tbody>
-                    {(workflowPreview.rows || []).map((row: any, index: number) => (
+              <div className="flex flex-wrap gap-2 text-xs font-black">
+                <span className="rounded-full bg-white px-3 py-1 text-lagoon">Total {workflowPreviewLoading && !workflowPreview ? "Loading..." : Number(workflowPreview?.total || 0).toLocaleString()}</span>
+                <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">New {Number(workflowPreview?.createCount || 0).toLocaleString()}</span>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-600">Already linked {Number(workflowPreview?.reuseCount || 0).toLocaleString()}</span>
+              </div>
+            </div>
+            <div className="mt-3 max-h-72 overflow-auto rounded-lg border border-white/70 bg-white">
+              <table className="w-full min-w-[900px] text-left text-xs">
+                <thead className="sticky top-0 bg-slate-700 text-white">
+                  <tr><th className="px-3 py-2">#</th><th className="px-3 py-2">PPM Row</th><th className="px-3 py-2">Asset / Location</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Due Date</th><th className="px-3 py-2">Action</th></tr>
+                </thead>
+                <tbody>
+                  {workflowPreviewLoading ? (
+                    <tr><td colSpan={6} className="px-3 py-6 text-center font-black text-slate-500">Loading PPM work order preview...</td></tr>
+                  ) : previewRows.length ? (
+                    previewRows.map((row: any, index: number) => (
                       <tr key={row.ppmId || row.code || index} className="border-t border-slate-100">
                         <td className="px-3 py-2 font-black text-slate-500">{index + 1}</td>
                         <td className="px-3 py-2 font-bold">{row.code}</td>
@@ -6460,13 +6511,15 @@ function PmPreviewModal({
                         <td className="px-3 py-2">{formatDateCell(row.nextDue)}</td>
                         <td className="px-3 py-2"><span className={`rounded-full px-2 py-1 font-black ${row.willCreate ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{row.willCreate ? "Create WO" : `Linked ${row.existingWorkOrderNo || row.workOrderNo || "WO"}`}</span></td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {workflowPreview.limited && <p className="mt-2 text-xs font-bold text-slate-500">Preview shows first 300 rows only. Total count above will be used for creation.</p>}
+                    ))
+                  ) : (
+                    <tr><td colSpan={6} className="px-3 py-6 text-center font-black text-slate-500">No PPM work orders are due for this PPM code and selected month.</td></tr>
+                  )}
+                </tbody>
+              </table>
             </div>
-          )}
+            {workflowPreview?.limited && <p className="mt-2 text-xs font-bold text-slate-500">Preview shows first 300 rows only. Total count above will be used for creation.</p>}
+          </div>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             <select value={workflowRecord.assignedTeamCode || ""} onChange={(event) => setWorkflowPpm((current: any) => ({ ...(current || workflowRecord), assignedTeamCode: event.target.value }))} className={TICKET_PLAN_FIELD_CLASS}>
               <option value="">Team</option>
