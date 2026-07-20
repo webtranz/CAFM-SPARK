@@ -6444,7 +6444,6 @@ function PmPreviewModal({
           <RequestPriorityBadge priority={priority} />
         </div>
         <div className="grid gap-3 md:grid-cols-2">
-          <PreviewField label="Starting From" value={formatDateCell(workflowEffectiveDate || PPM_WORK_ORDER_EFFECTIVE_DATE)} />
           <PreviewField label="Progression" value={ppm.active ? "Active" : "Paused"} />
           <PreviewField label="Time to Complete" value={`${ppm.durationHrs || 0} hrs`} />
           <PreviewField label="Work Type" value="Preventive" />
@@ -6466,11 +6465,7 @@ function PmPreviewModal({
             <span className="rounded-full bg-lagoon/10 px-3 py-1 text-xs font-black text-lagoon">{String(workflowRecord.workflowStatus || "DRAFT").replaceAll("_", " ")}</span>
           </div>
           {workflowError && <p className={`mt-3 rounded-lg p-3 text-sm font-black ${workflowMessageIsSuccess ? "bg-emerald-50 text-emerald-700" : "bg-coral/10 text-coral"}`}>{workflowError}</p>}
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
-              Effective From
-              <input type="date" value={workflowEffectiveDate} onChange={(event) => { setWorkflowEffectiveDate(event.target.value || PPM_WORK_ORDER_EFFECTIVE_DATE); setWorkflowPreview(null); }} className={`${TICKET_PLAN_FIELD_CLASS} normal-case`} />
-            </label>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
             <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
               Due Month
               <input type="month" value={workflowDueMonth} onChange={(event) => { setWorkflowDueMonth(event.target.value); setWorkflowPreview(null); }} className={`${TICKET_PLAN_FIELD_CLASS} normal-case`} />
@@ -6478,14 +6473,14 @@ function PmPreviewModal({
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
               <p className="text-xs font-black uppercase text-slate-500">Total Work Orders Preview</p>
               <p className="mt-1 text-2xl font-black text-ink">{workflowPreviewLoading && !workflowPreview ? "Loading..." : workflowPreview ? Number(workflowPreview.total || 0).toLocaleString() : "0"}</p>
-              <p className="text-xs font-bold text-slate-500">Default effective date is 01/01/2026.</p>
+              <p className="text-xs font-bold text-slate-500">Preview refreshes automatically for the selected due month.</p>
             </div>
           </div>
           <div className="mt-4 rounded-lg border border-lagoon/20 bg-lagoon/5 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-black uppercase text-slate-500">Work Order Generation Preview</p>
-                <h5 className="mt-1 font-black text-ink">{workflowPreview?.groupCode || ppmGroupCode} / {workflowPreview?.dueMonth || workflowDueMonth || "Selected month"} / Effective {formatDateCell(workflowPreview?.effectiveDate || workflowEffectiveDate || PPM_WORK_ORDER_EFFECTIVE_DATE)}</h5>
+                <h5 className="mt-1 font-black text-ink">{workflowPreview?.groupCode || ppmGroupCode} / {workflowPreview?.dueMonth || workflowDueMonth || "Selected month"}</h5>
               </div>
               <div className="flex flex-wrap gap-2 text-xs font-black">
                 <span className="rounded-full bg-white px-3 py-1 text-lagoon">Total {workflowPreviewLoading && !workflowPreview ? "Loading..." : Number(workflowPreview?.total || 0).toLocaleString()}</span>
