@@ -246,6 +246,21 @@ async function createPpmWorkOrder(ppm: PpmRecord, input: z.infer<typeof schema>,
   return (await ensurePpmWorkOrder(ppm, input, user)).workOrder;
 }
 
+async function findWorkflowWorkOrder(ppm: PpmRecord, input: z.infer<typeof schema>) {
+  if (ppm.generatedWorkOrderId) {
+    const generated = await prisma.workOrder.findUnique({ where: { id: ppm.generatedWorkOrderId } });
+    if (generated) return generated;
+  }
+  const planningWindow = ppmPlanningWindow(ppm, input);
+  return prisma.workOrder.findFirst({
+    where: {
+      ppmId: ppm.id,
+      plannedStart: planningWindow.dateFilter,
+      status: { notIn: [...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE] as any },
+    },
+    orderBy: [{ plannedStart: "desc" }, { createdAt: "desc" }],
+  });
+}
 type PpmOccurrence = {
   row: PpmRecord;
   scheduledDate: Date;
@@ -372,7 +387,7 @@ export async function POST(request: Request) {
       technicianEmail: input.technicianEmail ?? ppm.technicianEmail,
       supervisorEmail: input.supervisorEmail ?? ppm.supervisorEmail,
     };
-    let workOrder = ppm.generatedWorkOrderId ? await prisma.workOrder.findUnique({ where: { id: ppm.generatedWorkOrderId } }) : null;
+    let workOrder = await findWorkflowWorkOrder(ppm, input);
     let workflowStatus: typeof workflowStatuses[number] | undefined;
     const workUpdate: any = {};
     const ppmUpdate: any = { ...assignmentData };
@@ -434,6 +449,7 @@ export async function POST(request: Request) {
         reusedCount: generation.reusedCount,
         periodStart: generation.periodStart,
         periodEnd: generation.periodEnd,
+        message: `Created ${generation.createdCount.toLocaleString()} new PPM work orders and linked ${generation.total.toLocaleString()} work orders for ${generation.periodStart} to ${generation.periodEnd}.`, 
       });
     }
     if (input.action === "assign") {
@@ -447,7 +463,7 @@ export async function POST(request: Request) {
         workUpdate.status = "ASSIGNED";
       }
     }
-    if (!workOrder && !["schedule", "cancel"].includes(input.action)) throw new Error("Generate the PPM work order first.");
+    if (!workOrder && !["schedule", "cancel"].includes(input.action)) throw new Error("Generate the PPM work order first, then run this workflow action.");
     if (input.action === "accept") { workflowStatus = "ASSIGNED"; workUpdate.status = "ACCEPTED"; workUpdate.responseAt = new Date(); }
     if (input.action === "start") { workflowStatus = "IN_PROGRESS"; workUpdate.status = "IN_PROGRESS"; workUpdate.responseAt = workOrder?.responseAt || new Date(); }
     if (input.action === "hold") { workflowStatus = "ON_HOLD"; workUpdate.status = "ON_HOLD"; }
@@ -510,10 +526,15 @@ export async function POST(request: Request) {
     }
 
     await auditAction({ user, action: `PPM_WORKFLOW_${input.action.toUpperCase()}`, entity: "preventive_maintenance", entityId: ppm.id, details: { before: ppm, input, after: updatedPpm, workOrder } });
-    return NextResponse.json({ ppm: updatedPpm, workOrder });
+    return NextResponse.json({
+      ppm: updatedPpm,
+      workOrder,
+      message: `PPM workflow action ${input.action.replace(/_/g, " ")} completed successfully.`, 
+    });
   } catch (error) {
     return apiError(error, "Unable to process PPM workflow");
   }
 }
+
 
 

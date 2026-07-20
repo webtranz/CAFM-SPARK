@@ -6339,9 +6339,24 @@ function PmPreviewModal({
   }, [groupEquipment, ppm.name, ppmGroupCode, workflowDueMonth, workflowPeriodEnd, workflowPeriodStart, workflowRecord.nextDue]);
   const previewPpmIds = useMemo(() => Array.from(new Set(fallbackWorkflowPreview.rows.map((row: any) => row.ppmId).filter(Boolean))), [fallbackWorkflowPreview.rows]);
   const displayWorkflowPreview = workflowPreview?.total ? workflowPreview : fallbackWorkflowPreview;
-  const workflowMessageIsSuccess = /created|generated|linked|preview ready/i.test(workflowError);
+  const workflowMessageIsSuccess = /created|generated|linked|preview ready|completed|successfully|corrective/i.test(workflowError);
   const canCreatePreviewedWorkOrders = Boolean(displayWorkflowPreview?.total);
   const previewRows = Array.isArray(displayWorkflowPreview?.rows) ? displayWorkflowPreview.rows : [];
+  const workflowActionLabels: Record<string, string> = {
+    schedule: "Schedule",
+    preview: "Preview",
+    generate: "Create Work Orders",
+    assign: "Assign",
+    accept: "Technician Accept",
+    start: "Start Work",
+    hold: "On Hold",
+    submit: "Submit Review",
+    approve: "Approve",
+    rework: "Return Rework",
+    close: "Close",
+    cancel: "Cancel",
+    defect: "Create Corrective WO",
+  };
   const workflowActionButtons: Array<[string, string]> = [
     ["schedule", "Schedule"],
     ["preview", "Preview Period WOs"],
@@ -6512,6 +6527,8 @@ function PmPreviewModal({
       }
       if (result.workOrder) setWorkflowWorkOrder(result.workOrder);
       if (result.corrective) setWorkflowError(`Corrective work order created: ${result.corrective.woNo}`);
+      else if (!Array.isArray(result.generatedRows) && result.message) setWorkflowError(result.message);
+      else if (!Array.isArray(result.generatedRows) && action !== "preview") setWorkflowError(`${workflowActionLabels[action] || action} completed successfully.`);
     } catch (error: any) {
       setWorkflowError(error?.message || "PPM workflow action failed.");
     } finally {
@@ -12888,6 +12905,8 @@ function actionFieldLabel(field: string) {
   };
   return labels[field] || field.replace(/([A-Z])/g, " $1");
 }
+
+
 
 
 
