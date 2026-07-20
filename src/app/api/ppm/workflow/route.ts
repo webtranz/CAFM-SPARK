@@ -110,7 +110,7 @@ function ppmGroupCode(ppm: PpmRecord) {
   return ppm.ppmCode || String(ppm.code || "").split("-")[0] || ppm.code;
 }
 
-function ppmGroupWhere(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth">) {
+function ppmGroupBaseWhere(ppm: PpmRecord) {
   const groupCode = ppmGroupCode(ppm);
   return {
     OR: [
@@ -118,17 +118,39 @@ function ppmGroupWhere(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "eff
       { code: groupCode },
       { code: { startsWith: `${groupCode}-`, mode: "insensitive" as const } },
     ],
+  };
+}
+
+function ppmGroupWhere(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth">) {
+  return {
+    ...ppmGroupBaseWhere(ppm),
     nextDue: ppmPlanningWindow(ppm, input).dateFilter,
   };
 }
 
+function rowIsInsidePlanningWindow(row: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth">) {
+  if (!input?.effectiveDate && !input?.dueMonth) return true;
+  const planningWindow = ppmPlanningWindow(row, input);
+  const nextDue = new Date(row.nextDue);
+  const nextDueTime = nextDue.getTime();
+  return Number.isFinite(nextDueTime) && nextDueTime >= planningWindow.dateFilter.gte.getTime() && nextDueTime < planningWindow.dateFilter.lt.getTime();
+}
+
 async function loadPpmGroup(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth">) {
+  const orderBy = [{ locationCode: "asc" as const }, { assetTag: "asc" as const }, { nextDue: "asc" as const }];
   const rows = await prisma.preventiveMaintenance.findMany({
     where: ppmGroupWhere(ppm, input),
-    orderBy: [{ locationCode: "asc" }, { assetTag: "asc" }, { nextDue: "asc" }],
+    orderBy,
     take: 20000,
   });
-  return rows.length || input?.effectiveDate || input?.dueMonth ? rows : [ppm];
+  if (rows.length || (!input?.effectiveDate && !input?.dueMonth)) return rows.length ? rows : [ppm];
+
+  const unfilteredRows = await prisma.preventiveMaintenance.findMany({
+    where: ppmGroupBaseWhere(ppm),
+    orderBy,
+    take: 20000,
+  });
+  return unfilteredRows.filter((row) => rowIsInsidePlanningWindow(row, input));
 }
 
 async function nextPpmWorkOrderNumber() {
