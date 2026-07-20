@@ -922,17 +922,64 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
 
   async function patchRecord(path: string, body: Record<string, unknown>, successLabel: string, refresh = true) {
     setSaving(true);
-    const response = await fetch(path, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const result = await response.json();
-    setToast(response.ok ? successLabel : cleanMessage(result.message ?? "Action failed."));
-    if (response.ok && refresh) await refreshData();
-    setSaving(false);
+    try {
+      const response = await fetch(path, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json().catch(() => ({}));
+      setToast(response.ok ? successLabel : cleanMessage(result.message ?? "Action failed."));
+      if (response.ok && refresh) await refreshData();
+      return { ok: response.ok, result };
+    } catch (error) {
+      const message = cleanMessage(error instanceof Error ? error.message : "Action failed.");
+      setToast(message);
+      return { ok: false, result: { message } };
+    } finally {
+      setSaving(false);
+    }
   }
 
+  function readableStatus(value: string) {
+    return String(value).replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
+  function mergeWorkOrderRecord(updated: any) {
+    if (!updated?.id) return;
+    setRecords((current) => ({
+      ...current,
+      workOrders: current.workOrders.map((work) => (work.id === updated.id ? { ...work, ...updated } : work)),
+    }));
+  }
+
+  function mergeServiceRequestRecord(updated: any) {
+    if (!updated?.id) return;
+    setRecords((current) => ({
+      ...current,
+      requests: current.requests.map((request) => (request.id === updated.id ? { ...request, ...updated } : request)),
+    }));
+  }
+
+  async function updateWorkOrderRecord(id: string, formData: FormData) {
+    const { ok, result } = await patchRecord(`/api/work-orders/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "Work order updated.", false);
+    if (ok) mergeWorkOrderRecord(result);
+  }
+
+  async function updateWorkStatusRecord(id: string, status: string) {
+    setToast(`Updating work order status to ${readableStatus(status)}...`);
+    const { ok, result } = await patchRecord(`/api/work-orders/${id}`, { status }, "Work order status updated.", false);
+    if (ok) {
+      mergeWorkOrderRecord(result);
+      const nextStatus = readableStatus(String(result.status ?? status));
+      setToast(`Work order${result.woNo ? ` ${result.woNo}` : ""} is now ${nextStatus}.`);
+    }
+  }
+
+  async function updateRequestRecord(id: string, formData: FormData) {
+    const { ok, result } = await patchRecord(`/api/service-requests/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "Service request updated.", false);
+    if (ok) mergeServiceRequestRecord(result);
+  }
   async function updateAsset(id: string, formData: FormData) {
     await patchRecord(`/api/assets/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "Asset updated by admin.");
   }
@@ -1157,7 +1204,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
             </header>
           )}
 
-          {toast && <div className="rounded-lg border border-emerald-100 bg-white p-3 font-medium text-emerald-700 shadow-sm">{toast}</div>}
+          {toast && <div role="status" className="fixed right-6 top-6 z-[80] flex max-w-md items-start gap-3 rounded-lg border border-emerald-100 bg-white p-4 font-medium text-emerald-700 shadow-2xl"><span>{toast}</span><button type="button" onClick={() => setToast("")} className="rounded-md px-2 text-xs font-black text-slate-500 hover:bg-slate-100">Close</button></div>}
           {initialDataLoading && <div className="rounded-lg border border-emerald-100 bg-white p-3 font-medium text-emerald-700 shadow-sm">Loading latest dashboard data...</div>}
 
           {active !== "command" && (
@@ -1203,8 +1250,8 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
               saving={saving}
               permissions={actionPermissions}
               role={user.role}
-              updateWorkOrder={(id, formData) => patchRecord(`/api/work-orders/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "Work order updated by admin.")}
-              updateWorkStatus={(id, status) => patchRecord(`/api/work-orders/${id}`, { status }, `Work order marked ${status}.`)}
+              updateWorkOrder={updateWorkOrderRecord}
+              updateWorkStatus={updateWorkStatusRecord}
               deleteWorkOrder={(id) => deleteRecord(`/api/work-orders/${id}`, "Work order deleted.")}
               deleteWorkOrders={deleteWorkOrders}
             />
@@ -1221,7 +1268,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
               submitRequest={submitRequest}
               permissions={actionPermissions}
               role={user.role}
-              updateRequest={(id, formData) => patchRecord(`/api/service-requests/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "Service request updated by admin.")}
+              updateRequest={updateRequestRecord}
               deleteRequest={(id) => deleteRecord(`/api/service-requests/${id}`, "Service request deleted.")}
               convertRequest={convertRequestToWorkOrder}
               saving={saving}
@@ -1251,7 +1298,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
               isAdmin={isAdmin}
             />
           )}
-          {canViewActive && active === "ppm" && <Ppm ppms={records.ppms} ppmsTotal={records.ppmsTotal} assets={records.assets} locations={records.locations} workOrders={records.workOrders} teams={records.teams} users={records.users} saving={saving} isAdmin={isAdmin} submitPpm={(formData) => postRecord("/api/ppm", formData, "PPM")} updatePpm={(body) => patchRecord("/api/ppm", body, "PPM updated.")} deletePpm={(id) => deleteRecord(`/api/ppm?id=${encodeURIComponent(id)}`, "PPM deleted.")} />}
+          {canViewActive && active === "ppm" && <Ppm ppms={records.ppms} ppmsTotal={records.ppmsTotal} assets={records.assets} locations={records.locations} workOrders={records.workOrders} teams={records.teams} users={records.users} saving={saving} isAdmin={isAdmin} submitPpm={(formData) => postRecord("/api/ppm", formData, "PPM")} updatePpm={async (body) => { await patchRecord("/api/ppm", body, "PPM updated."); }} deletePpm={(id) => deleteRecord(`/api/ppm?id=${encodeURIComponent(id)}`, "PPM deleted.")} />}
           {canViewActive && active === "inventory" && <Inventory inventory={records.inventory} saving={saving} isAdmin={isAdmin} submitInventory={(formData) => postRecord("/api/inventory", formData, "Inventory item")} deleteInventory={(id) => deleteRecord(`/api/inventory?id=${encodeURIComponent(id)}`, "Inventory item deleted.")} />}
           {canViewActive && active === "hse" && <Hse inspections={records.inspections} saving={saving} isAdmin={isAdmin} submitInspection={(formData) => postRecord("/api/inspections", formData, "Inspection")} deleteInspection={(id) => deleteRecord(`/api/inspections?id=${encodeURIComponent(id)}`, "Inspection deleted.")} />}
           {canViewActive && active === "compliance" && (
@@ -1293,7 +1340,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
               navigate={navigate}
             />
           )}
-          {canViewActive && active === "iot" && <Iot alerts={records.alerts} saving={saving} acknowledgeAlert={(id) => patchRecord(`/api/iot-alerts/${id}`, {}, "IoT alert acknowledged.")} />}
+          {canViewActive && active === "iot" && <Iot alerts={records.alerts} saving={saving} acknowledgeAlert={async (id) => { await patchRecord(`/api/iot-alerts/${id}`, {}, "IoT alert acknowledged."); }} />}
           {canViewActive && active === "teams" && (
             <TeamsServices
               teams={records.teams}
@@ -1305,9 +1352,9 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
               submitService={(formData) => postRecord("/api/services", formData, "Service")}
               submitCategory={(formData) => postRecord("/api/asset-categories", formData, "Asset category")}
               submitDepartment={(formData) => postRecord("/api/departments", formData, "Department")}
-              updateTeam={(id, formData) => patchRecord(`/api/teams/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "Team updated.")}
-              updateService={(id, formData) => patchRecord(`/api/services/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "Service updated.")}
-              updateDepartment={(id, formData) => patchRecord(`/api/departments/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "Department updated.")}
+              updateTeam={async (id, formData) => { await patchRecord(`/api/teams/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "Team updated."); }}
+              updateService={async (id, formData) => { await patchRecord(`/api/services/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "Service updated."); }}
+              updateDepartment={async (id, formData) => { await patchRecord(`/api/departments/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "Department updated."); }}
               deleteTeam={(id) => deleteRecord(`/api/teams/${id}`, "Team deleted.")}
               deleteService={(id) => deleteRecord(`/api/services/${id}`, "Service deleted.")}
               deleteDepartment={(id) => deleteRecord(`/api/departments/${id}`, "Department deleted.")}
@@ -1330,7 +1377,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
               saving={saving}
               submitUser={(formData) => postRecord("/api/users", formData, "User", false)}
               submitRole={(formData) => postRecord("/api/roles", formData, "Custom role")}
-              updateUser={(id, formData) => patchRecord(`/api/users/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "User updated.", false)}
+              updateUser={async (id, formData) => { await patchRecord(`/api/users/${id}`, Object.fromEntries(formData.entries()) as Record<string, string>, "User updated.", false); }}
               deleteUser={(id) => deleteRecord(`/api/users/${id}`, "User deleted.", false)}
               deleteRole={(roleName) => deleteRecord(`/api/roles?name=${encodeURIComponent(roleName)}`, "Role deleted.")}
               isAdmin={isAdmin}
@@ -1381,7 +1428,7 @@ export function CafmConsole({ data, user, deferInitialData = false }: { data: Co
               isAdmin={isAdmin}
               userRole={user.role}
               submitHousing={(formData) => postRecord("/api/housing", formData, "Housing record")}
-              updateHousing={(type, id, body) => patchRecord(`/api/housing/${type}/${id}`, body, "Housing record updated.")}
+              updateHousing={async (type, id, body) => { await patchRecord(`/api/housing/${type}/${id}`, body, "Housing record updated."); }}
               deleteHousing={(type, id) => deleteRecord(`/api/housing/${type}/${id}`, "Housing record deleted.")}
               refreshData={refreshData}
             />
@@ -3004,7 +3051,10 @@ function WorkOrders({
   }, [search, statusFilter, priorityFilter, categoryFilter, departmentFilter, typeFilter, assignedFilter, overdueOnly, showTimeMetrics, showOnlyDelayed]);
 
   useEffect(() => {
-    setWorkRowsSource(data.workOrders);
+    setWorkRowsSource((current) => {
+      if (!data.workOrders.length && current.length && (data.workOrdersTotal ?? 0) > 0) return current;
+      return data.workOrders;
+    });
     setWorkTotal((current) => Math.max(current, data.workOrdersTotal ?? data.workOrders.length));
   }, [data.workOrders, data.workOrdersTotal]);
 
@@ -3040,8 +3090,10 @@ function WorkOrders({
         const response = await fetch(`/api/work-orders?${params.toString()}`, { cache: "no-store", signal: controller.signal });
         if (response.ok) {
           const result = await response.json();
-          setWorkRowsSource((current) => page === 1 ? result.workOrders ?? [] : [...current, ...(result.workOrders ?? [])]);
-          setWorkTotal(Number(result.total ?? result.workOrders?.length ?? 0));
+          const nextRows = result.workOrders ?? [];
+          const nextTotal = Number(result.total ?? nextRows.length ?? 0);
+          setWorkRowsSource((current) => page === 1 ? (nextRows.length || nextTotal === 0 ? nextRows : current) : [...current, ...nextRows]);
+          setWorkTotal(nextTotal);
         }
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -3343,9 +3395,9 @@ function WorkOrders({
                         <div className="flex min-w-[300px] flex-wrap gap-2">
                           <button type="button" onClick={(event) => { event.stopPropagation(); setSelectedWorkId(work.id); setPreviewWork(work); }} className="rounded-lg bg-white px-3 py-2 text-xs font-black text-lagoon ring-1 ring-lagoon/30">Preview</button>
                           {canAssignOrEdit && work.status !== "CLOSED" && <button type="button" disabled={workAction === `${work.id}:edit`} onClick={(event) => { event.stopPropagation(); setSelectedWorkId(work.id); setEditing(work); }} className="rounded-lg bg-slate-700 px-3 py-2 text-xs font-black text-white disabled:bg-slate-400">Edit</button>}
-                          {canExecute && work.status !== "CLOSED" && work.status !== "PENDING_SUPERVISOR_REVIEW" && <button type="button" disabled={workAction === `${work.id}:start`} onClick={(event) => { event.stopPropagation(); runWorkAction(`${work.id}:start`, work, () => updateWorkStatus(work.id, "IN_PROGRESS")); }} className="rounded-lg bg-lagoon px-3 py-2 text-xs font-black text-white disabled:bg-slate-400">In Progress</button>}
-                          {canExecute && work.status !== "CLOSED" && work.status !== "PENDING_SUPERVISOR_REVIEW" && <button type="button" disabled={workAction === `${work.id}:hold`} onClick={(event) => { event.stopPropagation(); runWorkAction(`${work.id}:hold`, work, () => updateWorkStatus(work.id, "ON_HOLD")); }} className="rounded-lg bg-slate-500 px-3 py-2 text-xs font-black text-white disabled:bg-slate-400">On Hold</button>}
-                          {canExecute && work.status !== "CLOSED" && work.status !== "PENDING_SUPERVISOR_REVIEW" && <button type="button" disabled={workAction === `${work.id}:complete`} onClick={(event) => { event.stopPropagation(); runWorkAction(`${work.id}:complete`, work, () => updateWorkStatus(work.id, "COMPLETED")); }} className="rounded-lg bg-leaf px-3 py-2 text-xs font-black text-white disabled:bg-slate-400">Submit Review</button>}
+                          {canExecute && work.status !== "CLOSED" && work.status !== "PENDING_SUPERVISOR_REVIEW" && <button type="button" disabled={workAction === `${work.id}:start`} onClick={(event) => { event.stopPropagation(); runWorkAction(`${work.id}:start`, work, () => updateWorkStatus(work.id, "IN_PROGRESS")); }} className="rounded-lg bg-lagoon px-3 py-2 text-xs font-black text-white disabled:bg-slate-400">{workAction === `${work.id}:start` ? "Updating..." : "In Progress"}</button>}
+                          {canExecute && work.status !== "CLOSED" && work.status !== "PENDING_SUPERVISOR_REVIEW" && <button type="button" disabled={workAction === `${work.id}:hold`} onClick={(event) => { event.stopPropagation(); runWorkAction(`${work.id}:hold`, work, () => updateWorkStatus(work.id, "ON_HOLD")); }} className="rounded-lg bg-slate-500 px-3 py-2 text-xs font-black text-white disabled:bg-slate-400">{workAction === `${work.id}:hold` ? "Updating..." : "On Hold"}</button>}
+                          {canExecute && work.status !== "CLOSED" && work.status !== "PENDING_SUPERVISOR_REVIEW" && <button type="button" disabled={workAction === `${work.id}:complete`} onClick={(event) => { event.stopPropagation(); runWorkAction(`${work.id}:complete`, work, () => updateWorkStatus(work.id, "COMPLETED")); }} className="rounded-lg bg-leaf px-3 py-2 text-xs font-black text-white disabled:bg-slate-400">{workAction === `${work.id}:complete` ? "Submitting..." : "Submit Review"}</button>}
                           {canFinalReview && ["PENDING_SUPERVISOR_REVIEW", "COMPLETED"].includes(work.status) && <button type="button" disabled={workAction === `${work.id}:close`} onClick={(event) => { event.stopPropagation(); setSelectedWorkId(work.id); setReviewWork({ work, action: "close" }); }} className="rounded-lg bg-ink px-3 py-2 text-xs font-black text-white disabled:bg-slate-400">Close Work Order</button>}
                           {canFinalReview && ["PENDING_SUPERVISOR_REVIEW", "COMPLETED"].includes(work.status) && <button type="button" disabled={workAction === `${work.id}:reopen`} onClick={(event) => { event.stopPropagation(); setSelectedWorkId(work.id); setReviewWork({ work, action: "reopen" }); }} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white disabled:bg-slate-400">Reopen</button>}
                           {isAdmin && work.status !== "CLOSED" && <button type="button" disabled={workAction === `${work.id}:delete`} onClick={(event) => { event.stopPropagation(); runWorkAction(`${work.id}:delete`, work, () => deleteWorkOrder(work.id)); }} className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-400">Delete</button>}
@@ -3624,7 +3676,7 @@ function Helpdesk({
   }, [filteredRequests, selectedRequestId]);
 
   useEffect(() => {
-    setRequestRowsSource(requests);
+    setRequestRowsSource((current) => (!requests.length && current.length ? current : requests));
     setRequestTotal((current) => Math.max(current, requests.length));
     setAllRequestTotal((current) => Math.max(current, requests.length));
   }, [requests]);
@@ -3651,9 +3703,11 @@ function Helpdesk({
         const response = await fetch(`/api/service-requests?${params.toString()}`, { cache: "no-store", signal: controller.signal });
         if (response.ok) {
           const result = await response.json();
-          setRequestRowsSource((current) => requestPage === 1 ? result.requests ?? [] : [...current, ...(result.requests ?? [])]);
-          setRequestTotal(Number(result.total ?? result.requests?.length ?? 0));
-          setAllRequestTotal(Number(result.allTotal ?? result.total ?? result.requests?.length ?? 0));
+          const nextRows = result.requests ?? [];
+          const nextTotal = Number(result.total ?? nextRows.length ?? 0);
+          setRequestRowsSource((current) => requestPage === 1 ? (nextRows.length || nextTotal === 0 ? nextRows : current) : [...current, ...nextRows]);
+          setRequestTotal(nextTotal);
+          setAllRequestTotal(Number(result.allTotal ?? result.total ?? nextRows.length ?? 0));
         }
       } catch (error) {
         if (!(error instanceof DOMException && error.name === "AbortError")) console.error(error);
