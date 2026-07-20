@@ -42,10 +42,19 @@ function departmentValues(user: Awaited<ReturnType<typeof getCurrentUser>>) {
 
 function visibleWorkWhere(user: Awaited<ReturnType<typeof getCurrentUser>>) {
   const role = accessRole(user);
+  const roleName = String(user?.role ?? "").toLowerCase();
+  const isManagerRole = roleName.includes("facility manager") || roleName.includes("maintenance manager");
   const departmentsForUser = departmentValues(user);
   const teamCode = user?.team?.code;
-  if (role === "admin" || role === "readonly") return {};
-  if (role === "supervisor") return { departmentCode: { in: departmentsForUser } };
+  if (role === "admin" || role === "readonly" || isManagerRole) return {};
+  if (role === "supervisor") {
+    const conditions = [
+      departmentsForUser.length ? { departmentCode: { in: departmentsForUser } } : null,
+      teamCode ? { assignedTeamCode: teamCode } : null,
+      user?.id ? { assignedToId: user.id } : null,
+    ].filter(Boolean) as any[];
+    return conditions.length ? { OR: conditions } : { assignedToId: "__none__" };
+  }
   if (role === "technician") return { OR: [{ assignedToId: user?.id || "" }, { assignedTeamCode: teamCode || "" }] };
   return { assignedToId: "__none__" };
 }
@@ -199,3 +208,5 @@ export async function POST(request: Request) {
     );
   }
 }
+
+

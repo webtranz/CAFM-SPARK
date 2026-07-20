@@ -85,7 +85,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const role = accessRole(user);
     const isAssignedTechnician = role === "technician" && (current.assignedToId === user?.id || Boolean(current.assignedTeamCode && current.assignedTeamCode === user?.team?.code));
     const reviewScope = reviewStatus ? await workOrderPermissionScope(user?.role, "workorders.approve") : null;
-    const isSupervisorOrAdmin = canManageDepartmentRecord(user, current.departmentCode) || Boolean(reviewStatus && scopeAllows(reviewScope, "Facility"));
+    const isSupervisorTeamOwner = role === "supervisor" && (current.assignedToId === user?.id || Boolean(current.assignedTeamCode && current.assignedTeamCode === user?.team?.code));
+    const isSupervisorOrAdmin = canManageDepartmentRecord(user, current.departmentCode) || isSupervisorTeamOwner || Boolean(reviewStatus && scopeAllows(reviewScope, "Facility"));
     if (!isSupervisorOrAdmin && !isAssignedTechnician) {
       return apiError(new Error("You do not have permission for this work order."), "Access denied", 403);
     }
@@ -216,3 +217,4 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
     return apiError(error, "Unable to delete work order");
   }
 }
+

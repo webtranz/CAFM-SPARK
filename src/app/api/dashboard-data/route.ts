@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { accessRole } from "@/lib/access-control";
 import { requireUser } from "@/lib/api-auth";
 import { emptyOperatingData } from "@/lib/empty-operating-data";
 import { prisma } from "@/lib/prisma";
@@ -9,12 +10,38 @@ export const dynamic = "force-dynamic";
 
 const DASHBOARD_LIMIT = 60;
 
+type DashboardUser = Awaited<ReturnType<typeof requireUser>>["user"];
+
+function departmentValues(user: DashboardUser) {
+  return [user?.department, user?.department?.trim()].filter(Boolean) as string[];
+}
+
+function visibleWorkWhere(user: DashboardUser) {
+  const role = accessRole(user);
+  const roleName = String(user?.role ?? "").toLowerCase();
+  const isManagerRole = roleName.includes("facility manager") || roleName.includes("maintenance manager");
+  const departmentsForUser = departmentValues(user);
+  const teamCode = user?.team?.code;
+  if (role === "admin" || role === "readonly" || isManagerRole) return {};
+  if (role === "supervisor") {
+    const conditions = [
+      departmentsForUser.length ? { departmentCode: { in: departmentsForUser } } : null,
+      teamCode ? { assignedTeamCode: teamCode } : null,
+      user?.id ? { assignedToId: user.id } : null,
+    ].filter(Boolean) as any[];
+    return conditions.length ? { OR: conditions } : { assignedToId: "__none__" };
+  }
+  if (role === "technician") return { OR: [{ assignedToId: user?.id || "" }, { assignedTeamCode: teamCode || "" }] };
+  return { assignedToId: "__none__" };
+}
+
 export async function GET() {
-  const { error } = await requireUser();
+  const { error, user } = await requireUser();
   if (error) return error;
 
   const now = new Date();
   const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const workScope = visibleWorkWhere(user);
 
   try {
     await ensureDefaultRbacOnce();
@@ -45,7 +72,7 @@ export async function GET() {
       totalEntries,
     ] = await Promise.all([
       prisma.serviceRequest.findMany({ where: { OR: [{ createdAt: { gte: since } }, { updatedAt: { gte: since } }, { dueAt: { gte: since, lte: now } }] }, orderBy: { updatedAt: "desc" }, take: DASHBOARD_LIMIT }),
-      prisma.workOrder.findMany({ where: { OR: [{ createdAt: { gte: since } }, { updatedAt: { gte: since } }, { dueAt: { gte: since, lte: now } }, { plannedStart: { gte: since, lte: now } }] }, orderBy: { updatedAt: "desc" }, take: DASHBOARD_LIMIT }),
+      prisma.workOrder.findMany({ where: { AND: [workScope, { OR: [{ createdAt: { gte: since } }, { updatedAt: { gte: since } }, { dueAt: { gte: since, lte: now } }, { plannedStart: { gte: since, lte: now } }] }] }, orderBy: { updatedAt: "desc" }, take: DASHBOARD_LIMIT }),
       prisma.asset.findMany({ orderBy: { tag: "asc" }, take: DASHBOARD_LIMIT }),
       prisma.inventoryItem.findMany({ orderBy: { sku: "asc" }, take: DASHBOARD_LIMIT }),
       prisma.inspection.findMany({ where: { dueAt: { gte: since, lte: now } }, orderBy: { dueAt: "desc" }, take: DASHBOARD_LIMIT }),
@@ -103,3 +130,7 @@ export async function GET() {
     return NextResponse.json({ ...emptyOperatingData, live: false }, { status: 200 });
   }
 }
+
+
+
+

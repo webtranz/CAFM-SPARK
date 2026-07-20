@@ -1,3 +1,4 @@
+import { accessRole } from "@/lib/access-control";
 import { prisma } from "@/lib/prisma";
 import { fallbackData } from "@/lib/demo-data";
 import { ensureDefaultRbacOnce } from "@/lib/rbac-runtime";
@@ -10,15 +11,6 @@ type OperatingUser = {
   department?: string | null;
   team?: { code: string } | null;
 } | null;
-
-function roleKind(user: OperatingUser) {
-  const role = String(user?.role ?? "").toLowerCase();
-  if (role === "admin" || role.includes("super admin")) return "admin";
-  if (role.includes("supervisor")) return "supervisor";
-  if (role.includes("technician") || role.includes("service team")) return "technician";
-  if (role.includes("read") || role.includes("viewer") || role.includes("view only")) return "readonly";
-  return "requester";
-}
 
 function departmentValues(user: OperatingUser) {
   return [user?.department, user?.department?.trim()].filter(Boolean) as string[];
@@ -67,9 +59,16 @@ export async function getOperatingData(user: OperatingUser = null) {
   try {
     await ensureDefaultRbacOnce();
 
-    const kind = roleKind(user);
+    const kind = accessRole(user);
+    const roleName = String(user?.role ?? "").toLowerCase();
+    const isManagerRole = roleName.includes("facility manager") || roleName.includes("maintenance manager");
     const departmentsForUser = departmentValues(user);
     const teamCode = user?.team?.code;
+    const supervisorWorkConditions = [
+      departmentsForUser.length ? { departmentCode: { in: departmentsForUser } } : null,
+      teamCode ? { assignedTeamCode: teamCode } : null,
+      user?.id ? { assignedToId: user.id } : null,
+    ].filter(Boolean) as any[];
     const visibleAssetWhere =
       kind === "admin" || kind === "readonly"
         ? {}
@@ -87,10 +86,12 @@ export async function getOperatingData(user: OperatingUser = null) {
         ? { OR: [{ assignedTeamCode: teamCode || "" }, { assignedSupervisorEmail: user?.email || "" }] }
         : { requester: user?.name || user?.email || "" };
     const visibleWorkWhere =
-      kind === "admin" || kind === "readonly"
+      kind === "admin" || kind === "readonly" || isManagerRole
         ? {}
         : kind === "supervisor"
-        ? { departmentCode: { in: departmentsForUser } }
+        ? supervisorWorkConditions.length
+          ? { OR: supervisorWorkConditions }
+          : { assignedToId: "__none__" }
         : kind === "technician"
         ? { OR: [{ assignedToId: user?.id || "" }, { assignedTeamCode: teamCode || "" }] }
         : { assignedToId: "__none__" };
@@ -203,4 +204,6 @@ export async function getOperatingData(user: OperatingUser = null) {
     return { ...fallbackData, live: false };
   }
 }
+
+
 
