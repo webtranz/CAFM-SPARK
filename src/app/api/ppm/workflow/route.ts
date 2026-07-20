@@ -128,11 +128,7 @@ async function findUserId(email?: string) {
 }
 
 const DEFAULT_PPM_EFFECTIVE_DATE = "2026-01-01";
-const OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE = [
-  "CLOSED",
-  "CANCELLED",
-  "REJECTED",
-] as const;
+const OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE = ["CLOSED", "REJECTED"] as const;
 
 function utcDateFromInput(
   value?: string,
@@ -930,3 +926,4 @@ export async function POST(request: Request) {
     );
   }
 }
+
