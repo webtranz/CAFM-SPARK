@@ -6,13 +6,15 @@ import { requireAnyPermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
 
-const actions = ["schedule", "generate", "assign", "accept", "start", "hold", "submit", "approve", "reject", "rework", "close", "cancel", "defect"] as const;
+const actions = ["schedule", "preview", "generate", "assign", "accept", "start", "hold", "submit", "approve", "reject", "rework", "close", "cancel", "defect"] as const;
 const workflowStatuses = ["DRAFT", "SCHEDULED", "ASSIGNED", "IN_PROGRESS", "ON_HOLD", "SUBMITTED", "REWORK", "COMPLETED", "CLOSED", "OVERDUE", "CANCELLED"] as const;
 
 const schema = z.object({
   ppmId: z.string().min(1),
   action: z.enum(actions),
   workflowStatus: z.enum(workflowStatuses).optional(),
+  effectiveDate: z.string().optional(),
+  dueMonth: z.string().optional(),
   assignedTeamCode: z.string().optional(),
   technicianEmail: z.string().optional(),
   supervisorEmail: z.string().optional(),
@@ -68,11 +70,47 @@ async function findUserId(email?: string) {
   return user?.id ?? null;
 }
 
+const DEFAULT_PPM_EFFECTIVE_DATE = "2026-01-01";
+const OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE = ["CLOSED", "CANCELLED", "REJECTED"] as const;
+
+function utcDateFromInput(value?: string, fallback = DEFAULT_PPM_EFFECTIVE_DATE) {
+  const raw = String(value || fallback || DEFAULT_PPM_EFFECTIVE_DATE).trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? new Date(Date.UTC(2026, 0, 1)) : date;
+}
+
+function monthKey(date: Date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthStartFromInput(value: string | undefined, fallbackDate: Date) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})$/);
+  if (match) return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, 1));
+  return new Date(Date.UTC(fallbackDate.getUTCFullYear(), fallbackDate.getUTCMonth(), 1));
+}
+
+function ppmPlanningWindow(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth">) {
+  const effectiveDate = utcDateFromInput(input?.effectiveDate);
+  const selectedMonthStart = monthStartFromInput(input?.dueMonth, new Date(ppm.nextDue));
+  const selectedMonthEnd = new Date(Date.UTC(selectedMonthStart.getUTCFullYear(), selectedMonthStart.getUTCMonth() + 1, 1));
+  const rangeStart = effectiveDate.getTime() > selectedMonthStart.getTime() ? effectiveDate : selectedMonthStart;
+  return {
+    effectiveDate,
+    effectiveDateText: effectiveDate.toISOString().slice(0, 10),
+    dueMonth: monthKey(selectedMonthStart),
+    monthStart: selectedMonthStart,
+    monthEnd: selectedMonthEnd,
+    dateFilter: { gte: rangeStart, lt: selectedMonthEnd },
+  };
+}
+
 function ppmGroupCode(ppm: PpmRecord) {
   return ppm.ppmCode || String(ppm.code || "").split("-")[0] || ppm.code;
 }
 
-function ppmGroupWhere(ppm: PpmRecord) {
+function ppmGroupWhere(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth">) {
   const groupCode = ppmGroupCode(ppm);
   return {
     OR: [
@@ -80,16 +118,17 @@ function ppmGroupWhere(ppm: PpmRecord) {
       { code: groupCode },
       { code: { startsWith: `${groupCode}-`, mode: "insensitive" as const } },
     ],
+    nextDue: ppmPlanningWindow(ppm, input).dateFilter,
   };
 }
 
-async function loadPpmGroup(ppm: PpmRecord) {
+async function loadPpmGroup(ppm: PpmRecord, input?: Pick<z.infer<typeof schema>, "effectiveDate" | "dueMonth">) {
   const rows = await prisma.preventiveMaintenance.findMany({
-    where: ppmGroupWhere(ppm),
+    where: ppmGroupWhere(ppm, input),
     orderBy: [{ locationCode: "asc" }, { assetTag: "asc" }, { nextDue: "asc" }],
     take: 20000,
   });
-  return rows.length ? rows : [ppm];
+  return rows.length || input?.effectiveDate || input?.dueMonth ? rows : [ppm];
 }
 
 async function nextPpmWorkOrderNumber() {
@@ -105,10 +144,10 @@ async function nextPpmWorkOrderNumber() {
 async function ensurePpmWorkOrder(ppm: PpmRecord, input: z.infer<typeof schema>, user: any) {
   if (ppm.generatedWorkOrderId) {
     const existing = await prisma.workOrder.findUnique({ where: { id: ppm.generatedWorkOrderId } });
-    if (existing && !["CLOSED", "CANCELLED", "REJECTED"].includes(existing.status)) return { workOrder: existing, created: false };
+    if (existing && ![...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE].includes(existing.status as any)) return { workOrder: existing, created: false };
   }
   const existingByPpm = await prisma.workOrder.findFirst({
-    where: { ppmId: ppm.id, status: { notIn: ["CLOSED", "CANCELLED", "REJECTED"] as any } },
+    where: { ppmId: ppm.id, status: { notIn: [...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE] as any } },
     orderBy: { createdAt: "desc" },
   });
   if (existingByPpm) return { workOrder: existingByPpm, created: false };
@@ -156,10 +195,11 @@ async function createPpmWorkOrder(ppm: PpmRecord, input: z.infer<typeof schema>,
 }
 
 async function createPpmWorkOrdersForGroup(ppm: PpmRecord, input: z.infer<typeof schema>, user: any) {
-  const rows = await loadPpmGroup(ppm);
+  const planningWindow = ppmPlanningWindow(ppm, input);
+  const rows = await loadPpmGroup(ppm, input);
   const generatedAt = new Date();
   const workflowStatus = input.assignedTeamCode || input.technicianEmail ? "ASSIGNED" : "SCHEDULED";
-  const results: Array<{ ppmId: string; ppmCode: string; code: string; workOrder: any; created: boolean }> = [];
+  const results: Array<{ ppmId: string; ppmCode: string; code: string; assetTag?: string; locationCode?: string; departmentCode?: string; equipmentDescription?: string | null; nextDue?: Date; workOrder: any; created: boolean }> = [];
   for (const row of rows) {
     const result = await ensurePpmWorkOrder(row, input, user);
     await prisma.preventiveMaintenance.update({
@@ -173,14 +213,60 @@ async function createPpmWorkOrdersForGroup(ppm: PpmRecord, input: z.infer<typeof
         workflowStatus,
       },
     });
-    results.push({ ppmId: row.id, ppmCode: row.ppmCode || ppmGroupCode(row), code: row.code, workOrder: result.workOrder, created: result.created });
+    results.push({ ppmId: row.id, ppmCode: row.ppmCode || ppmGroupCode(row), code: row.code, assetTag: row.assetTag, locationCode: row.locationCode, departmentCode: row.departmentCode, equipmentDescription: row.equipmentDescription, nextDue: row.nextDue, workOrder: result.workOrder, created: result.created });
   }
   return {
     groupCode: ppmGroupCode(ppm),
+    effectiveDate: planningWindow.effectiveDateText,
+    dueMonth: planningWindow.dueMonth,
     total: rows.length,
     createdCount: results.filter((item) => item.created).length,
     reusedCount: results.filter((item) => !item.created).length,
     results,
+  };
+}
+async function buildPpmWorkOrderPreview(ppm: PpmRecord, input: z.infer<typeof schema>) {
+  const planningWindow = ppmPlanningWindow(ppm, input);
+  const rows = await loadPpmGroup(ppm, input);
+  const rowIds = rows.map((row) => row.id);
+  const generatedIds = rows.map((row) => row.generatedWorkOrderId).filter(Boolean);
+  const orFilters: any[] = rowIds.length ? [{ ppmId: { in: rowIds } }] : [];
+  if (generatedIds.length) orFilters.push({ id: { in: generatedIds } });
+  const existingWorkOrders = orFilters.length ? await prisma.workOrder.findMany({
+    where: { OR: orFilters, status: { notIn: [...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE] as any } },
+    select: { id: true, ppmId: true, woNo: true, status: true, plannedStart: true, dueAt: true },
+  }) : [];
+  const existingByPpmId = new Map(existingWorkOrders.filter((workOrder) => workOrder.ppmId).map((workOrder) => [workOrder.ppmId, workOrder]));
+  const existingById = new Map(existingWorkOrders.map((workOrder) => [workOrder.id, workOrder]));
+  const previewRows = rows.map((row) => {
+    const existing = existingByPpmId.get(row.id) || (row.generatedWorkOrderId ? existingById.get(row.generatedWorkOrderId) : null);
+    return {
+      ppmId: row.id,
+      ppmCode: row.ppmCode || ppmGroupCode(row),
+      code: row.code,
+      title: row.name,
+      assetTag: row.assetTag,
+      locationCode: row.locationCode,
+      departmentCode: row.departmentCode,
+      equipmentDescription: row.equipmentDescription,
+      nextDue: row.nextDue,
+      plannedStart: row.nextDue,
+      existingWorkOrderNo: existing?.woNo || "",
+      existingStatus: existing?.status || "",
+      willCreate: !existing,
+    };
+  });
+  return {
+    groupCode: ppmGroupCode(ppm),
+    effectiveDate: planningWindow.effectiveDateText,
+    dueMonth: planningWindow.dueMonth,
+    monthStart: planningWindow.monthStart.toISOString().slice(0, 10),
+    monthEnd: addDays(planningWindow.monthEnd, -1).toISOString().slice(0, 10),
+    total: previewRows.length,
+    createCount: previewRows.filter((row) => row.willCreate).length,
+    reuseCount: previewRows.filter((row) => !row.willCreate).length,
+    rows: previewRows.slice(0, 300),
+    limited: previewRows.length > 300,
   };
 }
 export async function POST(request: Request) {
@@ -203,24 +289,52 @@ export async function POST(request: Request) {
     const ppmUpdate: any = { ...assignmentData };
 
     if (input.action === "schedule") workflowStatus = "SCHEDULED";
+    if (input.action === "preview") {
+      const preview = await buildPpmWorkOrderPreview(ppm, input);
+      return NextResponse.json({ ppm, preview, groupCode: preview.groupCode, totalWorkOrders: preview.total });
+    }
     if (input.action === "generate") {
       const generation = await createPpmWorkOrdersForGroup(ppm, input, user);
       const selectedResult = generation.results.find((item) => item.ppmId === ppm.id) || generation.results[0];
       workOrder = selectedResult?.workOrder || null;
       const updatedPpm = await prisma.preventiveMaintenance.findUnique({ where: { id: ppm.id } });
+      const preview = {
+        groupCode: generation.groupCode,
+        effectiveDate: generation.effectiveDate,
+        dueMonth: generation.dueMonth,
+        total: generation.total,
+        createCount: generation.createdCount,
+        reuseCount: generation.reusedCount,
+        rows: generation.results.slice(0, 300).map((item: any) => ({
+          ppmId: item.ppmId,
+          ppmCode: item.ppmCode,
+          code: item.code,
+          assetTag: item.assetTag,
+          locationCode: item.locationCode,
+          departmentCode: item.departmentCode,
+          equipmentDescription: item.equipmentDescription,
+          nextDue: item.nextDue,
+          workOrderNo: item.workOrder.woNo,
+          willCreate: item.created,
+        })),
+        limited: generation.results.length > 300,
+      };
       await auditAction({
         user,
         action: "PPM_WORKFLOW_GENERATE",
         entity: "preventive_maintenance",
         entityId: ppm.id,
-        details: { before: ppm, input, groupCode: generation.groupCode, total: generation.total, createdCount: generation.createdCount, reusedCount: generation.reusedCount },
+        details: { before: ppm, input, groupCode: generation.groupCode, dueMonth: generation.dueMonth, effectiveDate: generation.effectiveDate, total: generation.total, createdCount: generation.createdCount, reusedCount: generation.reusedCount },
       });
       return NextResponse.json({
         ppm: updatedPpm,
         workOrder,
         workOrders: generation.results.map((item) => item.workOrder),
-        generatedRows: generation.results.map((item) => ({ ppmId: item.ppmId, code: item.code, workOrderId: item.workOrder.id, woNo: item.workOrder.woNo, created: item.created })),
+        generatedRows: generation.results.map((item: any) => ({ ppmId: item.ppmId, code: item.code, workOrderId: item.workOrder.id, woNo: item.workOrder.woNo, created: item.created, nextDue: item.nextDue })),
+        preview,
         groupCode: generation.groupCode,
+        effectiveDate: generation.effectiveDate,
+        dueMonth: generation.dueMonth,
         totalWorkOrders: generation.total,
         generatedCount: generation.createdCount,
         reusedCount: generation.reusedCount,
