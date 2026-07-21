@@ -1512,7 +1512,11 @@ export function CafmConsole({
       "Work order updated.",
       false,
     );
-    if (ok) mergeWorkOrderRecord(result);
+    if (ok) {
+      mergeWorkOrderRecord(result);
+      return result;
+    }
+    return null;
   }
 
   async function updateWorkStatusRecord(id: string, status: string) {
@@ -1529,7 +1533,9 @@ export function CafmConsole({
       setToast(
         `Work order${result.woNo ? ` ${result.woNo}` : ""} is now ${nextStatus}.`,
       );
+      return result;
     }
+    return null;
   }
 
   async function updateRequestRecord(id: string, formData: FormData) {
@@ -5572,8 +5578,8 @@ function WorkOrders({
   saving: boolean;
   permissions: ActionPermissions;
   role: string;
-  updateWorkOrder: (id: string, formData: FormData) => Promise<void> | void;
-  updateWorkStatus: (id: string, status: string) => Promise<void> | void;
+  updateWorkOrder: (id: string, formData: FormData) => Promise<any> | any;
+  updateWorkStatus: (id: string, status: string) => Promise<any> | any;
   deleteWorkOrder: (id: string) => Promise<void> | void;
   deleteWorkOrders: (
     ids: string[],
@@ -5890,10 +5896,28 @@ function WorkOrders({
     }
   }
 
+  function mergeLocalWorkOrder(updated: any) {
+    if (!updated?.id) return;
+    setWorkRowsSource((current) =>
+      current.map((work) => (work.id === updated.id ? { ...work, ...updated } : work)),
+    );
+    setPreviewWork((current: any) =>
+      current?.id === updated.id ? { ...current, ...updated } : current,
+    );
+    setEditing((current: any) =>
+      current?.id === updated.id ? { ...current, ...updated } : current,
+    );
+    setReviewWork((current) => {
+      if (!current || current.work?.id !== updated.id) return current;
+      return { action: current.action, work: { ...current.work, ...updated } };
+    });
+    setSelectedWorkId(updated.id);
+  }
   async function quickPatchWork(work: any, body: Record<string, string>) {
     const formData = new FormData();
     Object.entries(body).forEach(([key, value]) => formData.append(key, value));
-    await updateWorkOrder(work.id, formData);
+    const updated = await updateWorkOrder(work.id, formData);
+    mergeLocalWorkOrder(updated);
     const previewBody = Object.fromEntries(
       Object.entries(body).map(([key, value]) => [
         key,
@@ -6486,8 +6510,8 @@ function WorkOrders({
                                 disabled={workAction === `${work.id}:start`}
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  runWorkAction(`${work.id}:start`, work, () =>
-                                    updateWorkStatus(work.id, "IN_PROGRESS"),
+                                  runWorkAction(`${work.id}:start`, work, async () =>
+                                    mergeLocalWorkOrder(await updateWorkStatus(work.id, "IN_PROGRESS")),
                                   );
                                 }}
                                 className="rounded-lg bg-lagoon px-3 py-2 text-xs font-black text-white disabled:bg-slate-400"
@@ -6505,8 +6529,8 @@ function WorkOrders({
                                 disabled={workAction === `${work.id}:hold`}
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  runWorkAction(`${work.id}:hold`, work, () =>
-                                    updateWorkStatus(work.id, "ON_HOLD"),
+                                  runWorkAction(`${work.id}:hold`, work, async () =>
+                                    mergeLocalWorkOrder(await updateWorkStatus(work.id, "ON_HOLD")),
                                   );
                                 }}
                                 className="rounded-lg bg-slate-500 px-3 py-2 text-xs font-black text-white disabled:bg-slate-400"
@@ -6527,8 +6551,8 @@ function WorkOrders({
                                   runWorkAction(
                                     `${work.id}:complete`,
                                     work,
-                                    () =>
-                                      updateWorkStatus(work.id, "COMPLETED"),
+                                    async () =>
+                                      mergeLocalWorkOrder(await updateWorkStatus(work.id, "COMPLETED")),
                                   );
                                 }}
                                 className="rounded-lg bg-leaf px-3 py-2 text-xs font-black text-white disabled:bg-slate-400"
@@ -6662,7 +6686,8 @@ function WorkOrders({
             data={data}
             work={editing}
             onSubmit={async (formData) => {
-              await updateWorkOrder(editing.id, formData);
+              const updated = await updateWorkOrder(editing.id, formData);
+              mergeLocalWorkOrder(updated);
               setEditing(null);
             }}
             saving={saving}
@@ -6680,7 +6705,7 @@ function WorkOrders({
                   runWorkAction(
                     `${previewWork.id}:${status}`,
                     previewWork,
-                    () => updateWorkStatus(previewWork.id, status),
+                    async () => mergeLocalWorkOrder(await updateWorkStatus(previewWork.id, status)),
                   )
               : undefined
           }
@@ -6725,7 +6750,8 @@ function WorkOrders({
           saving={saving}
           onClose={() => setReviewWork(null)}
           onSubmit={async (formData) => {
-            await updateWorkOrder(reviewWork.work.id, formData);
+            const updated = await updateWorkOrder(reviewWork.work.id, formData);
+            mergeLocalWorkOrder(updated);
             setReviewWork(null);
           }}
         />
@@ -6739,7 +6765,10 @@ function WorkOrders({
             work={selectedWork}
             inventory={data.inventory}
             saving={saving}
-            onSubmit={(formData) => updateWorkOrder(selectedWork.id, formData)}
+            onSubmit={async (formData) => {
+              const updated = await updateWorkOrder(selectedWork.id, formData);
+              mergeLocalWorkOrder(updated);
+            }}
           />
         )}
     </section>
