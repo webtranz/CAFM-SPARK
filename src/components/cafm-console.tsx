@@ -9693,6 +9693,36 @@ function WorkOrderPreviewModal({
   const checklist = checklistItems(
     work.jobPlan || work.request?.description || work.title,
   );
+  const checklistAutoCompleted = [
+    "COMPLETED",
+    "PENDING_SUPERVISOR_REVIEW",
+    "CLOSED",
+  ].includes(work.status);
+  const checklistKey = checklist.join("\u001f");
+  const [checkedChecklistItems, setCheckedChecklistItems] = useState<boolean[]>(
+    () => checklist.map(() => checklistAutoCompleted),
+  );
+  useEffect(() => {
+    setCheckedChecklistItems((current) => {
+      if (checklistAutoCompleted) return checklist.map(() => true);
+      return checklist.map((_, index) => current[index] ?? false);
+    });
+  }, [checklistKey, checklistAutoCompleted]);
+  const allChecklistSelected =
+    checklist.length > 0 && checkedChecklistItems.every(Boolean);
+  const someChecklistSelected = checkedChecklistItems.some(Boolean);
+
+  function setAllChecklistItems(checked: boolean) {
+    setCheckedChecklistItems(checklist.map(() => checked));
+  }
+
+  function setChecklistItem(index: number, checked: boolean) {
+    setCheckedChecklistItems((current) =>
+      checklist.map((_, itemIndex) =>
+        itemIndex === index ? checked : current[itemIndex] ?? false,
+      ),
+    );
+  }
   const historyRows = [
     ["Created", work.createdAt, `Work order ${work.woNo} was created.`],
     [
@@ -10000,18 +10030,44 @@ function WorkOrderPreviewModal({
 
         <div className="grid gap-4 lg:grid-cols-[1fr_0.8fr]">
           <div className="rounded-lg border border-slate-200 bg-white p-4">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <h4 className="font-black">Procedures & Checklist</h4>
-              <button
-                type="button"
-                onClick={() =>
-                  setQuickForm(quickForm === "procedure" ? "" : "procedure")
-                }
-                disabled={!onPatch}
-                className="rounded-lg border border-lagoon/30 px-3 py-2 text-xs font-black text-lagoon disabled:opacity-50"
-              >
-                Add Procedure
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={allChecklistSelected}
+                    ref={(input) => {
+                      if (input) {
+                        input.indeterminate =
+                          someChecklistSelected && !allChecklistSelected;
+                      }
+                    }}
+                    onChange={(event) =>
+                      setAllChecklistItems(event.target.checked)
+                    }
+                  />
+                  Select All
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setAllChecklistItems(false)}
+                  disabled={!someChecklistSelected}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50"
+                >
+                  Clear All
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setQuickForm(quickForm === "procedure" ? "" : "procedure")
+                  }
+                  disabled={!onPatch}
+                  className="rounded-lg border border-lagoon/30 px-3 py-2 text-xs font-black text-lagoon disabled:opacity-50"
+                >
+                  Add Procedure
+                </button>
+              </div>
             </div>
             {quickForm === "procedure" && (
               <div className="mt-3 flex gap-2">
@@ -10038,11 +10094,10 @@ function WorkOrderPreviewModal({
                 >
                   <input
                     type="checkbox"
-                    defaultChecked={[
-                      "COMPLETED",
-                      "PENDING_SUPERVISOR_REVIEW",
-                      "CLOSED",
-                    ].includes(work.status)}
+                    checked={checkedChecklistItems[index] ?? false}
+                    onChange={(event) =>
+                      setChecklistItem(index, event.target.checked)
+                    }
                     className="mt-1"
                   />
                   <span>
