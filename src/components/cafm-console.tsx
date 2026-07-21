@@ -8099,41 +8099,160 @@ function requestLocationNeedles(location: string, selectedLocation?: any) {
   );
 }
 
-function assetMatchesLocation(
-  asset: any,
-  location: string,
-  selectedLocation?: any,
-) {
-  const needles = requestLocationNeedles(location, selectedLocation);
-  if (!needles.length) return true;
-  const assetLocationParts = [
+function normalizedHierarchyCode(value: unknown) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function hierarchyCodeSet(values: unknown[]) {
+  return new Set(
+    values
+      .map(normalizedHierarchyCode)
+      .filter((value) => value.length > 1),
+  );
+}
+
+function assetLocationCodes(asset: any) {
+  return hierarchyCodeSet([
     asset.locationCode,
     asset.locationDesc,
     asset.siteCode,
+    asset.site?.code,
     asset.site?.name,
     asset.buildingCode,
     asset.building?.code,
     asset.building?.name,
     asset.floor,
     asset.room,
+    asset.sourceLocation,
+    asset.sourceEquipmentLocation,
+  ]);
+}
+
+function selectedLocationStrictCodes(location: string, selectedLocation?: any) {
+  const selectedValues = selectedLocation
+    ? [
+        selectedLocation.code,
+        selectedLocation.room,
+        selectedLocation.floor,
+        selectedLocation.building,
+        selectedLocation.parentLocation,
+        selectedLocation.zone,
+        selectedLocation.site,
+      ]
+    : [];
+  const locationValues = String(location || "")
+    .split(/[/>|]+/)
+    .map((part) => part.trim());
+  return hierarchyCodeSet([...selectedValues, ...locationValues]);
+}
+
+function strictAssetMatchesSelectedHierarchy(
+  asset: any,
+  location: string,
+  selectedLocation?: any,
+) {
+  const selectedCode = normalizedHierarchyCode(selectedLocation?.code);
+  const selectedRoom = normalizedHierarchyCode(selectedLocation?.room);
+  const selectedFloor = normalizedHierarchyCode(selectedLocation?.floor);
+  const selectedBuilding = normalizedHierarchyCode(selectedLocation?.building);
+  const selectedSite = normalizedHierarchyCode(selectedLocation?.site);
+  const assetCodes = assetLocationCodes(asset);
+  const assetLocationCode = normalizedHierarchyCode(asset.locationCode);
+  const assetRoom = normalizedHierarchyCode(asset.room);
+  const assetFloor = normalizedHierarchyCode(asset.floor);
+  const assetBuilding = normalizedHierarchyCode(
+    asset.buildingCode || asset.building?.code || asset.building?.name,
+  );
+  const assetSite = normalizedHierarchyCode(asset.siteCode || asset.site?.name);
+
+  if (selectedCode && (assetCodes.has(selectedCode) || assetLocationCode === selectedCode)) return true;
+  if (selectedRoom && (assetCodes.has(selectedRoom) || assetRoom === selectedRoom || assetLocationCode === selectedRoom)) return true;
+  if (selectedFloor && (assetFloor === selectedFloor || assetLocationCode === selectedFloor)) return true;
+  if (selectedBuilding && (assetBuilding === selectedBuilding || assetLocationCode === selectedBuilding)) return true;
+  if (selectedSite && assetSite === selectedSite && !selectedBuilding && !selectedFloor && !selectedRoom) return true;
+
+  const selectedCodes = selectedLocationStrictCodes(location, selectedLocation);
+  if (!selectedCodes.size) return true;
+  return Array.from(selectedCodes).some((code) => assetCodes.has(code));
+}
+
+function assetCategoryValue(asset: any) {
+  if (!asset) return "";
+  return (
+    asset.category ||
+    asset.assetGroup ||
+    asset.objectCategory ||
+    asset.primarySystem ||
+    asset.system ||
+    ""
+  );
+}
+
+function assetSubcategoryValue(asset: any) {
+  if (!asset) return "";
+  return asset.subcategory || asset.subCategory || asset.classCode || asset.assetType || "";
+}
+
+function assetLocationLabel(asset: any) {
+  return [
+    asset.locationCode,
+    asset.locationDesc,
+    asset.buildingCode || asset.building?.name,
+    asset.floor,
+    asset.room,
   ]
     .filter(Boolean)
-    .map((part) => String(part).trim().toLowerCase());
-  const haystack = assetLocationParts.join(" / ");
-  const compactAssetParts = assetLocationParts
-    .map((part) => part.replace(/[^a-z0-9]/g, ""))
-    .filter((part) => part.length > 2);
+    .join(" > ");
+}
 
-  return needles.some((needle) => {
-    const compactNeedle = needle.replace(/[^a-z0-9]/g, "");
-    if (compactNeedle.length < 2) return false;
-    return (
-      haystack.includes(needle) ||
-      compactAssetParts.some(
-        (part) => part.includes(compactNeedle) || compactNeedle.includes(part),
-      )
-    );
-  });
+function teamMatchesTicketScope(
+  team: any,
+  departmentCode: string,
+  categoryValue = "",
+  selectedLocation?: any,
+) {
+  const department = normalizedHierarchyCode(departmentCode);
+  const categoryTokens = hierarchyCodeSet([categoryValue]);
+  const teamCodes = hierarchyCodeSet([
+    team.code,
+    team.name,
+    team.departmentCode,
+    team.coverage,
+    team.serviceCode,
+    team.category,
+    team.description,
+  ]);
+  const departmentOk = !department || teamCodes.has(department);
+  const teamHasCategoryScope = Boolean(team.category || team.serviceCode);
+  const categoryOk =
+    !categoryTokens.size ||
+    !teamHasCategoryScope ||
+    Array.from(categoryTokens).some((token) => teamCodes.has(token));
+  const selectedSite = normalizedHierarchyCode(selectedLocation?.site);
+  const selectedBuilding = normalizedHierarchyCode(selectedLocation?.building);
+  const locationScope = normalizedHierarchyCode(
+    team.locationCode || team.siteCode || team.buildingCode,
+  );
+  const locationOk =
+    !locationScope ||
+    !selectedLocation ||
+    locationScope === selectedSite ||
+    locationScope === selectedBuilding ||
+    locationScope === normalizedHierarchyCode(selectedLocation.code);
+  return departmentOk && categoryOk && locationOk;
+}
+function assetMatchesLocation(
+  asset: any,
+  location: string,
+  selectedLocation?: any,
+) {
+  if (location || selectedLocation) {
+    return strictAssetMatchesSelectedHierarchy(asset, location, selectedLocation);
+  }
+  return true;
 }
 
 function assetMatchesDepartment(
@@ -8285,23 +8404,19 @@ function scopedAssetOptions(
   location: string,
   selectedLocation?: any,
 ) {
-  const locationScopedAssets =
-    location || selectedLocation
-      ? assets.filter((asset) =>
-          assetMatchesLocation(asset, location, selectedLocation),
-        )
-      : assets;
+  const hasLocationScope = Boolean(location || selectedLocation);
+  const locationScopedAssets = hasLocationScope
+    ? assets.filter((asset) =>
+        assetMatchesLocation(asset, location, selectedLocation),
+      )
+    : assets;
   const departmentScopedAssets = locationScopedAssets.filter((asset) =>
     assetMatchesDepartment(asset, departmentCode, assignedTeamCode),
   );
-  const fallbackDepartmentAssets = assets.filter((asset) =>
-    assetMatchesDepartment(asset, departmentCode, assignedTeamCode),
-  );
-  const chosenAssets = departmentScopedAssets.length
-    ? departmentScopedAssets
-    : locationScopedAssets.length
-      ? locationScopedAssets
-      : fallbackDepartmentAssets;
+  const chosenAssets =
+    departmentCode || assignedTeamCode
+      ? departmentScopedAssets
+      : locationScopedAssets;
   return [...chosenAssets].sort(sortAssetsForRequest).slice(0, 2500);
 }
 
@@ -8558,6 +8673,9 @@ function ServiceRequestForm({
     request?.departmentCode ?? "",
   );
   const [serviceCode, setServiceCode] = useState(request?.serviceCode ?? "");
+  const [assignedTeamCode, setAssignedTeamCode] = useState(
+    request?.assignedTeamCode ?? "",
+  );
   const [siteValue, setSiteValue] = useState(initialLocation?.site ?? "");
   const [parentLocationValue, setParentLocationValue] = useState(
     initialLocation?.parentLocation || initialLocation?.zone || "",
@@ -8623,6 +8741,7 @@ function ServiceRequestForm({
     (service) => service.code === serviceCode,
   );
   const selectedTeamCode =
+    assignedTeamCode ||
     selectedService?.team?.code ||
     selectedService?.teamCode ||
     teams.find((team) => team.code === departmentCode)?.code ||
@@ -8762,6 +8881,22 @@ function ServiceRequestForm({
       ),
     [assets, departmentCode, selectedTeamCode, locationValue, selectedLocation],
   );
+  const selectedFormAsset = useMemo(
+    () => assets.find((asset) => asset.tag === assetTagValue),
+    [assets, assetTagValue],
+  );
+  const relevantServiceTeams = useMemo(
+    () =>
+      teams.filter((team) =>
+        teamMatchesTicketScope(
+          team,
+          departmentCode || selectedFormAsset?.departmentCode || "",
+          categoryValue || assetCategoryValue(selectedFormAsset),
+          selectedLocation,
+        ),
+      ),
+    [teams, departmentCode, categoryValue, selectedFormAsset, selectedLocation],
+  );
   const departmentMatchedAssetCount = useMemo(
     () =>
       filteredAssets.filter((asset) =>
@@ -8804,6 +8939,16 @@ function ServiceRequestForm({
 
   useEffect(() => {
     if (
+      assignedTeamCode &&
+      relevantServiceTeams.length > 0 &&
+      !relevantServiceTeams.some((team) => team.code === assignedTeamCode)
+    ) {
+      setAssignedTeamCode("");
+    }
+  }, [assignedTeamCode, relevantServiceTeams]);
+
+  useEffect(() => {
+    if (
       locationCodeValue &&
       !finalLocationOptions.some(
         (location) => location.code === locationCodeValue,
@@ -8840,6 +8985,24 @@ function ServiceRequestForm({
     const inferred = inferServiceFromCategory(value, services, departments);
     if (inferred.departmentCode) setDepartmentCode(inferred.departmentCode);
     if (inferred.serviceCode) setServiceCode(inferred.serviceCode);
+  }
+
+  function applyAssetSelection(tag: string) {
+    setAssetTagValue(tag);
+    const asset = assets.find((item) => item.tag === tag);
+    if (!asset) return;
+    if (asset.departmentCode) setDepartmentCode(asset.departmentCode);
+    const category = assetCategoryValue(asset);
+    if (category) {
+      setCategoryValue(category);
+      const inferred = inferServiceFromCategory(category, services, departments);
+      if (inferred.serviceCode) setServiceCode(inferred.serviceCode);
+      if (!asset.departmentCode && inferred.departmentCode) {
+        setDepartmentCode(inferred.departmentCode);
+      }
+    }
+    if (asset.serviceCode) setServiceCode(asset.serviceCode);
+    if (asset.assignedTeamCode) setAssignedTeamCode(asset.assignedTeamCode);
   }
 
   function applyLocationSelection(location: any) {
@@ -9089,7 +9252,7 @@ function ServiceRequestForm({
           <select
             name="assetTag"
             value={assetTagValue}
-            onChange={(event) => setAssetTagValue(event.target.value)}
+            onChange={(event) => applyAssetSelection(event.target.value)}
             className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon"
           >
             <option value="">
@@ -9107,12 +9270,7 @@ function ServiceRequestForm({
                 {group.rows.map((asset) => (
                   <option key={asset.id ?? asset.tag} value={asset.tag}>
                     {asset.tag} - {asset.assetDescription || asset.name} /{" "}
-                    {[
-                      asset.locationCode || asset.room,
-                      asset.departmentCode || asset.assignedTeamCode,
-                      asset.buildingCode || asset.building?.name,
-                      asset.floor,
-                    ]
+                    {[assetLocationLabel(asset), asset.departmentCode, assetCategoryValue(asset)]
                       .filter(Boolean)
                       .join(" > ")}
                   </option>
@@ -9120,15 +9278,11 @@ function ServiceRequestForm({
               </optgroup>
             ))}
           </select>
-          {locationCodeValue &&
-            filteredAssets.length > 0 &&
-            departmentCode &&
-            departmentMatchedAssetCount === 0 && (
-              <span className="text-xs font-black text-amber-700">
-                No exact {departmentCode} asset was found at this location, so
-                all assets at the selected location are shown department-wise.
-              </span>
-            )}
+          {locationCodeValue && filteredAssets.length > 0 && (
+            <span className="text-xs font-black text-emerald-700">
+              Showing only assets mapped to the selected location hierarchy.
+            </span>
+          )}
           {!locationCodeValue && !departmentCode && !selectedTeamCode && (
             <span className="text-xs font-black text-slate-500">
               Select a location first to show assets location-wise, then choose
@@ -9141,6 +9295,18 @@ function ServiceRequestForm({
             </span>
           )}
         </label>
+        {selectedFormAsset && (
+          <div className="grid gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm font-bold text-slate-700 md:grid-cols-2">
+            <span>Asset code: {selectedFormAsset.tag || "-"}</span>
+            <span>
+              Asset name: {selectedFormAsset.assetDescription || selectedFormAsset.name || "-"}
+            </span>
+            <span>Exact location: {assetLocationLabel(selectedFormAsset) || "-"}</span>
+            <span>Department: {selectedFormAsset.departmentCode || "-"}</span>
+            <span>Category: {assetCategoryValue(selectedFormAsset) || "-"}</span>
+            <span>Subcategory: {assetSubcategoryValue(selectedFormAsset) || "-"}</span>
+          </div>
+        )}
         {request && (
           <select
             name="status"
@@ -9156,11 +9322,27 @@ function ServiceRequestForm({
           </select>
         )}
         {!request && <input type="hidden" name="status" value="NEW" />}
-        <input
-          type="hidden"
-          name="assignedTeamCode"
-          value={selectedTeamCode || request?.assignedTeamCode || ""}
-        />
+        <label className="grid gap-2 text-sm font-bold text-slate-600">
+          Service Team
+          <select
+            name="assignedTeamCode"
+            value={selectedTeamCode}
+            onChange={(event) => setAssignedTeamCode(event.target.value)}
+            className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon"
+          >
+            <option value="">Select mapped service team</option>
+            {relevantServiceTeams.map((team) => (
+              <option key={team.id ?? team.code} value={team.code}>
+                {team.code} - {team.name}
+              </option>
+            ))}
+          </select>
+          {departmentCode && categoryValue && !relevantServiceTeams.length && (
+            <span className="text-xs font-black text-amber-700">
+              No service team is mapped to this department, category and location.
+            </span>
+          )}
+        </label>
         <ImageUploadField
           name="attachmentUrls"
           defaultValue={request?.attachmentUrls ?? ""}
@@ -9278,6 +9460,17 @@ function RequestPreviewModal({
   );
   const selectedAsset = localAssets.find(
     (asset) => asset.tag === assignment.assetTag,
+  );
+  const relevantPreviewTeams = useMemo(
+    () =>
+      teams.filter((team) =>
+        teamMatchesTicketScope(
+          team,
+          request.departmentCode || selectedAsset?.departmentCode || "",
+          request.category || assetCategoryValue(selectedAsset),
+        ),
+      ),
+    [teams, request.departmentCode, request.category, selectedAsset],
   );
   const locationParts = String(request.location || "")
     .split("/")
@@ -9445,8 +9638,7 @@ function RequestPreviewModal({
                   const tag = event.target.value;
                   const asset = localAssets.find((item) => item.tag === tag);
                   onAssignAsset(tag);
-                  if (asset?.assignedTeamCode && !assignment.assignedTeamCode)
-                    onAssignTeam(asset.assignedTeamCode);
+                  if (asset?.assignedTeamCode) onAssignTeam(asset.assignedTeamCode);
                 }}
                 disabled={!isReviewed}
                 className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-lagoon"
@@ -9520,24 +9712,15 @@ function RequestPreviewModal({
             )}
             {selectedAsset && (
               <div className="grid gap-2 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-600 md:grid-cols-2">
+                <span>Asset code: {selectedAsset.tag || "-"}</span>
                 <span>
-                  Asset type:{" "}
-                  {selectedAsset.assetGroup || selectedAsset.category || "-"}
+                  Asset name: {selectedAsset.assetDescription || selectedAsset.name || "-"}
                 </span>
+                <span>Exact location: {assetLocationLabel(selectedAsset) || "-"}</span>
                 <span>Department: {selectedAsset.departmentCode || "-"}</span>
-                <span>
-                  Assigned team: {selectedAsset.assignedTeamCode || "-"}
-                </span>
-                <span>
-                  Location:{" "}
-                  {[
-                    selectedAsset.buildingCode || selectedAsset.building?.name,
-                    selectedAsset.floor,
-                    selectedAsset.room,
-                  ]
-                    .filter(Boolean)
-                    .join(" > ") || "-"}
-                </span>
+                <span>Category: {assetCategoryValue(selectedAsset) || "-"}</span>
+                <span>Subcategory: {assetSubcategoryValue(selectedAsset) || "-"}</span>
+                <span>Assigned team: {selectedAsset.assignedTeamCode || "-"}</span>
               </div>
             )}
             <label className="grid gap-2 text-sm font-black text-slate-600">
@@ -9549,8 +9732,8 @@ function RequestPreviewModal({
                 className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-lagoon"
               >
                 <option value="">Assign service team</option>
-                {teams.map((team) => (
-                  <option key={team.id} value={team.code}>
+                {relevantPreviewTeams.map((team) => (
+                  <option key={team.id ?? team.code} value={team.code}>
                     {team.code} - {team.name}
                   </option>
                 ))}
@@ -10361,7 +10544,7 @@ function WorkOrderSupervisorReviewModal({
               >
                 <option value="">Keep unassigned</option>
                 {teams.map((team) => (
-                  <option key={team.id} value={team.code}>
+                  <option key={team.id ?? team.code} value={team.code}>
                     {team.code} - {team.name}
                   </option>
                 ))}
