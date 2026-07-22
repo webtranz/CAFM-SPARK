@@ -486,6 +486,7 @@ model WorkOrder {
   assignedTo         User?            @relation(fields: [assignedToId], references: [id])
   inventoryIssues    InventoryIssue[]
   ppmChecklistHistory PpmChecklistHistory[]
+  ppmDueDateHistory PpmDueDateHistory[]
   ppmPlan         PreventiveMaintenance? @relation(fields: [ppmId], references: [id], onDelete: SetNull)
   ppmId           String?
   commentHistory     CommentHistory[]
@@ -573,6 +574,7 @@ model PreventiveMaintenance {
   escalationLevel      Int      @default(0)
   workOrders           WorkOrder[]
   checklistHistory     PpmChecklistHistory[]
+  dueDateHistory       PpmDueDateHistory[]
 
   @@index([assetTag, locationCode, frequency, name], map: "ppm_plans_asset_location_frequency_name_idx")
   @@index([ppmCode])
@@ -584,6 +586,23 @@ model PreventiveMaintenance {
   @@index([locationCode, nextDue])
 }
 
+model PpmDueDateHistory {
+  id              String                @id @default(cuid())
+  ppmId           String
+  workOrderId     String                @unique
+  previousDueDate DateTime
+  newDueDate      DateTime
+  workOrderNumber String
+  generatedBy     String                @default("")
+  generatedAt     DateTime              @default(now())
+  createdAt       DateTime              @default(now())
+  ppm             PreventiveMaintenance @relation(fields: [ppmId], references: [id], onDelete: Cascade)
+  workOrder       WorkOrder             @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+
+  @@index([ppmId, createdAt])
+  @@index([workOrderNumber])
+  @@index([generatedAt])
+}
 model PpmChecklistHistory {
   id                   String                 @id @default(cuid())
   sourceYear           String                 @default("")
@@ -1218,3 +1237,4 @@ model HousingHistory {
   @@index([roomId, createdAt])
   @@index([bookingId, createdAt])
 }
+

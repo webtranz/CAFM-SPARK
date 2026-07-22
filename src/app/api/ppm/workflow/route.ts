@@ -81,22 +81,26 @@ function dueHours(priority: string) {
 
 function frequencyInterval(frequency: string, periodUom?: string) {
   const rawFrequency = String(frequency || "").trim();
-  const numeric = Number(rawFrequency.match(/\d+(?:\.\d+)?/)?.[0] || "");
+  const rawPeriodUom = String(periodUom || "").trim();
+  const numeric = Number(
+    `${rawFrequency} ${rawPeriodUom}`.match(/\d+(?:\.\d+)?/)?.[0] || "",
+  );
   const amount =
     Number.isFinite(numeric) && numeric > 0
       ? Math.max(1, Math.floor(numeric))
       : 1;
-  const label = `${frequency || ""} ${periodUom || ""}`.toLowerCase();
+  const label = `${rawFrequency} ${rawPeriodUom}`.toLowerCase();
   if (label.includes("daily") || label.includes(" day"))
     return { amount, unit: "day" as const };
   if (label.includes("weekly") || label.includes(" week"))
     return { amount, unit: "week" as const };
   if (label.includes("quarter"))
     return { amount: numeric > 0 ? amount : 3, unit: "month" as const };
-  if (label.includes("semi"))
+  if (label.includes("half") || label.includes("semi"))
     return { amount: numeric > 0 ? amount : 6, unit: "month" as const };
   if (label.includes("annual") || label.includes("year"))
     return { amount, unit: "year" as const };
+  if (label.includes("month")) return { amount, unit: "month" as const };
   return { amount, unit: "month" as const };
 }
 
@@ -121,9 +125,9 @@ function workflowNote(input: z.infer<typeof schema>) {
     .join("\n\n");
 }
 
-async function findUserId(email?: string) {
+async function findUserId(email?: string, db: any = prisma) {
   if (!email) return null;
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await db.user.findUnique({ where: { email } });
   return user?.id ?? null;
 }
 
@@ -299,12 +303,12 @@ async function loadPpmGroup(
   return unfilteredRows.filter((row) => rowIsInsidePlanningWindow(row, input));
 }
 
-async function nextPpmWorkOrderNumber() {
+async function nextPpmWorkOrderNumber(db: any = prisma) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const suffix =
       `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`.toUpperCase();
     const woNo = `PPM-WO-${suffix}`;
-    const existing = await prisma.workOrder.findUnique({
+    const existing = await db.workOrder.findUnique({
       where: { woNo },
       select: { id: true },
     });
@@ -318,10 +322,11 @@ async function ensurePpmWorkOrder(
   input: z.infer<typeof schema>,
   user: any,
   scheduledDate = ppm.nextDue,
+  db: any = prisma,
 ) {
   const scheduledStart = new Date(scheduledDate);
   const scheduledEnd = addDays(scheduledStart, 1);
-  const existingByPpmAndDate = await prisma.workOrder.findFirst({
+  const existingByPpmAndDate = await db.workOrder.findFirst({
     where: {
       ppmId: ppm.id,
       plannedStart: { gte: scheduledStart, lt: scheduledEnd },
@@ -334,14 +339,14 @@ async function ensurePpmWorkOrder(
 
   const [asset, team, technicianId] = await Promise.all([
     ppm.assetTag
-      ? prisma.asset.findUnique({ where: { tag: ppm.assetTag } })
+      ? db.asset.findUnique({ where: { tag: ppm.assetTag } })
       : null,
     input.assignedTeamCode || ppm.assignedTeamCode
-      ? prisma.team.findUnique({
+      ? db.team.findUnique({
           where: { code: input.assignedTeamCode || ppm.assignedTeamCode },
         })
       : null,
-    findUserId(input.technicianEmail || ppm.technicianEmail),
+    findUserId(input.technicianEmail || ppm.technicianEmail, db),
   ]);
   const priority = ppm.priority;
   const target = ppm.assetTag || ppm.locationCode || ppm.code;
@@ -349,9 +354,9 @@ async function ensurePpmWorkOrder(
     null;
   let lastCreateError: unknown = null;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const woNo = await nextPpmWorkOrderNumber();
+    const woNo = await nextPpmWorkOrderNumber(db);
     try {
-      created = await prisma.workOrder.create({
+      created = await db.workOrder.create({
         data: {
           woNo,
           title:
@@ -402,7 +407,7 @@ async function ensurePpmWorkOrder(
           "Unable to create PPM work order after retrying work order numbers.",
         );
   if (asset?.id) {
-    await prisma.assetHistory.create({
+    await db.assetHistory.create({
       data: {
         assetId: asset.id,
         eventType: "PPM_WORK_ORDER_CREATED",
@@ -415,12 +420,76 @@ async function ensurePpmWorkOrder(
   return { workOrder: created, created: true };
 }
 
+async function advancePpmAfterGeneratedWorkOrder(
+  db: any,
+  ppm: PpmRecord,
+  workOrder: any,
+  user: any,
+  generatedAt = new Date(),
+  assignmentData: Partial<{
+    assignedTeamCode: string;
+    technicianEmail: string;
+    supervisorEmail: string;
+  }> = {},
+) {
+  if (!workOrder?.id) return { ppm, advanced: false };
+  const existingHistory = await db.ppmDueDateHistory.findUnique({
+    where: { workOrderId: workOrder.id },
+  });
+  if (existingHistory) {
+    const current = await db.preventiveMaintenance.findUnique({
+      where: { id: ppm.id },
+    });
+    return { ppm: current || ppm, advanced: false };
+  }
+
+  const currentPpm = await db.preventiveMaintenance.findUnique({
+    where: { id: ppm.id },
+  });
+  if (!currentPpm) throw new Error("PPM plan not found while updating due date.");
+
+  const previousDueDate = new Date(currentPpm.nextDue);
+  const newDueDate = nextDueDate(
+    previousDueDate,
+    currentPpm.frequency,
+    currentPpm.periodUom,
+  );
+  const generatedBy = user?.name || user?.email || "System";
+  const updatedPpm = await db.preventiveMaintenance.update({
+    where: { id: currentPpm.id },
+    data: {
+      assignedTeamCode:
+        assignmentData.assignedTeamCode ?? currentPpm.assignedTeamCode,
+      technicianEmail: assignmentData.technicianEmail ?? currentPpm.technicianEmail,
+      supervisorEmail: assignmentData.supervisorEmail ?? currentPpm.supervisorEmail,
+      generatedWorkOrderId: workOrder.id,
+      lastGeneratedAt: generatedAt,
+      workflowStatus: "IN_PROGRESS",
+      nextDue: newDueDate,
+    },
+  });
+
+  await db.ppmDueDateHistory.create({
+    data: {
+      ppmId: currentPpm.id,
+      workOrderId: workOrder.id,
+      previousDueDate,
+      newDueDate,
+      workOrderNumber: workOrder.woNo,
+      generatedBy,
+      generatedAt,
+    },
+  });
+
+  return { ppm: updatedPpm, advanced: true, previousDueDate, newDueDate };
+}
 async function createPpmWorkOrder(
   ppm: PpmRecord,
   input: z.infer<typeof schema>,
   user: any,
+  db: any = prisma,
 ) {
-  return (await ensurePpmWorkOrder(ppm, input, user)).workOrder;
+  return (await ensurePpmWorkOrder(ppm, input, user, ppm.nextDue, db)).workOrder;
 }
 
 async function findWorkflowWorkOrder(
@@ -504,8 +573,11 @@ async function createPpmWorkOrdersForGroup(
     );
   }
   const generatedAt = new Date();
-  const workflowStatus =
-    input.assignedTeamCode || input.technicianEmail ? "ASSIGNED" : "SCHEDULED";
+  const assignmentData = {
+    assignedTeamCode: input.assignedTeamCode || "",
+    technicianEmail: input.technicianEmail || "",
+    supervisorEmail: input.supervisorEmail || "",
+  };
   const results: Array<{
     ppmId: string;
     ppmCode: string;
@@ -516,30 +588,37 @@ async function createPpmWorkOrdersForGroup(
     equipmentDescription?: string | null;
     frequency?: string;
     periodUom?: string;
+    previousDue?: Date;
     nextDue?: Date;
     scheduledDate: Date;
     workOrder: any;
     created: boolean;
+    dueDateAdvanced: boolean;
   }> = [];
+
   for (const occurrence of occurrences) {
     const row = occurrence.row;
-    const result = await ensurePpmWorkOrder(
-      row,
-      input,
-      user,
-      occurrence.scheduledDate,
-    );
-    await prisma.preventiveMaintenance.update({
-      where: { id: row.id },
-      data: {
-        assignedTeamCode: input.assignedTeamCode || row.assignedTeamCode,
-        technicianEmail: input.technicianEmail || row.technicianEmail,
-        supervisorEmail: input.supervisorEmail || row.supervisorEmail,
-        generatedWorkOrderId: result.workOrder.id,
-        lastGeneratedAt: generatedAt,
-        workflowStatus,
-      },
+    const result = await prisma.$transaction(async (tx) => {
+      const ensured = await ensurePpmWorkOrder(
+        row,
+        input,
+        user,
+        occurrence.scheduledDate,
+        tx,
+      );
+      const dueUpdate = ensured.created
+        ? await advancePpmAfterGeneratedWorkOrder(
+            tx,
+            row,
+            ensured.workOrder,
+            user,
+            generatedAt,
+            assignmentData,
+          )
+        : { ppm: row, advanced: false };
+      return { ...ensured, dueUpdate };
     });
+
     results.push({
       ppmId: row.id,
       ppmCode: row.ppmCode || ppmGroupCode(row),
@@ -550,10 +629,12 @@ async function createPpmWorkOrdersForGroup(
       equipmentDescription: row.equipmentDescription,
       frequency: row.frequency,
       periodUom: row.periodUom,
-      nextDue: row.nextDue,
+      previousDue: result.dueUpdate.previousDueDate || row.nextDue,
+      nextDue: result.dueUpdate.ppm?.nextDue || row.nextDue,
       scheduledDate: occurrence.scheduledDate,
       workOrder: result.workOrder,
       created: result.created,
+      dueDateAdvanced: Boolean(result.dueUpdate.advanced),
     });
   }
   return {
@@ -565,10 +646,10 @@ async function createPpmWorkOrdersForGroup(
     total: occurrences.length,
     createdCount: results.filter((item) => item.created).length,
     reusedCount: results.filter((item) => !item.created).length,
+    advancedCount: results.filter((item) => item.dueDateAdvanced).length,
     results,
   };
 }
-
 async function buildPpmWorkOrderPreview(
   ppm: PpmRecord,
   input: z.infer<typeof schema>,
@@ -705,12 +786,14 @@ export async function POST(request: Request) {
           locationCode: item.locationCode,
           departmentCode: item.departmentCode,
           equipmentDescription: item.equipmentDescription,
-          nextDue: item.scheduledDate || item.nextDue,
+          previousDue: item.previousDue,
+          nextDue: item.nextDue,
           scheduledDate: item.scheduledDate?.toISOString?.().slice(0, 10) || "",
           frequency: item.frequency,
           periodUom: item.periodUom,
           workOrderNo: item.workOrder.woNo,
           willCreate: item.created,
+          dueDateAdvanced: item.dueDateAdvanced,
         })),
         limited: generation.results.length > 300,
       };
@@ -742,10 +825,14 @@ export async function POST(request: Request) {
           workOrderId: item.workOrder.id,
           woNo: item.workOrder.woNo,
           created: item.created,
-          nextDue: item.scheduledDate || item.nextDue,
+          previousDue: item.previousDue,
+          nextDue: item.nextDue,
           scheduledDate: item.scheduledDate?.toISOString?.().slice(0, 10) || "",
           frequency: item.frequency,
           periodUom: item.periodUom,
+          generatedAt: item.workOrder.createdAt,
+          workflowStatus: item.dueDateAdvanced ? "IN_PROGRESS" : undefined,
+          dueDateAdvanced: item.dueDateAdvanced,
         })),
         preview,
         groupCode: generation.groupCode,
@@ -760,13 +847,39 @@ export async function POST(request: Request) {
       });
     }
     if (input.action === "assign") {
-      workOrder = await createPpmWorkOrder(ppm, input, user);
+      const generatedAt = new Date();
+      const result = await prisma.$transaction(async (tx) => {
+        const ensured = await ensurePpmWorkOrder(ppm, input, user, ppm.nextDue, tx);
+        const dueUpdate = ensured.created
+          ? await advancePpmAfterGeneratedWorkOrder(
+              tx,
+              ppm,
+              ensured.workOrder,
+              user,
+              generatedAt,
+              assignmentData,
+            )
+          : { ppm, advanced: false };
+        return { ...ensured, dueUpdate };
+      });
+      workOrder = result.workOrder;
+      if (result.created && workOrder) {
+        return NextResponse.json({
+          ppm: result.dueUpdate.ppm,
+          workOrder,
+          dueDateAdvanced: result.dueUpdate.advanced,
+          message: `PPM work order ${workOrder.woNo} created. Next due date updated.`,
+        });
+      }
+      if (!workOrder) {
+        throw new Error("PPM work order could not be created or found.");
+      }
       workflowStatus =
         assignmentData.assignedTeamCode || assignmentData.technicianEmail
           ? "ASSIGNED"
           : "SCHEDULED";
       ppmUpdate.generatedWorkOrderId = workOrder.id;
-      ppmUpdate.lastGeneratedAt = new Date();
+      ppmUpdate.lastGeneratedAt = generatedAt;
       if (workOrder) {
         workUpdate.assignedTeamCode = assignmentData.assignedTeamCode || null;
         workUpdate.assignedToId =
@@ -832,11 +945,7 @@ export async function POST(request: Request) {
       workUpdate.finishedAt = new Date();
       workUpdate.verifiedAt = workOrder?.verifiedAt || new Date();
       ppmUpdate.lastCompletedAt = new Date();
-      ppmUpdate.nextDue = nextDueDate(
-        new Date(ppm.nextDue),
-        ppm.frequency,
-        ppm.periodUom,
-      );
+
     }
     if (input.action === "cancel") {
       workflowStatus = "CANCELLED";

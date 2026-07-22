@@ -12078,6 +12078,19 @@ function Ppm({
           )}
           saving={saving}
           onClose={() => setPreviewPpm(null)}
+          onLocalUpdate={(updatedRows) => {
+            const updatedById = new Map(updatedRows.map((row: any) => [row.id, row]));
+            setPpmRowsSource((current) =>
+              current.map((row) =>
+                updatedById.has(row.id) ? { ...row, ...updatedById.get(row.id) } : row,
+              ),
+            );
+            setPreviewPpm((current: any) =>
+              current && updatedById.has(current.id)
+                ? { ...current, ...updatedById.get(current.id) }
+                : current,
+            );
+          }}
           onUpdate={(body) => {
             setPreviewPpm((current: any) =>
               current ? { ...current, ...body } : current,
@@ -12344,6 +12357,7 @@ function PmPreviewModal({
   users,
   saving,
   onClose,
+  onLocalUpdate,
   onUpdate,
 }: {
   ppm: any;
@@ -12355,6 +12369,7 @@ function PmPreviewModal({
   users: any[];
   saving: boolean;
   onClose: () => void;
+  onLocalUpdate?: (updatedRows: any[]) => void;
   onUpdate: (body: Record<string, unknown>) => Promise<void> | void;
 }) {
   const ppmGroupCode = ppm.ppmCode || String(ppm.code || "").split("-")[0];
@@ -12815,24 +12830,36 @@ function PmPreviewModal({
         const generatedByPpmId = new Map(
           result.generatedRows.map((item: any) => [item.ppmId, item]),
         );
+        const localUpdates = result.generatedRows.map((generated: any) => ({
+          id: generated.ppmId,
+          nextDue: generated.nextDue,
+          generatedWorkOrderId: generated.workOrderId,
+          lastGeneratedAt: generated.generatedAt,
+          workflowStatus: generated.workflowStatus || (generated.dueDateAdvanced ? "IN_PROGRESS" : undefined),
+        }));
+        const localUpdateById = new Map(localUpdates.map((item: any) => [item.id, item]));
         setPpmGroup((current: any) =>
           current
             ? {
                 ...current,
                 equipment: (current.equipment || []).map((item: any) => {
                   const generated: any = generatedByPpmId.get(item.id);
-                  return generated
+                  const update: any = localUpdateById.get(item.id);
+                  return generated || update
                     ? {
                         ...item,
-                        generatedWorkOrderId: generated.workOrderId,
+                        ...update,
+                        generatedWorkOrderId:
+                          generated?.workOrderId || item.generatedWorkOrderId,
                         workflowStatus:
-                          result.ppm?.workflowStatus || item.workflowStatus,
+                          update?.workflowStatus || item.workflowStatus,
                       }
                     : item;
                 }),
               }
             : current,
         );
+        onLocalUpdate?.(localUpdates);
         const total = Number(
           result.totalWorkOrders ?? result.generatedRows.length,
         );
@@ -26924,3 +26951,4 @@ function actionFieldLabel(field: string) {
   };
   return labels[field] || field.replace(/([A-Z])/g, " $1");
 }
+
