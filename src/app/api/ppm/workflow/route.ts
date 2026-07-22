@@ -464,7 +464,7 @@ async function advancePpmAfterGeneratedWorkOrder(
       supervisorEmail: assignmentData.supervisorEmail ?? currentPpm.supervisorEmail,
       generatedWorkOrderId: workOrder.id,
       lastGeneratedAt: generatedAt,
-      workflowStatus: "IN_PROGRESS",
+      workflowStatus: "SCHEDULED",
       nextDue: newDueDate,
     },
   });
@@ -476,6 +476,7 @@ async function advancePpmAfterGeneratedWorkOrder(
       previousDueDate,
       newDueDate,
       workOrderNumber: workOrder.woNo,
+      scheduleStatus: "GENERATED",
       generatedBy,
       generatedAt,
     },
@@ -831,7 +832,7 @@ export async function POST(request: Request) {
           frequency: item.frequency,
           periodUom: item.periodUom,
           generatedAt: item.workOrder.createdAt,
-          workflowStatus: item.dueDateAdvanced ? "IN_PROGRESS" : undefined,
+          workflowStatus: item.dueDateAdvanced ? "SCHEDULED" : undefined,
           dueDateAdvanced: item.dueDateAdvanced,
         })),
         preview,
@@ -868,7 +869,7 @@ export async function POST(request: Request) {
           ppm: result.dueUpdate.ppm,
           workOrder,
           dueDateAdvanced: result.dueUpdate.advanced,
-          message: `PPM work order ${workOrder.woNo} created. Next due date updated.`,
+          message: `PPM work order ${workOrder.woNo} created. Current schedule marked Generated and next due date scheduled.`,
         });
       }
       if (!workOrder) {

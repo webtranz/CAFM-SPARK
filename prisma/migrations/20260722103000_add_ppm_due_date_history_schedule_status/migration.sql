@@ -1,0 +1,2 @@
+ALTER TABLE "PpmDueDateHistory" ADD COLUMN "scheduleStatus" TEXT NOT NULL DEFAULT 'GENERATED';
+

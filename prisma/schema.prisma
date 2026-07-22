@@ -593,6 +593,7 @@ model PpmDueDateHistory {
   previousDueDate DateTime
   newDueDate      DateTime
   workOrderNumber String
+  scheduleStatus  String                @default("GENERATED")
   generatedBy     String                @default("")
   generatedAt     DateTime              @default(now())
   createdAt       DateTime              @default(now())

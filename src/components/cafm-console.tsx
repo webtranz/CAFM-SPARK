@@ -12835,7 +12835,7 @@ function PmPreviewModal({
           nextDue: generated.nextDue,
           generatedWorkOrderId: generated.workOrderId,
           lastGeneratedAt: generated.generatedAt,
-          workflowStatus: generated.workflowStatus || (generated.dueDateAdvanced ? "IN_PROGRESS" : undefined),
+          workflowStatus: generated.workflowStatus || (generated.dueDateAdvanced ? "SCHEDULED" : undefined),
         }));
         const localUpdateById = new Map(localUpdates.map((item: any) => [item.id, item]));
         setPpmGroup((current: any) =>
