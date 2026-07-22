@@ -92,6 +92,8 @@ function frequencyInterval(frequency: string, periodUom?: string) {
   const label = `${rawFrequency} ${rawPeriodUom}`.toLowerCase();
   if (label.includes("daily") || label.includes(" day"))
     return { amount, unit: "day" as const };
+  if (label.includes("biweekly") || label.includes("bi-weekly"))
+    return { amount: numeric > 0 ? amount : 2, unit: "week" as const };
   if (label.includes("weekly") || label.includes(" week"))
     return { amount, unit: "week" as const };
   if (label.includes("quarter"))
@@ -132,7 +134,7 @@ async function findUserId(email?: string, db: any = prisma) {
 }
 
 const DEFAULT_PPM_EFFECTIVE_DATE = "2026-01-01";
-const OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE = ["CLOSED", "REJECTED"] as const;
+const INVALID_GENERATED_WORK_ORDER_STATUSES = ["REJECTED"] as const;
 
 function utcDateFromInput(
   value?: string,
@@ -330,7 +332,7 @@ async function ensurePpmWorkOrder(
     where: {
       ppmId: ppm.id,
       plannedStart: { gte: scheduledStart, lt: scheduledEnd },
-      status: { notIn: [...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE] as any },
+      status: { notIn: [...INVALID_GENERATED_WORK_ORDER_STATUSES] as any },
     },
     orderBy: { createdAt: "desc" },
   });
@@ -433,41 +435,76 @@ async function advancePpmAfterGeneratedWorkOrder(
   }> = {},
 ) {
   if (!workOrder?.id) return { ppm, advanced: false };
-  const existingHistory = await db.ppmDueDateHistory.findUnique({
-    where: { workOrderId: workOrder.id },
-  });
-  if (existingHistory) {
-    const current = await db.preventiveMaintenance.findUnique({
-      where: { id: ppm.id },
-    });
-    return { ppm: current || ppm, advanced: false };
-  }
+  if (INVALID_GENERATED_WORK_ORDER_STATUSES.includes(workOrder.status as any))
+    return { ppm, advanced: false };
 
   const currentPpm = await db.preventiveMaintenance.findUnique({
     where: { id: ppm.id },
   });
   if (!currentPpm) throw new Error("PPM plan not found while updating due date.");
 
-  const previousDueDate = new Date(currentPpm.nextDue);
+  const generatedScheduleDate = new Date(workOrder.plannedStart || currentPpm.nextDue);
+  const previousDueDate = Number.isNaN(generatedScheduleDate.getTime())
+    ? new Date(currentPpm.nextDue)
+    : generatedScheduleDate;
   const newDueDate = nextDueDate(
     previousDueDate,
     currentPpm.frequency,
     currentPpm.periodUom,
   );
+  const currentDueDate = new Date(currentPpm.nextDue);
+  const shouldMoveForward =
+    Number.isNaN(currentDueDate.getTime()) ||
+    newDueDate.getTime() > currentDueDate.getTime();
   const generatedBy = user?.name || user?.email || "System";
-  const updatedPpm = await db.preventiveMaintenance.update({
-    where: { id: currentPpm.id },
-    data: {
-      assignedTeamCode:
-        assignmentData.assignedTeamCode ?? currentPpm.assignedTeamCode,
-      technicianEmail: assignmentData.technicianEmail ?? currentPpm.technicianEmail,
-      supervisorEmail: assignmentData.supervisorEmail ?? currentPpm.supervisorEmail,
-      generatedWorkOrderId: workOrder.id,
-      lastGeneratedAt: generatedAt,
-      workflowStatus: "SCHEDULED",
-      nextDue: newDueDate,
-    },
+
+  const existingHistory = await db.ppmDueDateHistory.findUnique({
+    where: { workOrderId: workOrder.id },
   });
+  if (existingHistory) {
+    if (shouldMoveForward) {
+      const updatedPpm = await db.preventiveMaintenance.update({
+        where: { id: currentPpm.id },
+        data: {
+          assignedTeamCode:
+            assignmentData.assignedTeamCode ?? currentPpm.assignedTeamCode,
+          technicianEmail:
+            assignmentData.technicianEmail ?? currentPpm.technicianEmail,
+          supervisorEmail:
+            assignmentData.supervisorEmail ?? currentPpm.supervisorEmail,
+          generatedWorkOrderId: workOrder.id,
+          lastGeneratedAt: generatedAt,
+          workflowStatus: "SCHEDULED",
+          nextDue: newDueDate,
+        },
+      });
+      return {
+        ppm: updatedPpm,
+        advanced: true,
+        previousDueDate: existingHistory.previousDueDate || previousDueDate,
+        newDueDate,
+      };
+    }
+    return { ppm: currentPpm, advanced: false, previousDueDate, newDueDate };
+  }
+
+  const updatedPpm = shouldMoveForward
+    ? await db.preventiveMaintenance.update({
+        where: { id: currentPpm.id },
+        data: {
+          assignedTeamCode:
+            assignmentData.assignedTeamCode ?? currentPpm.assignedTeamCode,
+          technicianEmail:
+            assignmentData.technicianEmail ?? currentPpm.technicianEmail,
+          supervisorEmail:
+            assignmentData.supervisorEmail ?? currentPpm.supervisorEmail,
+          generatedWorkOrderId: workOrder.id,
+          lastGeneratedAt: generatedAt,
+          workflowStatus: "SCHEDULED",
+          nextDue: newDueDate,
+        },
+      })
+    : currentPpm;
 
   await db.ppmDueDateHistory.create({
     data: {
@@ -482,9 +519,46 @@ async function advancePpmAfterGeneratedWorkOrder(
     },
   });
 
-  return { ppm: updatedPpm, advanced: true, previousDueDate, newDueDate };
+  return { ppm: updatedPpm, advanced: shouldMoveForward, previousDueDate, newDueDate };
 }
-async function createPpmWorkOrder(
+
+async function reconcileGeneratedPpmWorkOrders(
+  db: any,
+  ppm: PpmRecord,
+  user: any,
+  assignmentData: Partial<{
+    assignedTeamCode: string;
+    technicianEmail: string;
+    supervisorEmail: string;
+  }> = {},
+) {
+  const workOrders = await db.workOrder.findMany({
+    where: {
+      ppmId: ppm.id,
+      status: { notIn: [...INVALID_GENERATED_WORK_ORDER_STATUSES] as any },
+    },
+    orderBy: [{ plannedStart: "asc" }, { createdAt: "asc" }],
+  });
+  let current = ppm;
+  let advanced = false;
+  let previousDueDate: Date | undefined;
+  let newDueDate: Date | undefined;
+  for (const workOrder of workOrders) {
+    const result = await advancePpmAfterGeneratedWorkOrder(
+      db,
+      current,
+      workOrder,
+      user,
+      workOrder.createdAt || new Date(),
+      assignmentData,
+    );
+    current = result.ppm || current;
+    advanced = advanced || Boolean(result.advanced);
+    previousDueDate = result.previousDueDate || previousDueDate;
+    newDueDate = result.newDueDate || newDueDate;
+  }
+  return { ppm: current, advanced, previousDueDate, newDueDate };
+}async function createPpmWorkOrder(
   ppm: PpmRecord,
   input: z.infer<typeof schema>,
   user: any,
@@ -508,7 +582,7 @@ async function findWorkflowWorkOrder(
     where: {
       ppmId: ppm.id,
       plannedStart: planningWindow.dateFilter,
-      status: { notIn: [...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE] as any },
+      status: { notIn: [...INVALID_GENERATED_WORK_ORDER_STATUSES] as any },
     },
     orderBy: [{ plannedStart: "desc" }, { createdAt: "desc" }],
   });
@@ -607,7 +681,7 @@ async function createPpmWorkOrdersForGroup(
         occurrence.scheduledDate,
         tx,
       );
-      const dueUpdate = ensured.created
+      const dueUpdate = ensured.workOrder
         ? await advancePpmAfterGeneratedWorkOrder(
             tx,
             row,
@@ -664,7 +738,7 @@ async function buildPpmWorkOrderPreview(
         where: {
           ppmId: { in: rowIds },
           plannedStart: planningWindow.dateFilter,
-          status: { notIn: [...OPEN_WORK_ORDER_STATUSES_TO_EXCLUDE] as any },
+          status: { notIn: [...INVALID_GENERATED_WORK_ORDER_STATUSES] as any },
         },
         select: {
           id: true,
@@ -851,7 +925,7 @@ export async function POST(request: Request) {
       const generatedAt = new Date();
       const result = await prisma.$transaction(async (tx) => {
         const ensured = await ensurePpmWorkOrder(ppm, input, user, ppm.nextDue, tx);
-        const dueUpdate = ensured.created
+        const dueUpdate = ensured.workOrder
           ? await advancePpmAfterGeneratedWorkOrder(
               tx,
               ppm,
@@ -1036,4 +1110,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

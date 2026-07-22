@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { addDays } from "date-fns";
+import { addDays, addMonths, addWeeks, addYears } from "date-fns";
 import { z } from "zod";
 import { apiError } from "@/lib/api-response";
 import { requireAdmin, requirePermission } from "@/lib/api-auth";
@@ -27,6 +27,74 @@ function isInvalidChecklistValue(value: unknown) {
 }
 
 const workflowStatuses = ["DRAFT", "SCHEDULED", "ASSIGNED", "IN_PROGRESS", "ON_HOLD", "SUBMITTED", "REWORK", "COMPLETED", "CLOSED", "OVERDUE", "CANCELLED"] as const;
+const INVALID_GENERATED_WORK_ORDER_STATUSES = ["REJECTED"] as const;
+
+function ppmFrequencyInterval(frequency: string, periodUom?: string) {
+  const rawFrequency = String(frequency || "").trim();
+  const rawPeriodUom = String(periodUom || "").trim();
+  const numeric = Number(`${rawFrequency} ${rawPeriodUom}`.match(/\d+(?:\.\d+)?/)?.[0] || "");
+  const amount = Number.isFinite(numeric) && numeric > 0 ? Math.max(1, Math.floor(numeric)) : 1;
+  const label = `${rawFrequency} ${rawPeriodUom}`.toLowerCase();
+  if (label.includes("daily") || label.includes(" day")) return { amount, unit: "day" as const };
+  if (label.includes("weekly") || label.includes(" week") || label.includes("biweekly") || label.includes("bi-weekly")) return { amount: label.includes("biweekly") || label.includes("bi-weekly") ? 2 : amount, unit: "week" as const };
+  if (label.includes("quarter")) return { amount: numeric > 0 ? amount : 3, unit: "month" as const };
+  if (label.includes("half") || label.includes("semi")) return { amount: numeric > 0 ? amount : 6, unit: "month" as const };
+  if (label.includes("annual") || label.includes("year")) return { amount, unit: "year" as const };
+  return { amount, unit: "month" as const };
+}
+
+function ppmNextDueDate(current: Date, frequency: string, periodUom?: string) {
+  const interval = ppmFrequencyInterval(frequency, periodUom);
+  if (interval.unit === "day") return addDays(current, interval.amount);
+  if (interval.unit === "week") return addWeeks(current, interval.amount);
+  if (interval.unit === "year") return addYears(current, interval.amount);
+  return addMonths(current, interval.amount);
+}
+
+async function reconcilePpmGeneratedWorkOrders(ppm: any) {
+  const workOrders = await prisma.workOrder.findMany({
+    where: {
+      ppmId: ppm.id,
+      status: { notIn: [...INVALID_GENERATED_WORK_ORDER_STATUSES] as any },
+    },
+    orderBy: [{ plannedStart: "asc" }, { createdAt: "asc" }],
+  });
+  let current = ppm;
+  for (const workOrder of workOrders) {
+    const previousDueDate = new Date(workOrder.plannedStart || current.nextDue);
+    if (Number.isNaN(previousDueDate.getTime())) continue;
+    const newDueDate = ppmNextDueDate(previousDueDate, current.frequency, current.periodUom);
+    const currentDue = new Date(current.nextDue);
+    const shouldMoveForward = Number.isNaN(currentDue.getTime()) || newDueDate.getTime() > currentDue.getTime();
+    const existingHistory = await prisma.ppmDueDateHistory.findUnique({ where: { workOrderId: workOrder.id } });
+    if (!existingHistory) {
+      await prisma.ppmDueDateHistory.create({
+        data: {
+          ppmId: current.id,
+          workOrderId: workOrder.id,
+          previousDueDate,
+          newDueDate,
+          workOrderNumber: workOrder.woNo,
+          scheduleStatus: "GENERATED",
+          generatedBy: "System",
+          generatedAt: workOrder.createdAt || new Date(),
+        },
+      });
+    }
+    if (shouldMoveForward) {
+      current = await prisma.preventiveMaintenance.update({
+        where: { id: current.id },
+        data: {
+          generatedWorkOrderId: workOrder.id,
+          lastGeneratedAt: workOrder.createdAt || new Date(),
+          workflowStatus: "SCHEDULED",
+          nextDue: newDueDate,
+        },
+      });
+    }
+  }
+  return current;
+}
 
 const schema = z.object({
   code: z.string().optional(),
@@ -62,7 +130,7 @@ export async function GET(request: Request) {
   const status = url.searchParams.get("status")?.trim() || "All";
   const groupCode = url.searchParams.get("groupCode")?.trim() || "";
   if (groupCode) {
-    const groupedPpms = await prisma.preventiveMaintenance.findMany({
+    const sourceGroupedPpms = await prisma.preventiveMaintenance.findMany({
       where: {
         OR: [
           { ppmCode: groupCode },
@@ -73,12 +141,34 @@ export async function GET(request: Request) {
       orderBy: [{ locationCode: "asc" }, { assetTag: "asc" }, { nextDue: "asc" }],
       take: 20000,
     });
+    const groupedPpms: any[] = [];
+    for (const ppm of sourceGroupedPpms) {
+      groupedPpms.push(await reconcilePpmGeneratedWorkOrders(ppm));
+    }
+    groupedPpms.sort(
+      (left, right) =>
+        String(left.locationCode || "").localeCompare(String(right.locationCode || "")) ||
+        String(left.assetTag || "").localeCompare(String(right.assetTag || "")) ||
+        new Date(left.nextDue).getTime() - new Date(right.nextDue).getTime(),
+    );
     const assetTags = [...new Set(groupedPpms.map((item) => item.assetTag).filter(Boolean))];
     const locationCodes = [...new Set(groupedPpms.map((item) => item.locationCode).filter(Boolean))];
-    const [assets, locations] = await Promise.all([
+    const [assets, locations, dueDateHistories] = await Promise.all([
       assetTags.length ? prisma.asset.findMany({ where: { tag: { in: assetTags } }, select: { id: true, tag: true, name: true, assetDescription: true, locationCode: true, locationDesc: true, departmentCode: true, category: true, categoryDesc: true, buildingCode: true, floor: true, room: true, status: true } }) : [],
       locationCodes.length ? prisma.location.findMany({ where: { code: { in: locationCodes } }, select: { id: true, code: true, site: true, zone: true, building: true, floor: true, room: true, type: true, description: true, parentLocation: true, locationClass: true, active: true } }) : [],
+      groupedPpms.length
+        ? prisma.ppmDueDateHistory.findMany({
+            where: { ppmId: { in: groupedPpms.map((item) => item.id) } },
+            orderBy: [{ previousDueDate: "asc" }, { generatedAt: "asc" }],
+          })
+        : [],
     ]);
+    const dueDateHistoryByPpmId = new Map<string, any[]>();
+    dueDateHistories.forEach((history: any) => {
+      const current = dueDateHistoryByPpmId.get(history.ppmId) || [];
+      current.push(history);
+      dueDateHistoryByPpmId.set(history.ppmId, current);
+    });
     const assetByTag = new Map(assets.map((asset) => [asset.tag, asset]));
     const locationByCode = new Map(locations.map((location) => [location.code, location]));
     const checklistSource = groupedPpms.find((item) => item.checklist && !isInvalidChecklistValue(item.checklist))?.checklist || "No match";
@@ -106,6 +196,7 @@ export async function GET(request: Request) {
         technicianEmail: item.technicianEmail,
         supervisorEmail: item.supervisorEmail,
         generatedWorkOrderId: item.generatedWorkOrderId,
+        dueDateHistory: dueDateHistoryByPpmId.get(item.id) || [],
         assetDetails: item.assetTag ? assetByTag.get(item.assetTag) || null : null,
         locationDetails: item.locationCode ? locationByCode.get(item.locationCode) || null : null,
       })),
