@@ -12817,7 +12817,20 @@ function PmPreviewModal({
       const result = await response.json().catch(() => ({}));
       if (!response.ok)
         throw new Error(result.message || "PPM workflow action failed.");
-      if (result.ppm) setWorkflowPpm(result.ppm);
+      if (result.ppm) {
+        setWorkflowPpm(result.ppm);
+        onLocalUpdate?.([result.ppm]);
+        setPpmGroup((current: any) =>
+          current
+            ? {
+                ...current,
+                equipment: (current.equipment || []).map((item: any) =>
+                  item.id === result.ppm.id ? { ...item, ...result.ppm } : item,
+                ),
+              }
+            : current,
+        );
+      }
       if (result.preview) {
         setWorkflowPreview(result.preview);
         if (action === "preview") {
@@ -12941,29 +12954,29 @@ function PmPreviewModal({
         <div className="flex items-start justify-between gap-3">
           <div>
             <p className="text-xs font-black text-slate-500">
-              PPM {ppmGroupCode} / Record {ppm.code} / Next due{" "}
-              {formatDateCell(ppm.nextDue)}
+              PPM {ppmGroupCode} / Record {workflowRecord.code} / Next due{" "}
+              {formatDateCell(workflowRecord.nextDue)}
             </p>
-            <h3 className="mt-1 text-2xl font-black">{ppm.name}</h3>
+            <h3 className="mt-1 text-2xl font-black">{workflowRecord.name}</h3>
           </div>
           <RequestPriorityBadge priority={priority} />
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <PreviewField
             label="Progression"
-            value={ppm.active ? "Active" : "Paused"}
+            value={workflowRecord.active ? "Active" : "Paused"}
           />
           <PreviewField
             label="Time to Complete"
-            value={`${ppm.durationHrs || 0} hrs`}
+            value={`${workflowRecord.durationHrs || 0} hrs`}
           />
           <PreviewField label="Work Type" value="Preventive" />
           <PreviewField
             label="Schedule"
             value={
-              ppmPeriodUomValue(ppm)
-                ? `${ppm.frequency} ${ppmPeriodUomValue(ppm)}`
-                : ppm.frequency
+              ppmPeriodUomValue(workflowRecord)
+                ? `${workflowRecord.frequency} ${ppmPeriodUomValue(workflowRecord)}`
+                : workflowRecord.frequency
             }
           />
           <PreviewField label="PPM Code" value={ppmGroupCode} />
@@ -12971,14 +12984,14 @@ function PmPreviewModal({
             label="Linked Equipment"
             value={`${groupEquipment.length} item${groupEquipment.length === 1 ? "" : "s"}`}
           />
-          <PreviewField label="Asset" value={ppm.assetTag} />
+          <PreviewField label="Asset" value={workflowRecord.assetTag} />
           <PreviewField
             label="Location Code"
-            value={ppm.locationCode || asset?.locationCode}
+            value={workflowRecord.locationCode || asset?.locationCode}
           />
           <PreviewField
             label="Department"
-            value={ppm.departmentCode || asset?.departmentCode}
+            value={workflowRecord.departmentCode || asset?.departmentCode}
           />
           <PreviewField
             label="Category"
