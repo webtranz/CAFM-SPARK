@@ -16,6 +16,7 @@ const modules = [
   ["documents", "Documents"],
   ["housing", "Housing"],
   ["residents", "Residents"],
+  ["security", "Security"],
   ["reports", "Reports"],
   ["users", "Users"],
   ["roles", "Roles"],
@@ -72,6 +73,8 @@ export const LEGACY_PERMISSION_ALIASES: Record<string, string[]> = {
   "housing.view": ["housing.view", "residents.view"],
   "compliance.manage": ["compliance.view", "compliance.create", "compliance.edit", "compliance.delete", "certifications.view", "certifications.create", "certifications.edit"],
   "compliance.view": ["compliance.view", "certifications.view"],
+  "security.manage": ["security.view", "security.create", "security.edit", "security.approve", "security.report"],
+  "security.view": ["security.view"],
 };
 
 export const ACTION_PERMISSION_SEED = ENTERPRISE_PERMISSION_SEED;
@@ -92,6 +95,7 @@ export const DEFAULT_ROLE_NAMES = [
   "Housing Manager",
   "Resident",
   "Requester",
+  "Security",
   "Read-only",
 ] as const;
 
@@ -101,7 +105,7 @@ function grant(codes: string[], scope: PermissionScope): RolePermissionGrant[] {
   return codes.map((code) => ({ code, scope }));
 }
 
-const viewOnly = ["dashboard.view", "assets.view", "locations.view", "workorders.view", "servicerequests.view", "ppm.view", "inventory.view", "safety.view", "incidents.view", "compliance.view", "certifications.view", "documents.view", "housing.view", "residents.view", "reports.view"];
+const viewOnly = ["dashboard.view", "assets.view", "locations.view", "workorders.view", "servicerequests.view", "ppm.view", "inventory.view", "safety.view", "incidents.view", "compliance.view", "certifications.view", "documents.view", "housing.view", "residents.view", "security.view", "reports.view"];
 const requestOwn = ["servicerequests.view", "servicerequests.create"];
 
 export const DEFAULT_ROLE_PERMISSION_GRANTS: Record<string, RolePermissionGrant[]> = {
@@ -112,7 +116,7 @@ export const DEFAULT_ROLE_PERMISSION_GRANTS: Record<string, RolePermissionGrant[
   Supervisor: grant(["dashboard.view", "assets.view", "workorders.view", "workorders.create", "workorders.edit", "workorders.assign", "workorders.approve", "servicerequests.view", "servicerequests.edit", "servicerequests.assign", "servicerequests.approve", "reports.view"], "Department"),
   "Service Team": grant(["assets.view", "workorders.view", "workorders.edit", "servicerequests.view", "ppm.view", "ppm.edit"], "Own"),
   Technician: grant(["assets.view", "workorders.view", "workorders.edit", "servicerequests.view", "ppm.view", "ppm.edit"], "Own"),
-  Helpdesk: grant(["dashboard.view", "servicerequests.view", "servicerequests.create", "servicerequests.edit", "servicerequests.assign", "workorders.view", "assets.view", "locations.view", "housing.view", "housing.create", "residents.view", "residents.create"], "Company"),
+  Helpdesk: grant(["dashboard.view", "servicerequests.view", "servicerequests.create", "servicerequests.edit", "servicerequests.assign", "workorders.view", "assets.view", "locations.view", "housing.view", "housing.create", "residents.view", "residents.create", "security.view", "security.edit", "security.approve", "security.report"], "Company"),
   Reception: grant(["dashboard.view", "servicerequests.view", "servicerequests.create", "servicerequests.edit", "housing.view", "housing.create", "housing.edit", "residents.view", "residents.create", "residents.edit"], "Facility"),
   Storekeeper: grant(["inventory.view", "inventory.create", "inventory.edit", "inventory.import", "inventory.export", "inventory.report", "workorders.view", "assets.view"], "Facility"),
   "HSE Officer": grant(["safety.view", "safety.create", "safety.edit", "safety.report", "incidents.view", "incidents.create", "incidents.edit", "incidents.approve", "reports.view"], "Company"),
@@ -120,6 +124,7 @@ export const DEFAULT_ROLE_PERMISSION_GRANTS: Record<string, RolePermissionGrant[
   "Housing Manager": grant(["dashboard.view", "housing.view", "housing.create", "housing.edit", "housing.delete", "housing.approve", "housing.report", "residents.view", "residents.create", "residents.edit", "servicerequests.view", "servicerequests.create", "servicerequests.edit", "servicerequests.assign", "reports.view", "reports.export"], "Facility"),
   Resident: grant(requestOwn, "Own"),
   Requester: grant(requestOwn, "Own"),
+  Security: grant(["security.view", "security.create", "security.report"], "Facility"),
   "Read-only": grant(viewOnly, "Company"),
 };
 

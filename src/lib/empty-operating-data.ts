@@ -33,6 +33,12 @@ export const emptyOperatingData = {
     rotations: [],
     roster: [],
   },
+  security: {
+    locations: [],
+    gatePasses: [],
+    dailyReports: [],
+    fireDrills: [],
+  },
   housing: {
     properties: [],
     blocks: [],

@@ -93,6 +93,12 @@ type ConsoleData = {
   auditLogs: any[];
   complianceCertificates: any[];
   documentUploads: any[];
+  security?: {
+    locations: any[];
+    gatePasses: any[];
+    dailyReports: any[];
+    fireDrills: any[];
+  };
   totalEntries?: Record<string, number>;
   shiftRotation?: {
     shifts: any[];
@@ -483,6 +489,17 @@ const moduleGroups: ModuleGroup[] = [
     ],
   },
   {
+    label: "Security",
+    icon: ShieldCheck,
+    items: [
+      { id: "security", label: "Security Dashboard", icon: ShieldCheck, view: "security-dashboard" },
+      { id: "security", label: "Gate Pass Issuance", icon: FileText, view: "security-gate-passes" },
+      { id: "security", label: "Security Locations", icon: MapPinned, view: "security-locations" },
+      { id: "security", label: "Daily Reports", icon: ClipboardCheck, view: "security-daily-reports" },
+      { id: "security", label: "Fire Alarm Drill Reports", icon: AlertTriangle, view: "security-fire-drills" },
+    ],
+  },
+  {
     label: "Resource Management",
     icon: Users,
     items: [
@@ -732,6 +749,7 @@ const modulePermissions: Record<string, string> = {
   audit: "reports.view",
   housing: "housing.view",
   compliance: "compliance.view",
+  security: "security.view",
 };
 const actionPermissionCatalog = ACTION_PERMISSION_SEED;
 function permissionSlug(value: string) {
@@ -2217,6 +2235,31 @@ export function CafmConsole({
                 )
               }
               setToast={(message) => setToast(cleanMessage(message))}
+            />
+          )}
+          {canViewActive && active === "security" && (
+            <SecurityModule
+              security={records.security ?? { locations: [], gatePasses: [], dailyReports: [], fireDrills: [] }}
+              view={activeView}
+              saving={saving}
+              canApprove={can("security.approve")}
+              canManage={can("security.manage") || can("security.create")}
+              submitSecurity={(formData) => postRecord("/api/security", formData, "Security record")}
+              updateGatePassStatus={async (id, status, rejectionReason) => {
+                setSaving(true);
+                try {
+                  const response = await fetch("/api/security", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ type: "gatePassStatus", id, status, rejectionReason }),
+                  });
+                  const result = await response.json().catch(() => ({}));
+                  setToast(response.ok ? `Gate pass ${readableStatus(status)}.` : cleanMessage(result.message ?? "Gate pass update failed."));
+                  if (response.ok) await refreshData();
+                } finally {
+                  setSaving(false);
+                }
+              }}
             />
           )}
           {canViewActive && active === "incidents" && (
@@ -19034,6 +19077,231 @@ function Templates() {
   );
 }
 
+function securityDate(value: unknown) {
+  if (!value) return "-";
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return displayValue(value);
+  return date.toLocaleString();
+}
+
+function printGatePass(pass: any) {
+  const popup = window.open("", "_blank", "width=900,height=700");
+  if (!popup) return;
+  const html = [
+    "<!doctype html><html><head><title>Gate Pass " + displayValue(pass.passNo) + "</title><style>",
+    "body{font-family:Arial,sans-serif;margin:32px;color:#0f172a}.card{border:2px solid #0f172a;padding:24px;border-radius:10px}.head{display:flex;justify-content:space-between;gap:16px;border-bottom:1px solid #cbd5e1;padding-bottom:16px;margin-bottom:20px}.title{font-size:24px;font-weight:800}.badge{padding:8px 12px;border-radius:999px;background:#dcfce7;color:#047857;font-weight:800}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.label{font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800}.value{font-size:16px;font-weight:700;margin-top:4px}.full{grid-column:1/-1}.sign{margin-top:40px;display:flex;justify-content:space-between}.line{border-top:1px solid #0f172a;width:220px;padding-top:8px;text-align:center}.no-print{margin-bottom:16px}@media print{.no-print{display:none}}",
+    "</style></head><body><button class='no-print' onclick='window.print()'>Print Gate Pass</button><div class='card'><div class='head'><div><div class='title'>Security Gate Pass</div><div>" + displayValue(pass.securityLocationCode) + " " + displayValue(pass.locationName) + "</div></div><div class='badge'>APPROVED</div></div><div class='grid'>",
+    "<div><div class='label'>Pass No</div><div class='value'>" + displayValue(pass.passNo) + "</div></div>",
+    "<div><div class='label'>Approved By</div><div class='value'>" + displayValue(pass.helpdeskApprovedBy) + "</div></div>",
+    "<div><div class='label'>Visitor</div><div class='value'>" + displayValue(pass.visitorName) + "</div></div>",
+    "<div><div class='label'>Company</div><div class='value'>" + displayValue(pass.visitorCompany) + "</div></div>",
+    "<div><div class='label'>ID / Badge</div><div class='value'>" + displayValue(pass.visitorIdNo) + "</div></div>",
+    "<div><div class='label'>Contact</div><div class='value'>" + displayValue(pass.contactNo) + "</div></div>",
+    "<div><div class='label'>Valid From</div><div class='value'>" + securityDate(pass.validFrom) + "</div></div>",
+    "<div><div class='label'>Valid To</div><div class='value'>" + securityDate(pass.validTo) + "</div></div>",
+    "<div><div class='label'>Vehicle No</div><div class='value'>" + displayValue(pass.vehicleNo) + "</div></div>",
+    "<div><div class='label'>Issued By</div><div class='value'>" + displayValue(pass.issuedBy) + "</div></div>",
+    "<div class='full'><div class='label'>Purpose</div><div class='value'>" + displayValue(pass.purpose) + "</div></div>",
+    "<div class='full'><div class='label'>Materials</div><div class='value'>" + displayValue(pass.materials) + "</div></div>",
+    "</div><div class='sign'><div class='line'>Security Officer</div><div class='line'>Visitor Signature</div><div class='line'>Helpdesk Approval</div></div></div></body></html>",
+  ].join("");
+  popup.document.write(html);
+  popup.document.close();
+  popup.focus();
+}
+
+function SecurityModule({
+  security,
+  view,
+  saving,
+  canApprove,
+  canManage,
+  submitSecurity,
+  updateGatePassStatus,
+}: {
+  security: { locations: any[]; gatePasses: any[]; dailyReports: any[]; fireDrills: any[] };
+  view: string;
+  saving: boolean;
+  canApprove: boolean;
+  canManage: boolean;
+  submitSecurity: (formData: FormData) => void;
+  updateGatePassStatus: (id: string, status: string, rejectionReason?: string) => Promise<void>;
+}) {
+  const locations = security.locations ?? [];
+  const gatePasses = security.gatePasses ?? [];
+  const dailyReports = security.dailyReports ?? [];
+  const fireDrills = security.fireDrills ?? [];
+  const pending = gatePasses.filter((pass) => pass.status === "PENDING_HELPDESK").length;
+  const approved = gatePasses.filter((pass) => pass.status === "APPROVED").length;
+  const rejected = gatePasses.filter((pass) => pass.status === "REJECTED").length;
+  const today = new Date().toISOString().slice(0, 10);
+  const [locationCode, setLocationCode] = useState(locations[0]?.code ?? "");
+  const selectedLocation = locations.find((location) => location.code === locationCode);
+
+  useEffect(() => {
+    if (!locationCode && locations[0]?.code) setLocationCode(locations[0].code);
+  }, [locationCode, locations]);
+
+  const locationOptions = locations.map((location) => (
+    <option key={location.id ?? location.code} value={location.code}>
+      {location.code} - {location.name}
+    </option>
+  ));
+
+  const gateColumns: [string, string][] = [
+    ["passNo", "PASS NO"],
+    ["visitorName", "VISITOR"],
+    ["requesterName", "REQUESTER"],
+    ["securityLocationCode", "SECURITY LOCATION"],
+    ["validFrom", "VALID FROM"],
+    ["validTo", "VALID TO"],
+    ["status", "STATUS"],
+  ];
+  const reportColumns: [string, string][] = [
+    ["reportNo", "REPORT NO"],
+    ["reportDate", "DATE"],
+    ["shift", "SHIFT"],
+    ["securityLocationCode", "LOCATION"],
+    ["officerName", "OFFICER"],
+    ["visitorCount", "VISITORS"],
+    ["vehicleCount", "VEHICLES"],
+    ["incidents", "INCIDENTS"],
+  ];
+  const drillColumns: [string, string][] = [
+    ["drillNo", "DRILL NO"],
+    ["drillDate", "DATE"],
+    ["securityLocationCode", "LOCATION"],
+    ["alarmType", "ALARM TYPE"],
+    ["conductedBy", "CONDUCTED BY"],
+    ["evacuationTimeMin", "EVAC MIN"],
+    ["participants", "PARTICIPANTS"],
+    ["status", "STATUS"],
+  ];
+  const locationColumns: [string, string][] = [
+    ["code", "CODE"],
+    ["name", "NAME"],
+    ["gateName", "GATE"],
+    ["siteCode", "SITE"],
+    ["locationCode", "LINKED LOCATION"],
+    ["active", "ACTIVE"],
+  ];
+  return (
+    <section className="grid gap-4">
+      <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <p className="text-xs font-black uppercase tracking-[0.2em] text-lagoon">Security Operations</p>
+        <h2 className="mt-2 text-2xl font-black text-navy">Gate Pass, Approval and Security Reports</h2>
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          {[
+            ["Pending Helpdesk Approval", pending],
+            ["Approved Gate Passes", approved],
+            ["Rejected Gate Passes", rejected],
+            ["Security Reports", dailyReports.length + fireDrills.length],
+          ].map(([label, value]) => (
+            <div key={String(label)} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-black uppercase text-slate-500">{label}</p>
+              <p className="mt-2 text-2xl font-black text-navy">{value}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {(view === "security-dashboard" || view === "security-gate-passes") && (
+        <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+          <Panel title="Gate Pass Issuance" icon={FileText}>
+            <div className="mb-3 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">Helpdesk approval required</div>
+            <DataTable rows={gatePasses} columns={gateColumns} />
+            {gatePasses.some((pass) => pass.status === "APPROVED" || (canApprove && pass.status === "PENDING_HELPDESK")) && (
+              <div className="mt-3 grid gap-2">
+                {gatePasses.map((pass) => (
+                  <div key={pass.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 p-2 text-xs font-bold text-slate-600">
+                    <span>{pass.passNo} - {pass.visitorName} - {pass.status}</span>
+                    <span className="flex gap-2">
+                      {pass.status === "APPROVED" && <button type="button" onClick={() => printGatePass(pass)} className="rounded-lg border border-emerald-200 px-3 py-1 font-black text-emerald-700">Print</button>}
+                      {canApprove && pass.status === "PENDING_HELPDESK" && <button type="button" disabled={saving} onClick={() => updateGatePassStatus(pass.id, "APPROVED")} className="rounded-lg bg-lagoon px-3 py-1 font-black text-white disabled:opacity-50">Approve</button>}
+                      {canApprove && pass.status === "PENDING_HELPDESK" && <button type="button" disabled={saving} onClick={() => updateGatePassStatus(pass.id, "REJECTED", "Rejected by Helpdesk")} className="rounded-lg bg-red-500 px-3 py-1 font-black text-white disabled:opacity-50">Reject</button>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Panel>
+          <form action={submitSecurity} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <input type="hidden" name="type" value="gatePass" />
+            <input name="requesterName" required placeholder="Requester name" className={FACILITY_FIELD_CLASS} />
+            <input name="visitorName" required placeholder="Visitor name" className={FACILITY_FIELD_CLASS} />
+            <input name="visitorCompany" placeholder="Visitor company" className={FACILITY_FIELD_CLASS} />
+            <input name="visitorIdNo" placeholder="Visitor ID / badge number" className={FACILITY_FIELD_CLASS} />
+            <input name="contactNo" placeholder="Contact number" className={FACILITY_FIELD_CLASS} />
+            <select name="securityLocationCode" value={locationCode} onChange={(event) => setLocationCode(event.target.value)} className={FACILITY_FIELD_CLASS}>
+              <option value="">Select security location</option>
+              {locationOptions}
+            </select>
+            <input type="hidden" name="locationName" value={selectedLocation?.name ?? ""} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <input type="datetime-local" name="validFrom" defaultValue={`${today}T08:00`} required className={FACILITY_FIELD_CLASS} />
+              <input type="datetime-local" name="validTo" defaultValue={`${today}T18:00`} required className={FACILITY_FIELD_CLASS} />
+            </div>
+            <input name="vehicleNo" placeholder="Vehicle number" className={FACILITY_FIELD_CLASS} />
+            <textarea name="purpose" required placeholder="Purpose of visit" className={TICKET_PLAN_TEXTAREA_CLASS} rows={3} />
+            <textarea name="materials" placeholder="Materials / tools carried" className={TICKET_PLAN_TEXTAREA_CLASS} rows={3} />
+            <button disabled={saving || !canManage} className="rounded-lg bg-navy px-4 py-3 font-black text-white disabled:opacity-50">Create Gate Pass Request</button>
+          </form>
+        </div>
+      )}
+
+      {view === "security-locations" && (
+        <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+          <Panel title="Security Locations" icon={MapPinned}><DataTable rows={locations} columns={locationColumns} /></Panel>
+          <form action={submitSecurity} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <input type="hidden" name="type" value="location" />
+            <input name="code" required placeholder="Security location code" className={FACILITY_FIELD_CLASS} />
+            <input name="name" required placeholder="Security location name" className={FACILITY_FIELD_CLASS} />
+            <input name="gateName" placeholder="Gate name / post" className={FACILITY_FIELD_CLASS} />
+            <input name="siteCode" placeholder="Site code" className={FACILITY_FIELD_CLASS} />
+            <input name="locationCode" placeholder="Linked CAFM location code" className={FACILITY_FIELD_CLASS} />
+            <button disabled={saving || !canManage} className="rounded-lg bg-navy px-4 py-3 font-black text-white disabled:opacity-50">Save Security Location</button>
+          </form>
+        </div>
+      )}
+
+      {view === "security-daily-reports" && (
+        <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+          <Panel title="Security Daily Reports" icon={ClipboardCheck}><DataTable rows={dailyReports} columns={reportColumns} /></Panel>
+          <form action={submitSecurity} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <input type="hidden" name="type" value="dailyReport" />
+            <input type="date" name="reportDate" defaultValue={today} required className={FACILITY_FIELD_CLASS} />
+            <select name="shift" required className={FACILITY_FIELD_CLASS}><option>Day</option><option>Night</option><option>General</option></select>
+            <select name="securityLocationCode" className={FACILITY_FIELD_CLASS}><option value="">Select security location</option>{locationOptions}</select>
+            <input name="officerName" required placeholder="Officer name" className={FACILITY_FIELD_CLASS} />
+            <input name="visitorCount" type="number" min="0" placeholder="Visitor count" className={FACILITY_FIELD_CLASS} />
+            <input name="vehicleCount" type="number" min="0" placeholder="Vehicle count" className={FACILITY_FIELD_CLASS} />
+            <textarea name="incidents" placeholder="Incidents / observations" className={TICKET_PLAN_TEXTAREA_CLASS} rows={3} />
+            <textarea name="handoverNotes" placeholder="Handover notes" className={TICKET_PLAN_TEXTAREA_CLASS} rows={3} />
+            <button disabled={saving || !canManage} className="rounded-lg bg-navy px-4 py-3 font-black text-white disabled:opacity-50">Save Daily Report</button>
+          </form>
+        </div>
+      )}
+
+      {view === "security-fire-drills" && (
+        <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+          <Panel title="Fire Alarm Drill Reports" icon={AlertTriangle}><DataTable rows={fireDrills} columns={drillColumns} /></Panel>
+          <form action={submitSecurity} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <input type="hidden" name="type" value="fireDrill" />
+            <input type="datetime-local" name="drillDate" defaultValue={`${today}T09:00`} required className={FACILITY_FIELD_CLASS} />
+            <select name="securityLocationCode" className={FACILITY_FIELD_CLASS}><option value="">Select security location</option>{locationOptions}</select>
+            <input name="alarmType" required placeholder="Alarm type" className={FACILITY_FIELD_CLASS} />
+            <input name="conductedBy" required placeholder="Conducted by" className={FACILITY_FIELD_CLASS} />
+            <input name="evacuationTimeMin" type="number" min="0" placeholder="Evacuation time minutes" className={FACILITY_FIELD_CLASS} />
+            <input name="participants" type="number" min="0" placeholder="Participants" className={FACILITY_FIELD_CLASS} />
+            <textarea name="observations" placeholder="Observations" className={TICKET_PLAN_TEXTAREA_CLASS} rows={3} />
+            <textarea name="correctiveActions" placeholder="Corrective actions" className={TICKET_PLAN_TEXTAREA_CLASS} rows={3} />
+            <button disabled={saving || !canManage} className="rounded-lg bg-navy px-4 py-3 font-black text-white disabled:opacity-50">Save Fire Drill Report</button>
+          </form>
+        </div>
+      )}
+    </section>
+  );
+}
 function UsersRoles({
   users,
   teams,
@@ -27207,3 +27475,9 @@ function actionFieldLabel(field: string) {
   };
   return labels[field] || field.replace(/([A-Z])/g, " $1");
 }
+
+
+
+
+
+

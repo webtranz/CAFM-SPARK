@@ -1239,3 +1239,83 @@ model HousingHistory {
   @@index([bookingId, createdAt])
 }
 
+model SecurityLocation {
+  id           String   @id @default(cuid())
+  code         String   @unique
+  name         String
+  gateName     String?
+  siteCode     String?
+  locationCode String?
+  active       Boolean  @default(true)
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model SecurityGatePass {
+  id                   String   @id @default(cuid())
+  passNo               String   @unique
+  requesterName        String
+  visitorName          String
+  visitorCompany       String?
+  visitorIdNo          String?
+  contactNo            String?
+  purpose              String
+  securityLocationCode String?
+  locationName         String?
+  validFrom            DateTime
+  validTo              DateTime
+  vehicleNo            String?
+  materials            String?
+  status               String   @default("PENDING_HELPDESK")
+  helpdeskApprovedBy   String?
+  helpdeskApprovedAt   DateTime?
+  rejectionReason      String?
+  issuedBy             String?
+  createdBy            String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([status, validFrom])
+  @@index([securityLocationCode])
+}
+
+model SecurityDailyReport {
+  id                   String   @id @default(cuid())
+  reportNo             String   @unique
+  reportDate           DateTime
+  shift                String
+  securityLocationCode String?
+  locationName         String?
+  officerName          String
+  visitorCount         Int      @default(0)
+  vehicleCount         Int      @default(0)
+  incidents            String?
+  handoverNotes        String?
+  createdBy            String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([reportDate, securityLocationCode])
+}
+
+model SecurityFireDrillReport {
+  id                   String   @id @default(cuid())
+  drillNo              String   @unique
+  drillDate            DateTime
+  securityLocationCode String?
+  locationName         String?
+  alarmType            String
+  conductedBy          String
+  evacuationTimeMin    Int?
+  participants         Int?
+  observations         String?
+  correctiveActions    String?
+  status               String   @default("SUBMITTED")
+  createdBy            String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([drillDate, securityLocationCode])
+}
+
