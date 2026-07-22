@@ -98,8 +98,13 @@ export async function POST(request: Request) {
       ? await prisma.user.findFirst({
           where: {
             role: { contains: "Supervisor", mode: "insensitive" },
-            department: { in: [input.departmentCode, department?.name ?? input.departmentCode] },
+            OR: [
+              { department: { contains: input.departmentCode, mode: "insensitive" } },
+              { department: { contains: department?.name ?? input.departmentCode, mode: "insensitive" } },
+            ],
+            active: true,
           },
+          orderBy: { name: "asc" },
         })
       : null;
 

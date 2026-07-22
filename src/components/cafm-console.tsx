@@ -19649,6 +19649,22 @@ function roleOptions(roles: any[]) {
   );
 }
 
+function splitUserDepartments(value?: string | null) {
+  return Array.from(
+    new Set(
+      String(value ?? "")
+        .split(/[;,|]/)
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function roleSupportsMultipleDepartments(role?: string | null) {
+  const normalizedRole = String(role ?? "").toLowerCase();
+  return normalizedRole.includes("supervisor") || normalizedRole.includes("service team");
+}
+
 function UserForm({
   title,
   user,
@@ -19668,10 +19684,23 @@ function UserForm({
   onSubmit: (formData: FormData) => void;
   saving: boolean;
 }) {
+  const [selectedRole, setSelectedRole] = useState(user?.role ?? "Service Team");
+  const [selectedDepartments, setSelectedDepartments] = useState<string[]>(() =>
+    splitUserDepartments(user?.department),
+  );
+  const allowMultiDepartment = roleSupportsMultipleDepartments(selectedRole);
+  const departmentValue = allowMultiDepartment
+    ? selectedDepartments.join(",")
+    : selectedDepartments[0] || "";
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await onSubmit(new FormData(event.currentTarget));
-    if (!user) event.currentTarget.reset();
+    if (!user) {
+      event.currentTarget.reset();
+      setSelectedRole("Service Team");
+      setSelectedDepartments([]);
+    }
   }
 
   const cls =
@@ -19729,7 +19758,8 @@ function UserForm({
           Select User Role
           <select
             name="role"
-            defaultValue={user?.role ?? "Service Team"}
+            value={selectedRole}
+            onChange={(event) => setSelectedRole(event.target.value)}
             className={cls}
           >
             {roleOptions(roles).map((role) => (
@@ -19738,11 +19768,18 @@ function UserForm({
           </select>
         </label>
         <label className="grid gap-1 text-sm font-bold text-slate-600">
-          Select Department
+          Select Department{allowMultiDepartment ? "s" : ""}
+          <input type="hidden" name="department" value={departmentValue} />
           <select
-            name="department"
-            defaultValue={user?.department ?? ""}
-            className={cls}
+            multiple={allowMultiDepartment}
+            value={allowMultiDepartment ? selectedDepartments : departmentValue}
+            onChange={(event) => {
+              const values = Array.from(event.currentTarget.selectedOptions).map(
+                (option) => option.value,
+              );
+              setSelectedDepartments(values.filter(Boolean));
+            }}
+            className={`${cls} ${allowMultiDepartment ? "h-32 py-2" : ""}`}
           >
             <option value="">Select Department</option>
             {departments.map((department) => (
@@ -19751,6 +19788,11 @@ function UserForm({
               </option>
             ))}
           </select>
+          {allowMultiDepartment && (
+            <span className="text-xs font-bold text-slate-500">
+              Hold Ctrl to select multiple departments. Selected: {selectedDepartments.length || 0}
+            </span>
+          )}
         </label>
         <label className="grid gap-1 text-sm font-bold text-slate-600">
           Select Team

@@ -13,12 +13,20 @@ const schema = z.object({
   password: z.string().optional(),
   role: z.string().min(2),
   department: z.string().optional(),
+  departmentCodes: z.union([z.string(), z.array(z.string())]).optional(),
   supervisorEmail: z.string().optional(),
   notifyWorkOrder: z.coerce.boolean().optional(),
   notifyFacilityBooking: z.coerce.boolean().optional(),
   teamCode: z.string().optional(),
   active: z.coerce.boolean().optional(),
 });
+
+function normalizedDepartments(input: z.infer<typeof schema>) {
+  const source = input.departmentCodes ?? input.department ?? "";
+  const values = Array.isArray(source) ? source : String(source).split(/[;,|]/);
+  const departments = Array.from(new Set(values.map((item) => String(item).trim()).filter(Boolean)));
+  return departments.length ? departments.join(",") : "General";
+}
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -29,6 +37,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const current = await prisma.user.findUnique({ where: { id } });
     if (!current) return apiError(new Error("User not found."), "Unable to update user", 404);
     const team = input.teamCode ? await prisma.team.findUnique({ where: { code: input.teamCode } }) : null;
+    const department = normalizedDepartments(input);
     const updated = await prisma.user.update({
       where: { id },
       data: {
@@ -36,7 +45,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         email: input.email,
         phone: input.phone || null,
         role: input.role,
-        department: input.department || "General",
+        department,
         supervisorEmail: input.supervisorEmail || null,
         notifyWorkOrder: input.notifyWorkOrder ?? false,
         notifyFacilityBooking: input.notifyFacilityBooking ?? false,

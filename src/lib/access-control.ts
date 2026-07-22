@@ -9,6 +9,13 @@ function comparable(value?: string | null) {
   return String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+function departmentValues(value?: string | null) {
+  return String(value ?? "")
+    .split(/[;,|]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export function accessRole(user: AccessUser | null) {
   const role = String(user?.role ?? "").toLowerCase();
   if (role === "admin" || role.includes("super admin")) return "admin";
@@ -19,10 +26,17 @@ export function accessRole(user: AccessUser | null) {
 }
 
 export function sameDepartment(user: AccessUser | null, departmentCode?: string | null) {
-  const userDepartment = comparable(user?.department);
   const recordDepartment = comparable(departmentCode);
-  if (!userDepartment || !recordDepartment) return false;
-  return userDepartment === recordDepartment || userDepartment.includes(recordDepartment) || recordDepartment.includes(userDepartment);
+  if (!recordDepartment) return false;
+  return departmentValues(user?.department).some((department) => {
+    const userDepartment = comparable(department);
+    return (
+      !!userDepartment &&
+      (userDepartment === recordDepartment ||
+        userDepartment.includes(recordDepartment) ||
+        recordDepartment.includes(userDepartment))
+    );
+  });
 }
 
 export function canManageDepartmentRecord(user: AccessUser | null, departmentCode?: string | null) {

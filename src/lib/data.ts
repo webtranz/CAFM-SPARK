@@ -13,7 +13,20 @@ type OperatingUser = {
 } | null;
 
 function departmentValues(user: OperatingUser) {
-  return [user?.department, user?.department?.trim()].filter(Boolean) as string[];
+  return Array.from(
+    new Set(
+      String(user?.department ?? "")
+        .split(/[;,|]/)
+        .map((department) => department.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function departmentContainsWhere(departments: string[]) {
+  return departments.map((department) => ({
+    department: { contains: department, mode: "insensitive" as const },
+  }));
 }
 
 const INITIAL_LOAD_LIMIT = 50;
@@ -97,7 +110,10 @@ export async function getOperatingData(user: OperatingUser = null) {
         ? { OR: [{ assignedToId: user?.id || "" }, { assignedTeamCode: teamCode || "" }] }
         : { assignedToId: "__none__" };
     const visibleJobPlanWhere = kind === "admin" || kind === "readonly" ? {} : kind === "supervisor" || kind === "technician" ? { departmentCode: { in: departmentsForUser } } : {};
-    const visibleUsersWhere = kind === "admin" ? {} : { OR: [{ department: { in: departmentsForUser } }, { id: user?.id || "" }] };
+    const visibleUsersWhere =
+      kind === "admin"
+        ? {}
+        : { OR: [{ id: user?.id || "" }, ...departmentContainsWhere(departmentsForUser)] };
 
     const [sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, shifts, rotations, roster, housingProperties, housingBlocks, housingRooms, housingBeds, housingResidents, housingBookings, housingInspections, housingAssets, housingInventory, housingApprovals, housingNotifications, housingNotificationSettings, housingHistory, housingRoomHolds, totalEntries] = await Promise.all([
       prisma.site.findMany({ include: { buildings: { take: 10, orderBy: { code: "asc" } } }, orderBy: { name: "asc" }, take: INITIAL_REFERENCE_LIMIT }),

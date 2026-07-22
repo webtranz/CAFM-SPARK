@@ -14,12 +14,20 @@ const schema = z.object({
   password: z.string().optional(),
   role: z.string().min(2),
   department: z.string().optional(),
+  departmentCodes: z.union([z.string(), z.array(z.string())]).optional(),
   supervisorEmail: z.string().optional(),
   notifyWorkOrder: z.coerce.boolean().optional(),
   notifyFacilityBooking: z.coerce.boolean().optional(),
   teamCode: z.string().optional(),
   active: z.coerce.boolean().optional(),
 });
+
+function normalizedDepartments(input: z.infer<typeof schema>) {
+  const source = input.departmentCodes ?? input.department ?? "";
+  const values = Array.isArray(source) ? source : String(source).split(/[;,|]/);
+  const departments = Array.from(new Set(values.map((item) => String(item).trim()).filter(Boolean)));
+  return departments.length ? departments.join(",") : "General";
+}
 
 export async function GET(request: Request) {
   const { error } = await requirePermission("users.manage");
@@ -59,13 +67,14 @@ export async function POST(request: Request) {
     if (error) return error;
     const input = schema.parse(await request.json());
     const team = input.teamCode ? await prisma.team.findUnique({ where: { code: input.teamCode } }) : null;
+    const department = normalizedDepartments(input);
     const created = await prisma.user.upsert({
       where: { email: input.email },
       update: {
         name: input.name,
         phone: input.phone || null,
         role: input.role,
-        department: input.department || "General",
+        department,
         supervisorEmail: input.supervisorEmail || null,
         notifyWorkOrder: input.notifyWorkOrder ?? false,
         notifyFacilityBooking: input.notifyFacilityBooking ?? false,
@@ -77,7 +86,7 @@ export async function POST(request: Request) {
         email: input.email,
         phone: input.phone || null,
         role: input.role,
-        department: input.department || "General",
+        department,
         supervisorEmail: input.supervisorEmail || null,
         notifyWorkOrder: input.notifyWorkOrder ?? false,
         notifyFacilityBooking: input.notifyFacilityBooking ?? false,

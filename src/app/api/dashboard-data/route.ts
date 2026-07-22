@@ -13,7 +13,14 @@ const DASHBOARD_LIMIT = 60;
 type DashboardUser = Awaited<ReturnType<typeof requireUser>>["user"];
 
 function departmentValues(user: DashboardUser) {
-  return [user?.department, user?.department?.trim()].filter(Boolean) as string[];
+  return Array.from(
+    new Set(
+      String(user?.department ?? "")
+        .split(/[;,|]/)
+        .map((department) => department.trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 function visibleWorkWhere(user: DashboardUser) {
