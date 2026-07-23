@@ -173,6 +173,94 @@ async function reportRows(type: string, filters: ReturnType<typeof reportFilters
     const rows = await prisma.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: 1000 });
     return rows.map((row) => ({ time: dateValue(row.createdAt), actorName: row.actorName, role: row.role, action: row.action, entity: row.entity, entityId: row.entityId, details: row.details }));
   }
+  if (["service-requests", "tickets"].includes(type)) return reportRows("requests", filters);
+  if (["ppms", "ppm-schedules", "pm-schedules"].includes(type)) return reportRows("ppm", filters);
+  if (type === "sites") {
+    const rows = await prisma.site.findMany({ orderBy: [{ name: "asc" }, { city: "asc" }] });
+    return rows.map((row) => ({ name: row.name, city: row.city, country: row.country, type: row.type, areaSqm: row.areaSqm }));
+  }
+  if (type === "buildings") {
+    const rows = await prisma.building.findMany({ include: { site: true }, orderBy: { code: "asc" } });
+    return rows.map((row) => ({ code: row.code, name: row.name, site: row.site.name, city: row.site.city, floors: row.floors, areaSqm: row.areaSqm }));
+  }
+  if (type === "spaces") {
+    const rows = await prisma.space.findMany({ include: { building: { include: { site: true } } }, orderBy: [{ building: { code: "asc" } }, { floor: "asc" }, { name: "asc" }] });
+    return rows.map((row) => ({ name: row.name, floor: row.floor, type: row.type, capacity: row.capacity, areaSqm: row.areaSqm, occupancy: row.occupancy, buildingCode: row.building.code, building: row.building.name, site: row.building.site.name }));
+  }
+  if (["documents", "documents-om-manuals", "documents-warranties", "documents-contracts-slas"].includes(type)) {
+    const category = type === "documents-om-manuals" ? "OM_MANUAL" : type === "documents-warranties" ? "WARRANTY_GUARANTEE" : type === "documents-contracts-slas" ? "SUPPORT_CONTRACT_SLA" : undefined;
+    const rows = await prisma.documentUpload.findMany({ where: category ? { category } : undefined, orderBy: { createdAt: "desc" } });
+    return rows.map((row) => ({ category: row.category, assetTag: row.assetTag, fileName: row.fileName, fileUrl: row.fileUrl, fileSize: row.fileSize, mimeType: row.mimeType, checksum: row.checksum, uploadedBy: row.uploadedBy ?? "", uploadedAt: dateValue(row.createdAt) }));
+  }
+  if (["incidents", "incident-cases", "cases-incidents"].includes(type)) {
+    const rows = await prisma.serviceRequest.findMany({ where: { isIncidentCase: true }, orderBy: { createdAt: "desc" } });
+    return rows.map((row) => ({ ticketNo: row.ticketNo, title: row.title, category: row.category, departmentCode: row.departmentCode, serviceCode: row.serviceCode, requester: row.requester, priority: row.priority, status: row.status, location: row.location, dueAt: dateValue(row.dueAt), createdAt: dateValue(row.createdAt), description: row.description }));
+  }
+  if (type === "hse-incidents") {
+    const rows = await prisma.hseIncident.findMany({ orderBy: { reportedAt: "desc" } });
+    return rows.map((row) => ({ refNo: row.refNo, title: row.title, area: row.area, severity: row.severity, status: row.status, reportedAt: dateValue(row.reportedAt), correctiveAction: row.correctiveAction }));
+  }
+  if (type === "ppm-checklist-history") {
+    const rows = await prisma.ppmChecklistHistory.findMany({ include: { workOrder: true, asset: true, ppm: true }, orderBy: { createdAt: "desc" }, take: 50000 });
+    return rows.map((row) => ({ uploadKey: row.uploadKey, sourceYear: row.sourceYear, sourceFile: row.sourceFile, workOrder: row.workOrder?.woNo ?? row.ackEvent, ppmCode: row.ppm?.ppmCode || row.ppm?.code || row.ackCode, assetTag: row.asset?.tag ?? row.ackObject, sequence: row.ackSequence, checklist: row.ackDescription, notes: row.ackNotes, yes: row.ackYes, no: row.ackNo, finding: row.ackFinding, value: row.ackValue, uom: row.ackUom, linkStatus: row.linkStatus, createdAt: dateValue(row.createdAt) }));
+  }
+  if (type === "comments") {
+    const rows = await prisma.commentHistory.findMany({ include: { workOrder: true }, orderBy: { createdAt: "desc" }, take: 50000 });
+    return rows.map((row) => ({ uploadKey: row.uploadKey, woNo: row.woNo, systemWorkOrder: row.workOrder?.woNo ?? "", commentText: row.commentText, commentedAt: dateValue(row.commentedAt), commentedBy: row.commentedBy, linkStatus: row.linkStatus, sourceYear: row.sourceYear, sourceFile: row.sourceFile, createdAt: dateValue(row.createdAt) }));
+  }
+  if (type === "ppm-due-date-history") {
+    const rows = await prisma.ppmDueDateHistory.findMany({ include: { ppm: true, workOrder: true }, orderBy: { generatedAt: "desc" } });
+    return rows.map((row) => ({ ppmCode: row.ppm.ppmCode || row.ppm.code, workOrderNumber: row.workOrderNumber, previousDueDate: dateValue(row.previousDueDate), newDueDate: dateValue(row.newDueDate), scheduleStatus: row.scheduleStatus, generatedBy: row.generatedBy, generatedAt: dateValue(row.generatedAt), workOrderStatus: row.workOrder.status }));
+  }
+  if (type === "bulk-upload-jobs") {
+    const rows = await prisma.bulkUploadJob.findMany({ orderBy: { createdAt: "desc" }, take: 1000 });
+    return rows.map((row) => ({ module: row.module, fileName: row.fileName, totalRows: row.totalRows, processedRows: row.processedRows, createdRows: row.createdRows, failedRows: row.failedRows, status: row.status, actorName: row.actorName, role: row.role, startedAt: dateValue(row.startedAt), completedAt: dateValue(row.completedAt), message: row.message ?? "" }));
+  }
+  if (type === "inventory-issues") {
+    const rows = await prisma.inventoryIssue.findMany({ include: { item: true, workOrder: true }, orderBy: { issuedAt: "desc" } });
+    return rows.map((row) => ({ sku: row.item.sku, item: row.item.name, workOrder: row.workOrder.woNo, quantity: row.quantity, issuedAt: dateValue(row.issuedAt) }));
+  }
+  if (type === "vendors") {
+    const rows = await prisma.vendor.findMany({ orderBy: { name: "asc" } });
+    return rows.map((row) => ({ name: row.name, category: row.category, rating: Number(row.rating), contact: row.contact, email: row.email, phone: row.phone }));
+  }
+  if (type === "contracts") {
+    const rows = await prisma.contract.findMany({ include: { vendor: true }, orderBy: { endDate: "asc" } });
+    return rows.map((row) => ({ title: row.title, vendor: row.vendor.name, type: row.type, startDate: dateValue(row.startDate), endDate: dateValue(row.endDate), value: Number(row.value), slaTarget: row.slaTarget }));
+  }
+  if (type === "meters") {
+    const rows = await prisma.meter.findMany({ include: { asset: true }, orderBy: { readAt: "desc" } });
+    return rows.map((row) => ({ name: row.name, type: row.type, unit: row.unit, reading: Number(row.reading), assetTag: row.asset?.tag ?? "", readAt: dateValue(row.readAt) }));
+  }
+  if (type === "shift-masters") {
+    const rows = await prisma.shiftMaster.findMany({ orderBy: { name: "asc" } });
+    return rows.map((row) => ({ name: row.name, shiftType: row.shiftType, startTime: row.startTime, endTime: row.endTime, breakDuration: row.breakDuration, active: row.active, createdAt: dateValue(row.createdAt) }));
+  }
+  if (type === "rotation-setups") {
+    const rows = await prisma.rotationSetup.findMany({ orderBy: { startDate: "desc" } });
+    return rows.map((row) => ({ name: row.name, appliesTo: row.appliesTo, shiftSequence: row.shiftSequence, offDays: row.offDays, startDate: dateValue(row.startDate), endDate: dateValue(row.endDate), repeatCycle: row.repeatCycle, active: row.active }));
+  }
+  if (type === "roster") {
+    const rows = await prisma.rosterEntry.findMany({ include: { employee: true, team: true, shift: true }, orderBy: { date: "desc" }, take: 50000 });
+    return rows.map((row) => ({ date: dateValue(row.date), assignmentType: row.assignmentType, employee: row.employee?.name ?? "", team: row.team?.name ?? "", shift: row.shift.name, locationZone: row.locationZone, supervisor: row.supervisor, status: row.status, attendanceStatus: row.attendanceStatus, workedHours: row.workedHours, overtimeHours: row.overtimeHours }));
+  }
+  if (type === "security-locations") {
+    const rows = await prisma.securityLocation.findMany({ orderBy: { code: "asc" } });
+    return rows.map((row) => ({ code: row.code, name: row.name, gateName: row.gateName ?? "", siteCode: row.siteCode ?? "", locationCode: row.locationCode ?? "", active: row.active, createdBy: row.createdBy ?? "", createdAt: dateValue(row.createdAt) }));
+  }
+  if (type === "security-gate-passes") {
+    const rows = await prisma.securityGatePass.findMany({ orderBy: { createdAt: "desc" } });
+    return rows.map((row) => ({ passNo: row.passNo, requesterName: row.requesterName, visitorName: row.visitorName, visitorCompany: row.visitorCompany ?? "", visitorIdNo: row.visitorIdNo ?? "", contactNo: row.contactNo ?? "", purpose: row.purpose, securityLocationCode: row.securityLocationCode ?? "", locationName: row.locationName ?? "", validFrom: dateValue(row.validFrom), validTo: dateValue(row.validTo), vehicleNo: row.vehicleNo ?? "", status: row.status, helpdeskApprovedBy: row.helpdeskApprovedBy ?? "", issuedBy: row.issuedBy ?? "", createdAt: dateValue(row.createdAt) }));
+  }
+  if (type === "security-daily-reports") {
+    const rows = await prisma.securityDailyReport.findMany({ orderBy: { reportDate: "desc" } });
+    return rows.map((row) => ({ reportNo: row.reportNo, reportDate: dateValue(row.reportDate), shift: row.shift, securityLocationCode: row.securityLocationCode ?? "", locationName: row.locationName ?? "", officerName: row.officerName, visitorCount: row.visitorCount, vehicleCount: row.vehicleCount, incidents: row.incidents ?? "", handoverNotes: row.handoverNotes ?? "", createdBy: row.createdBy ?? "" }));
+  }
+  if (type === "security-fire-drills") {
+    const rows = await prisma.securityFireDrillReport.findMany({ orderBy: { drillDate: "desc" } });
+    return rows.map((row) => ({ drillNo: row.drillNo, drillDate: dateValue(row.drillDate), securityLocationCode: row.securityLocationCode ?? "", locationName: row.locationName ?? "", alarmType: row.alarmType, conductedBy: row.conductedBy, evacuationTimeMin: row.evacuationTimeMin ?? "", participants: row.participants ?? "", observations: row.observations ?? "", correctiveActions: row.correctiveActions ?? "", status: row.status, createdBy: row.createdBy ?? "" }));
+  }
+  if (type === "total-entries") return totalEntriesReportRows();
   const rows = await prisma.asset.findMany({ include: { building: true, site: true }, orderBy: { tag: "asc" } });
   return rows.map((row) => ({
     EQUIPMENTNO: row.tag,
@@ -483,6 +571,58 @@ async function housingReportRows(type: string, filters: ReturnType<typeof report
   return [];
 }
 
+async function totalEntriesReportRows(): Promise<ReportRow[]> {
+  const [
+    assets,
+    locations,
+    workOrders,
+    ppmSchedules,
+    ppmChecklistHistory,
+    documents,
+    serviceRequests,
+    incidentCases,
+    comments,
+    rooms,
+    guests,
+    occupancy,
+    inventory,
+    compliance,
+    securityGatePasses,
+  ] = await Promise.all([
+    prisma.asset.count(),
+    prisma.location.count(),
+    prisma.workOrder.count(),
+    prisma.preventiveMaintenance.count(),
+    prisma.ppmChecklistHistory.count(),
+    prisma.documentUpload.count(),
+    prisma.serviceRequest.count({ where: { isIncidentCase: false } }),
+    prisma.serviceRequest.count({ where: { isIncidentCase: true } }),
+    prisma.commentHistory.count(),
+    prisma.housingRoom.count(),
+    prisma.housingResident.count(),
+    prisma.housingBooking.count(),
+    prisma.inventoryItem.count(),
+    prisma.complianceCertificate.count(),
+    prisma.securityGatePass.count(),
+  ]);
+  return [
+    ["Asset Registry", assets],
+    ["Location List", locations],
+    ["Work Orders History", workOrders],
+    ["PPM Schedules", ppmSchedules],
+    ["PPM WOs Checklist Items History", ppmChecklistHistory],
+    ["System O&M Manual", documents],
+    ["Service Request History", serviceRequests],
+    ["Cases & Incident", incidentCases],
+    ["Comment History", comments],
+    ["Rooms", rooms],
+    ["Guest Profile", guests],
+    ["Guest Stay Occupancy", occupancy],
+    ["Inventory", inventory],
+    ["Compliance & Certification", compliance],
+    ["Security Gate Passes", securityGatePasses],
+  ].map(([module, total], index) => ({ no: index + 1, module: String(module), totalEntries: Number(total) }));
+}
 function dateValue(value: Date | null | undefined) {
   return value ? value.toISOString() : "";
 }
@@ -761,3 +901,6 @@ function html(body: string) {
     },
   });
 }
+
+
+

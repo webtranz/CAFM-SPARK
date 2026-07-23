@@ -2987,6 +2987,7 @@ function TotalEntries({ data }: { data: ConsoleData }) {
                 System Data Audit
               </p>
               <h1 className="text-2xl font-black text-ink">Total Entries</h1>
+              <div className="mt-3"><ReportButtons type="total-entries" label="Total entries report" /></div>
             </div>
           </div>
           <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-right">
@@ -15129,6 +15130,7 @@ function IncidentCaseManagement({
   return (
     <section className="grid gap-5">
       <Panel title="Incident & Case Management" icon={AlertTriangle}>
+        <ReportButtons type="incident-cases" label="Incident and case report" />
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-bold text-slate-500">
@@ -15760,6 +15762,7 @@ function DocumentManagement({
   return (
     <section className="grid gap-5">
       <Panel title="Document Management" icon={FileText}>
+        <ReportButtons type={tab} label={`${activeLabel} report`} />
         <div className="mb-4 flex flex-wrap gap-2 border-b border-slate-200 pb-3">
           {tabs.map(([id, label, category]) => {
             const count =
@@ -17045,6 +17048,7 @@ function AssetHierarchySetup({
       <div className="space-y-5">
         {showSites && (
           <Panel title="Sites" icon={MapPinned}>
+            <ReportButtons type="sites" label="Sites report" />
             <ScrollableRowsTable
               rows={siteRows}
               totalRows={setupTotals.sites}
@@ -17079,6 +17083,7 @@ function AssetHierarchySetup({
         )}
         {showBuildings && (
           <Panel title="Buildings" icon={Building2}>
+            <ReportButtons type="buildings" label="Buildings report" />
             <ScrollableRowsTable
               rows={buildingRows}
               totalRows={setupTotals.buildings}
@@ -17112,6 +17117,7 @@ function AssetHierarchySetup({
         )}
         {showSpaces && (
           <Panel title="Spaces" icon={Boxes}>
+            <ReportButtons type="spaces" label="Spaces report" />
             <ScrollableRowsTable
               rows={spaceRows}
               totalRows={setupTotals.spaces}
@@ -19255,6 +19261,7 @@ function SecurityModule({
       {(view === "security-dashboard" || view === "security-gate-passes") && (
         <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
           <Panel title="Gate Pass Issuance" icon={FileText}>
+            <ReportButtons type="security-gate-passes" label="Gate passes report" />
             <div className="mb-3 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">Helpdesk approval required</div>
             <DataTable rows={gatePasses} columns={gateColumns} />
             {gatePasses.some((pass) => pass.status === "APPROVED" || (canApprove && pass.status === "PENDING_HELPDESK")) && (
@@ -19298,7 +19305,7 @@ function SecurityModule({
 
       {view === "security-locations" && (
         <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
-          <Panel title="Security Locations" icon={MapPinned}><DataTable rows={locations} columns={locationColumns} /></Panel>
+          <Panel title="Security Locations" icon={MapPinned}><ReportButtons type="security-locations" label="Security locations report" /><DataTable rows={locations} columns={locationColumns} /></Panel>
           <form action={submitSecurity} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <input type="hidden" name="type" value="location" />
             <input name="code" required placeholder="Security location code" className={FACILITY_FIELD_CLASS} />
@@ -19313,7 +19320,7 @@ function SecurityModule({
 
       {view === "security-daily-reports" && (
         <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
-          <Panel title="Security Daily Reports" icon={ClipboardCheck}><DataTable rows={dailyReports} columns={reportColumns} /></Panel>
+          <Panel title="Security Daily Reports" icon={ClipboardCheck}><ReportButtons type="security-daily-reports" label="Security daily reports" /><DataTable rows={dailyReports} columns={reportColumns} /></Panel>
           <form action={submitSecurity} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <input type="hidden" name="type" value="dailyReport" />
             <input type="date" name="reportDate" defaultValue={today} required className={FACILITY_FIELD_CLASS} />
@@ -19331,7 +19338,7 @@ function SecurityModule({
 
       {view === "security-fire-drills" && (
         <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
-          <Panel title="Fire Alarm Drill Reports" icon={AlertTriangle}><DataTable rows={fireDrills} columns={drillColumns} /></Panel>
+          <Panel title="Fire Alarm Drill Reports" icon={AlertTriangle}><ReportButtons type="security-fire-drills" label="Fire drill reports" /><DataTable rows={fireDrills} columns={drillColumns} /></Panel>
           <form action={submitSecurity} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <input type="hidden" name="type" value="fireDrill" />
             <input type="datetime-local" name="drillDate" defaultValue={`${today}T09:00`} required className={FACILITY_FIELD_CLASS} />
@@ -25927,14 +25934,48 @@ function Reports() {
             }}
             className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon"
           >
+            <option value="total-entries">Total Entries</option>
             <option value="assets">Assets</option>
+            <option value="locations">Locations</option>
+            <option value="sites">Sites</option>
+            <option value="buildings">Buildings</option>
+            <option value="spaces">Spaces</option>
             <option value="work-orders">Work Orders</option>
             <option value="requests">Service Requests</option>
+            <option value="incident-cases">Incident & Cases</option>
+            <option value="ppm">PPM Planner</option>
+            <option value="ppm-checklist-history">PPM Checklist History</option>
+            <option value="ppm-due-date-history">PPM Due Date History</option>
+            <option value="job-plans">Job Plans</option>
             <option value="inventory">Inventory</option>
-            <option value="ppm">PPM</option>
+            <option value="inventory-issues">Inventory Issues</option>
+            <option value="vendors">Vendors</option>
+            <option value="contracts">Contracts</option>
+            <option value="documents">All Documents</option>
+            <option value="documents-om-manuals">O&M Manuals</option>
+            <option value="documents-warranties">Warranties</option>
+            <option value="documents-contracts-slas">Contracts & SLAs</option>
+            <option value="inspections">HSE Inspections</option>
+            <option value="hse-incidents">HSE Incidents</option>
+            <option value="compliance">Compliance</option>
+            <option value="iot-alerts">IoT Alerts</option>
+            <option value="meters">Meters</option>
+            <option value="departments">Departments</option>
+            <option value="teams">Teams</option>
+            <option value="services">Services</option>
+            <option value="asset-categories">Asset Categories</option>
+            <option value="users">Users</option>
+            <option value="permissions">Permissions</option>
+            <option value="employees">Employees</option>
+            <option value="shift-masters">Shift Masters</option>
+            <option value="rotation-setups">Rotation Setups</option>
+            <option value="roster">Roster & Attendance</option>
             <option value="housing-dashboard">Housing Dashboard</option>
             <option value="housing-rooms">Housing Rooms</option>
+            <option value="housing-guests">Housing Guests</option>
             <option value="housing-bookings">Housing Bookings</option>
+            <option value="housing-check-movements">Housing Check-In / Check-Out</option>
+            <option value="housing-room-holds">Housing Room Holds</option>
             <option value="housing-inspections">Housing Inspections</option>
             <option value="housing-assets">Housing Assets</option>
             <option value="housing-inventory">Housing Inventory</option>
@@ -25944,6 +25985,13 @@ function Reports() {
               Housing Notification Settings
             </option>
             <option value="housing-history">Housing History</option>
+            <option value="security-gate-passes">Security Gate Passes</option>
+            <option value="security-locations">Security Locations</option>
+            <option value="security-daily-reports">Security Daily Reports</option>
+            <option value="security-fire-drills">Security Fire Drill Reports</option>
+            <option value="comments">Comments History</option>
+            <option value="bulk-upload-jobs">Bulk Upload Jobs</option>
+            <option value="audit-logs">Audit Logs</option>
           </select>
           <a
             className="rounded-lg bg-lagoon px-4 py-3 text-sm font-black text-white"
@@ -27549,6 +27597,12 @@ function actionFieldLabel(field: string) {
   };
   return labels[field] || field.replace(/([A-Z])/g, " $1");
 }
+
+
+
+
+
+
 
 
 
