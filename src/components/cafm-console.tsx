@@ -2987,7 +2987,7 @@ function TotalEntries({ data }: { data: ConsoleData }) {
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-slate-100 text-xs font-black uppercase text-slate-600">
+            <thead className="sticky top-0 z-20 bg-slate-100 text-xs font-black uppercase text-slate-600 shadow-sm">
               <tr>
                 <th className="w-16 px-4 py-3">#</th>
                 <th className="px-4 py-3">Module</th>
@@ -4680,7 +4680,7 @@ function Assets({
           className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin"
         >
           <table className="cafm-data-table cafm-asset-table min-w-[4300px] border-collapse bg-white text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+            <thead className="sticky top-0 z-20 bg-slate-50 text-left text-xs uppercase text-slate-500 shadow-sm">
               <tr>
                 <th className="px-3 py-3">
                   <input
@@ -6359,7 +6359,7 @@ function WorkOrders({
               className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin"
             >
               <table className="cafm-data-table min-w-[1880px] border-collapse bg-white text-sm">
-                <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                <thead className="sticky top-0 z-20 bg-slate-50 text-left text-xs uppercase text-slate-500 shadow-sm">
                   <tr>
                     <th className="px-3 py-3">
                       <input
@@ -7653,7 +7653,7 @@ function Helpdesk({
           className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin"
         >
           <table className="cafm-data-table min-w-[1680px] border-collapse bg-white text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+            <thead className="sticky top-0 z-20 bg-slate-50 text-left text-xs uppercase text-slate-500 shadow-sm">
               <tr>
                 {isAdmin && (
                   <th className="px-3 py-3 font-black">
@@ -11884,7 +11884,7 @@ function Ppm({
               className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin"
             >
               <table className="cafm-data-table min-w-[1500px] border-collapse bg-white text-sm">
-                <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                <thead className="sticky top-0 z-20 bg-slate-50 text-left text-xs uppercase text-slate-500 shadow-sm">
                   <tr>
                     {isAdmin && (
                       <th className="px-3 py-3">
@@ -14812,9 +14812,9 @@ function LinkedTicketsTable({
       </p>
     );
   return (
-    <div className="cafm-scroll-x overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
+    <div className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
       <table className="cafm-data-table min-w-[980px] border-collapse bg-white text-sm">
-        <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+        <thead className="sticky top-0 z-20 bg-slate-50 text-left text-xs uppercase text-slate-500 shadow-sm">
           <tr>
             {[
               "Ticket Type",
@@ -18153,7 +18153,7 @@ function Locations({
           className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin"
         >
           <table className="cafm-data-table min-w-[1020px] border-collapse bg-white text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+            <thead className="sticky top-0 z-20 bg-slate-50 text-left text-xs uppercase text-slate-500 shadow-sm">
               <tr>
                 {isAdmin && (
                   <th className="px-3 py-3">
@@ -18555,7 +18555,7 @@ function JobPlans({
           className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin"
         >
           <table className="cafm-data-table min-w-[1180px] border-collapse bg-white text-sm">
-            <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+            <thead className="sticky top-0 z-20 bg-slate-50 text-left text-xs uppercase text-slate-500 shadow-sm">
               <tr>
                 {isAdmin && (
                   <th className="px-3 py-3">
@@ -20544,9 +20544,9 @@ function ResourceTimeSheetsTable({
       </p>
     );
   return (
-    <div className="cafm-scroll-x overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
+    <div className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
       <table className="cafm-data-table min-w-[1200px] border-collapse bg-white text-sm">
-        <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+        <thead className="sticky top-0 z-20 bg-slate-50 text-left text-xs uppercase text-slate-500 shadow-sm">
           <tr>
             {[
               "Source",
@@ -21414,7 +21414,7 @@ function ResourceShiftsTable({ rows }: { rows: any[] }) {
       </p>
     );
   return (
-    <div className="cafm-scroll-x overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
+    <div className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
       <table className="cafm-data-table min-w-[1280px] table-fixed border-collapse bg-white text-sm">
         <colgroup>
           <col className="w-12" />
@@ -21428,7 +21428,7 @@ function ResourceShiftsTable({ rows }: { rows: any[] }) {
           <col className="w-32" />
           <col className="w-32" />
         </colgroup>
-        <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+        <thead className="sticky top-0 z-20 bg-slate-50 text-left text-xs uppercase text-slate-500 shadow-sm">
           <tr>
             {[
               "#",
@@ -23567,7 +23567,7 @@ function HousingTable({
         </div>
       )}
       <div
-        className="cafm-scroll-x mt-4 max-h-[640px] overflow-auto rounded-lg border border-slate-200 scrollbar-thin"
+        className="cafm-scroll-x mt-4 max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin"
         onScroll={(event) => {
           const target = event.currentTarget;
           if (
@@ -23581,7 +23581,7 @@ function HousingTable({
         }}
       >
         <table className="cafm-data-table min-w-[900px] bg-white text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+          <thead className="sticky top-0 z-20 bg-slate-50 text-left text-xs uppercase text-slate-500 shadow-sm">
             <tr>
               {bulkSelectable && (
                 <th className="px-3 py-3">
@@ -26348,7 +26348,7 @@ function AuditDetailsModal({
             </div>
             <div className="max-h-80 overflow-auto">
               <table className="min-w-full text-sm">
-                <thead className="bg-white text-left text-xs uppercase text-slate-500">
+                <thead className="sticky top-0 z-20 bg-white text-left text-xs uppercase text-slate-500 shadow-sm">
                   <tr>
                     <th className="px-3 py-2 font-black">Row</th>
                     <th className="px-3 py-2 font-black">Status</th>
@@ -27183,9 +27183,9 @@ function DataTable({
           total={bulkProgress.total}
         />
       )}
-      <div className="cafm-scroll-x overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
+      <div className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
         <table className="cafm-data-table min-w-max border-collapse bg-white text-sm">
-          <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+          <thead className="sticky top-0 z-20 bg-slate-50 text-left text-xs uppercase text-slate-500 shadow-sm">
             <tr>
               {bulkSelectable && (
                 <th className="whitespace-nowrap px-3 py-3 font-black">
