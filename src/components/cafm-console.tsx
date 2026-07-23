@@ -8250,7 +8250,9 @@ function strictAssetMatchesSelectedHierarchy(
   const selectedFloor = normalizedHierarchyCode(selectedLocation?.floor);
   const selectedBuilding = normalizedHierarchyCode(selectedLocation?.building);
   const selectedSite = normalizedHierarchyCode(selectedLocation?.site);
-  const assetCodes = assetLocationCodes(asset);
+  const selectedClass = String(
+    selectedLocation?.locationClass || selectedLocation?.type || "",
+  ).toUpperCase();
   const assetLocationCode = normalizedHierarchyCode(asset.locationCode);
   const assetRoom = normalizedHierarchyCode(asset.room);
   const assetFloor = normalizedHierarchyCode(asset.floor);
@@ -8258,16 +8260,51 @@ function strictAssetMatchesSelectedHierarchy(
     asset.buildingCode || asset.building?.code || asset.building?.name,
   );
   const assetSite = normalizedHierarchyCode(asset.siteCode || asset.site?.name);
+  const assetDirectCodes = hierarchyCodeSet([
+    asset.locationCode,
+    asset.room,
+    asset.sourceLocation,
+    asset.sourceEquipmentLocation,
+  ]);
 
-  if (selectedCode && (assetCodes.has(selectedCode) || assetLocationCode === selectedCode)) return true;
-  if (selectedRoom && (assetCodes.has(selectedRoom) || assetRoom === selectedRoom || assetLocationCode === selectedRoom)) return true;
-  if (selectedFloor && (assetFloor === selectedFloor || assetLocationCode === selectedFloor)) return true;
-  if (selectedBuilding && (assetBuilding === selectedBuilding || assetLocationCode === selectedBuilding)) return true;
-  if (selectedSite && assetSite === selectedSite && !selectedBuilding && !selectedFloor && !selectedRoom) return true;
+  const isRoomScope =
+    Boolean(selectedRoom) ||
+    selectedClass.includes("ROOM") ||
+    /^L[A-Z0-9]*[FR][A-Z0-9]*R\d+/i.test(String(selectedLocation?.code || ""));
+  const isFloorScope = Boolean(selectedFloor) && !isRoomScope;
+  const isBuildingScope = Boolean(selectedBuilding) && !isFloorScope && !isRoomScope;
+
+  if (isRoomScope) {
+    return Boolean(
+      (selectedCode && assetDirectCodes.has(selectedCode)) ||
+        (selectedRoom &&
+          (assetRoom === selectedRoom || assetLocationCode === selectedRoom)),
+    );
+  }
+
+  if (isFloorScope) {
+    return Boolean(
+      (selectedCode && assetLocationCode === selectedCode) ||
+        (selectedFloor &&
+          assetFloor === selectedFloor &&
+          (!selectedBuilding || assetBuilding === selectedBuilding)),
+    );
+  }
+
+  if (isBuildingScope) {
+    return Boolean(
+      (selectedCode && assetLocationCode === selectedCode) ||
+        (selectedBuilding && assetBuilding === selectedBuilding),
+    );
+  }
+
+  if (selectedSite) {
+    return assetSite === selectedSite || assetLocationCode === selectedSite;
+  }
 
   const selectedCodes = selectedLocationStrictCodes(location, selectedLocation);
   if (!selectedCodes.size) return true;
-  return Array.from(selectedCodes).some((code) => assetCodes.has(code));
+  return Array.from(selectedCodes).some((code) => assetDirectCodes.has(code));
 }
 
 function assetCategoryValue(asset: any) {
@@ -27597,15 +27634,3 @@ function actionFieldLabel(field: string) {
   };
   return labels[field] || field.replace(/([A-Z])/g, " $1");
 }
-
-
-
-
-
-
-
-
-
-
-
-

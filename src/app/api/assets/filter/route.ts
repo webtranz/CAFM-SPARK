@@ -81,6 +81,7 @@ export async function GET(request: Request) {
   const filterValue = url.searchParams.get("filterValue")?.trim() || "";
   const locationCode = url.searchParams.get("locationCode")?.trim() || "";
   const locationQuery = url.searchParams.get("locationQuery")?.trim() || "";
+  const strictLocation = url.searchParams.get("strictLocation") === "true";
   const classValue = url.searchParams.get("class")?.trim() || "";
   const status = url.searchParams.get("status")?.trim() || "";
   const pageInput = Number(url.searchParams.get("page") || 1);
@@ -139,7 +140,7 @@ export async function GET(request: Request) {
       ],
     });
   }
-  if (locationQuery) {
+  if (locationQuery && !strictLocation) {
     andFilters.push({
       OR: [
         { locationCode: { contains: locationQuery, mode: "insensitive" } },
