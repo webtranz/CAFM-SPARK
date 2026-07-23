@@ -4437,7 +4437,7 @@ function Assets({
               <select
                 value={filterField}
                 onChange={(event) => setFilterField(event.target.value)}
-                className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+                className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
               >
                 {filterOptions.map(([value, label]) => (
                   <option key={value} value={value}>
@@ -4505,7 +4505,7 @@ function Assets({
           <select
             value={locationFilter}
             onChange={(event) => setLocationFilter(event.target.value)}
-            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+            className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
           >
             <option value="">LOCATION</option>
             <option value="__unassigned__">Unassigned</option>
@@ -4524,7 +4524,7 @@ function Assets({
           <select
             value={classFilter}
             onChange={(event) => setClassFilter(event.target.value)}
-            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+            className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
           >
             <option value="">CLASS / CATEGORY</option>
             {classOptions.map((assetClass) => (
@@ -4536,7 +4536,7 @@ function Assets({
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
-            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+            className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
           >
             <option value="">ASSETSTATUS</option>
             {statusOptions.map((status) => (
@@ -7516,7 +7516,7 @@ function Helpdesk({
             <select
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value)}
-              className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+              className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
             >
               <option value="All">Status</option>
               <option value="NEW">New</option>
@@ -7528,7 +7528,7 @@ function Helpdesk({
             <select
               value={priorityFilter}
               onChange={(event) => setPriorityFilter(event.target.value)}
-              className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+              className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
             >
               <option value="All">Priority</option>
               <option value="LOW">Low</option>
@@ -7539,7 +7539,7 @@ function Helpdesk({
             <select
               value={categoryFilter}
               onChange={(event) => setCategoryFilter(event.target.value)}
-              className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+              className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
             >
               {requestCategories.map((category) => (
                 <option key={category} value={category}>
@@ -18003,7 +18003,7 @@ function Locations({
           <select
             value={parentFilter}
             onChange={(event) => setParentFilter(event.target.value)}
-            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+            className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
           >
             <option value="">All parents</option>
             {parentOptions.map((parentLocation) => (
@@ -18015,7 +18015,7 @@ function Locations({
           <select
             value={classFilter}
             onChange={(event) => setClassFilter(event.target.value)}
-            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+            className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
           >
             <option value="">All classes</option>
             {classOptions.map((locationClass) => (
@@ -18027,7 +18027,7 @@ function Locations({
           <select
             value={residentialFilter}
             onChange={(event) => setResidentialFilter(event.target.value)}
-            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+            className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
           >
             <option value="">Residential</option>
             <option value="YES">YES</option>
@@ -22102,7 +22102,7 @@ function HousingOperations({
           <select
             value={status}
             onChange={(event) => setStatus(event.target.value)}
-            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+            className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
           >
             <option>All</option>
             <option>REQUESTED</option>
@@ -22126,7 +22126,7 @@ function HousingOperations({
           <select
             value={companyFilter}
             onChange={(event) => setCompanyFilter(event.target.value)}
-            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+            className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
           >
             <option>All</option>
             {dashboardCompanies.map((company) => (
@@ -22136,7 +22136,7 @@ function HousingOperations({
           <select
             value={buildingFilter}
             onChange={(event) => setBuildingFilter(event.target.value)}
-            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+            className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
           >
             <option>All</option>
             {dashboardBuildings.map((building) => (
@@ -22146,7 +22146,7 @@ function HousingOperations({
           <select
             value={floorFilter}
             onChange={(event) => setFloorFilter(event.target.value)}
-            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+            className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
           >
             <option>All</option>
             {dashboardFloors.map((floor) => (
@@ -22156,7 +22156,7 @@ function HousingOperations({
           <select
             value={categoryFilter}
             onChange={(event) => setCategoryFilter(event.target.value)}
-            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+            className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
           >
             <option>All</option>
             {dashboardCategories.map((category) => (
@@ -22167,13 +22167,13 @@ function HousingOperations({
             value={dateFrom}
             onChange={(event) => setDateFrom(event.target.value)}
             type="date"
-            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+            className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
           />
           <input
             value={dateTo}
             onChange={(event) => setDateTo(event.target.value)}
             type="date"
-            className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+            className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
           />
           <ReportButtons
             type="housing-dashboard"
@@ -22579,7 +22579,7 @@ function HousingOperations({
                 value={movementDate}
                 onChange={(event) => setMovementDate(event.target.value)}
                 type="date"
-                className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
+                className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
               />
               <div className="flex flex-wrap gap-2 rounded-lg bg-slate-50 p-1">
                 <button
@@ -24325,6 +24325,16 @@ function housingRoomLabel(room: any) {
     .join(" / ");
 }
 
+function housingRoomSearchLabel(room: any) {
+  return [
+    room.code,
+    room.roomNumber && room.roomNumber !== room.code ? room.roomNumber : "",
+    housingRoomLabel(room),
+  ]
+    .filter(Boolean)
+    .join(" - ");
+}
+
 function HousingRoomSelect({
   rooms,
   name = "roomId",
@@ -24344,7 +24354,7 @@ function HousingRoomSelect({
     () =>
       roomRows.map((room) => ({
         value: room.id,
-        label: housingRoomLabel(room),
+        label: housingRoomSearchLabel(room),
       })),
     [roomRows],
   );
@@ -24975,11 +24985,18 @@ function HousingBookingForm({
       </div>
       <HousingRoomSelect
         rooms={rooms}
-        placeholder="Select room by company / building / floor"
-        filter={(room) =>
-          !["BLOCKED", "MAINTENANCE"].includes(room.status) &&
-          !activeHeldRoomIds.has(room.id)
-        }
+        placeholder="Search available room by ID or room number"
+        filter={(room) => {
+          const roomStatus = String(room.status || "").toUpperCase();
+          const occupancy = Number(room.occupancy || 0);
+          const capacity = Number(room.capacity || 0);
+          return (
+            roomStatus === "AVAILABLE" &&
+            occupancy === 0 &&
+            capacity > 0 &&
+            !activeHeldRoomIds.has(room.id)
+          );
+        }}
       />
       <select name="bedId" className={HOUSING_FIELD_CLASS}>
         <option value="">Auto-assign available bed</option>
@@ -26852,7 +26869,7 @@ function ExcelFilterHeader<T>({
       {open && (
         <div
           onClick={(event) => event.stopPropagation()}
-          className="absolute left-0 top-7 z-50 w-72 rounded-lg border border-slate-200 bg-white p-3 text-left normal-case text-slate-700 shadow-xl"
+          className="absolute left-0 top-7 z-50 w-96 max-w-[min(32rem,calc(100vw-2rem))] rounded-lg border border-slate-200 bg-white p-3 text-left normal-case text-slate-700 shadow-xl"
         >
           <div className="grid gap-1 border-b border-slate-100 pb-2 text-xs font-bold">
             <button
@@ -26908,7 +26925,7 @@ function ExcelFilterHeader<T>({
                   checked={draftValues.has(value)}
                   onChange={(event) => toggleValue(value, event.target.checked)}
                 />
-                <span className="truncate" title={value}>
+                <span className="whitespace-normal break-words" title={value}>
                   {value}
                 </span>
               </label>
