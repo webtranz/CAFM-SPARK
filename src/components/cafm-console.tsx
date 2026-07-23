@@ -21801,11 +21801,19 @@ function HousingOperations({
     }));
   const filterText = search.toLowerCase();
   const visibleBookings = bookings.filter((booking) => {
+    const startDate = String(booking.checkIn || "").slice(0, 10);
+    const endDate = String(booking.checkOut || "").slice(0, 10);
+    const rangeStart = startDate || endDate;
+    const rangeEnd = endDate || startDate;
+    const matchesDateRange =
+      (!dateFrom || !rangeEnd || rangeEnd >= dateFrom) &&
+      (!dateTo || !rangeStart || rangeStart <= dateTo);
     const haystack =
-      `${booking.bookingNo} ${booking.residentName} ${booking.departmentCode} ${booking.status} ${booking.room?.roomNumber} ${booking.bed?.label}`.toLowerCase();
+      `${booking.bookingNo} ${booking.employeeId} ${booking.residentNo} ${booking.guestId} ${booking.residentName} ${booking.companyName} ${booking.departmentCode} ${booking.status} ${booking.bookingType} ${booking.allocationType} ${booking.buildingNumber} ${booking.floorNumber} ${booking.roomNumber} ${booking.bedNumber} ${booking.room?.roomNumber} ${booking.bed?.label} ${startDate} ${endDate}`.toLowerCase();
     return (
       (!search || haystack.includes(filterText)) &&
-      (status === "All" || booking.status === status)
+      (status === "All" || booking.status === status) &&
+      matchesDateRange
     );
   });
   const visibleRooms = rooms.filter((room) => {
@@ -22087,7 +22095,7 @@ function HousingOperations({
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search housing rooms, residents, bookings"
+              placeholder="Search by badge, ID, booking or room number"
               className="h-11 w-full text-sm outline-none"
             />
           </div>
@@ -22429,7 +22437,7 @@ function HousingOperations({
               rows={visibleBookings}
               columns={[
                 ["bookingNo", "Booking"],
-                ["employeeId", "Employee ID"],
+                ["employeeId", "Badge No"],
                 ["residentName", "Employee"],
                 ["companyName", "Company"],
                 ["departmentCode", "Department"],
@@ -22438,9 +22446,11 @@ function HousingOperations({
                 ["floorNumber", "Floor"],
                 ["roomNumber", "Room"],
                 ["bedNumber", "Bed"],
+                ["checkIn", "Start Date"],
+                ["checkOut", "End Date"],
                 ["bookingType", "Type"],
                 ["allocationType", "Allocation"],
-                ["status", "Status"],
+                ["status", "Checked-In Status"],
                 ["priority", "Priority"],
               ]}
               onSelect={(record) => setSelected({ type: "booking", record })}
@@ -24877,7 +24887,7 @@ function HousingBookingForm({
       <SearchableDropdownField
         value={residentSearch}
         options={residentOptions}
-        placeholder="New employee / search existing by employee ID or name"
+        placeholder="New employee / search by badge, ID or name"
         onInput={(value) => {
           setResidentSearch(value);
           if (!value) setResidentId("");
@@ -24890,7 +24900,7 @@ function HousingBookingForm({
           required
           value={employeeId}
           onChange={(event) => setEmployeeId(event.target.value)}
-          placeholder="Employee ID *"
+          placeholder="Badge No / Employee ID *"
           className={HOUSING_FIELD_CLASS}
         />
         <input
