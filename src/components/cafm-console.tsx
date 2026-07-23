@@ -8205,22 +8205,6 @@ function hierarchyCodeSet(values: unknown[]) {
   );
 }
 
-function assetLocationCodes(asset: any) {
-  return hierarchyCodeSet([
-    asset.locationCode,
-    asset.locationDesc,
-    asset.siteCode,
-    asset.site?.code,
-    asset.site?.name,
-    asset.buildingCode,
-    asset.building?.code,
-    asset.building?.name,
-    asset.floor,
-    asset.room,
-    asset.sourceLocation,
-    asset.sourceEquipmentLocation,
-  ]);
-}
 
 function selectedLocationStrictCodes(location: string, selectedLocation?: any) {
   const selectedValues = selectedLocation
@@ -8270,15 +8254,15 @@ function strictAssetMatchesSelectedHierarchy(
   const isRoomScope =
     Boolean(selectedRoom) ||
     selectedClass.includes("ROOM") ||
-    /^L[A-Z0-9]*[FR][A-Z0-9]*R\d+/i.test(String(selectedLocation?.code || ""));
+    /R\d+$/i.test(selectedCode) ||
+    /ROOM/i.test(String(selectedLocation?.description || ""));
   const isFloorScope = Boolean(selectedFloor) && !isRoomScope;
   const isBuildingScope = Boolean(selectedBuilding) && !isFloorScope && !isRoomScope;
 
   if (isRoomScope) {
     return Boolean(
       (selectedCode && assetDirectCodes.has(selectedCode)) ||
-        (selectedRoom &&
-          (assetRoom === selectedRoom || assetLocationCode === selectedRoom)),
+        (selectedRoom && assetDirectCodes.has(selectedRoom)),
     );
   }
 
@@ -8992,12 +8976,21 @@ function ServiceRequestForm({
       })),
     [activeLocations],
   );
-  const selectedLocation = activeLocations.find(
-    (location) => location.code === locationCodeValue,
-  );
+  const selectedLocation = useMemo(() => {
+    const normalizedSelectedCode = normalizedHierarchyCode(locationCodeValue);
+    return (
+      activeLocations.find((location) => location.code === locationCodeValue) ||
+      findLocationBySearch(activeLocations, locationSearchValue) ||
+      activeLocations.find(
+        (location) =>
+          normalizedSelectedCode &&
+          normalizedHierarchyCode(location.code) === normalizedSelectedCode,
+      )
+    );
+  }, [activeLocations, locationCodeValue, locationSearchValue]);
   const locationValue = selectedLocation
     ? serviceRequestLocationLabel(selectedLocation)
-    : "";
+    : locationSearchValue || locationCodeValue || "";
   const filteredAssets = useMemo(
     () =>
       scopedAssetOptions(
