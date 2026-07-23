@@ -950,6 +950,31 @@ function workMetricRows(workOrders: any[], showOnlyDelayed: boolean) {
     );
 }
 
+function liveWorkOrderSort(rows: any[]) {
+  const priority = (work: any) => {
+    const status = String(work?.status || "").toUpperCase();
+    if (status === "PENDING_SUPERVISOR_REVIEW") return 0;
+    if (status === "COMPLETED") return 1;
+    if (["IN_PROGRESS", "ON_HOLD"].includes(status)) return 2;
+    if (["ASSIGNED", "ACCEPTED", "PENDING_ASSIGNMENT", "OPEN", "NEW"].includes(status)) return 3;
+    if (["VERIFIED", "CLOSED"].includes(status)) return 4;
+    return 5;
+  };
+  const timeValue = (value: unknown) => {
+    const time = new Date(String(value || "")).getTime();
+    return Number.isFinite(time) ? time : 0;
+  };
+  return [...rows].sort((left, right) => {
+    const leftPriority = priority(left);
+    const rightPriority = priority(right);
+    if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+    return (
+      timeValue(right.updatedAt || right.finishedAt || right.createdAt) -
+      timeValue(left.updatedAt || left.finishedAt || left.createdAt)
+    );
+  });
+}
+
 function DetailPanel({
   title,
   rows,
@@ -1505,12 +1530,22 @@ export function CafmConsole({
 
   function mergeWorkOrderRecord(updated: any) {
     if (!updated?.id) return;
-    setRecords((current) => ({
-      ...current,
-      workOrders: current.workOrders.map((work) =>
-        work.id === updated.id ? { ...work, ...updated } : work,
-      ),
-    }));
+    setRecords((current) => {
+      const exists = current.workOrders.some((work) => work.id === updated.id);
+      const nextRows = exists
+        ? current.workOrders.map((work) =>
+            work.id === updated.id ? { ...work, ...updated } : work,
+          )
+        : [{ ...updated }, ...current.workOrders];
+      return {
+        ...current,
+        workOrders: liveWorkOrderSort(nextRows),
+        workOrdersTotal: Math.max(
+          current.workOrdersTotal ?? 0,
+          nextRows.length,
+        ),
+      };
+    });
   }
 
   function mergeServiceRequestRecord(updated: any) {
@@ -5744,30 +5779,32 @@ function WorkOrders({
   );
   const visibleWorks = useMemo(
     () =>
-      applyExcelTableFilters(
-        rawVisibleWorks,
-        workExcelColumns,
-        workExcelFilters,
-        workExcelSort,
-        (work, key) => {
-          if (key === "asset") return work.asset?.tag ?? work.assetTag ?? "";
-          if (key === "location")
-            return (
-              work.asset?.buildingCode ||
-              work.asset?.floor ||
-              work.location ||
-              ""
-            );
-          if (key === "description")
-            return work.jobPlan || work.workNotes || work.title;
-          if (key === "assignedTo")
-            return work.assignedTo?.email ?? work.assignedTeamCode ?? "";
-          if (key === "isIncidentCase")
-            return work.isIncidentCase ? "Yes" : "No";
-          if (["dueAt", "createdAt", "updatedAt", "plannedStart"].includes(key))
-            return formatDateCell(work[key]);
-          return work[key];
-        },
+      liveWorkOrderSort(
+        applyExcelTableFilters(
+          rawVisibleWorks,
+          workExcelColumns,
+          workExcelFilters,
+          workExcelSort,
+          (work, key) => {
+            if (key === "asset") return work.asset?.tag ?? work.assetTag ?? "";
+            if (key === "location")
+              return (
+                work.asset?.buildingCode ||
+                work.asset?.floor ||
+                work.location ||
+                ""
+              );
+            if (key === "description")
+              return work.jobPlan || work.workNotes || work.title;
+            if (key === "assignedTo")
+              return work.assignedTo?.email ?? work.assignedTeamCode ?? "";
+            if (key === "isIncidentCase")
+              return work.isIncidentCase ? "Yes" : "No";
+            if (["dueAt", "createdAt", "updatedAt", "plannedStart"].includes(key))
+              return formatDateCell(work[key]);
+            return work[key];
+          },
+        ),
       ),
     [rawVisibleWorks, workExcelColumns, workExcelFilters, workExcelSort],
   );
@@ -5941,9 +5978,19 @@ function WorkOrders({
 
   function mergeLocalWorkOrder(updated: any) {
     if (!updated?.id) return;
-    setWorkRowsSource((current) =>
-      current.map((work) => (work.id === updated.id ? { ...work, ...updated } : work)),
-    );
+    let nextCount = workRowsSource.length;
+    setWorkRowsSource((current) => {
+      const exists = current.some((work) => work.id === updated.id);
+      const nextRows = exists
+        ? current.map((work) =>
+            work.id === updated.id ? { ...work, ...updated } : work,
+          )
+        : [{ ...updated }, ...current];
+      nextCount = nextRows.length;
+      return liveWorkOrderSort(nextRows);
+    });
+    setWorkTotal((current) => Math.max(current, nextCount));
+    workScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     setPreviewWork((current: any) =>
       current?.id === updated.id ? { ...current, ...updated } : current,
     );

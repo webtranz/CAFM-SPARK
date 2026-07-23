@@ -134,7 +134,7 @@ export async function GET(request: Request) {
       where,
       skip: (page - 1) * pageSize,
       take: pageSize,
-      orderBy: [{ createdAt: "desc" }, { updatedAt: "desc" }, { dueAt: "asc" }],
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }, { dueAt: "asc" }],
       include: {
         assignedTo: { select: { name: true, email: true } },
         asset: { select: { tag: true, name: true, assetDescription: true, buildingCode: true, floor: true, room: true } },

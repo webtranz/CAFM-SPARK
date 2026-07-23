@@ -138,7 +138,7 @@ export async function getOperatingData(user: OperatingUser = null) {
       }),
       prisma.workOrder.findMany({
         where: visibleWorkWhere,
-        orderBy: [{ createdAt: "desc" }, { updatedAt: "desc" }, { dueAt: "asc" }],
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }, { dueAt: "asc" }],
         take: INITIAL_LOAD_LIMIT,
         include: {
           assignedTo: { select: { name: true, email: true } },
