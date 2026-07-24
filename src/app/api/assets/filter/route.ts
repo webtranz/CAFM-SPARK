@@ -137,6 +137,7 @@ export async function GET(request: Request) {
       OR: [
         { locationCode: { equals: locationCode, mode: "insensitive" } },
         { room: { equals: locationCode, mode: "insensitive" } },
+        { locationDesc: { contains: locationCode, mode: "insensitive" } },
       ],
     });
   }

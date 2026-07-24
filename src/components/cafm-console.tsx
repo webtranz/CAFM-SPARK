@@ -8250,6 +8250,17 @@ function strictAssetMatchesSelectedHierarchy(
     asset.sourceLocation,
     asset.sourceEquipmentLocation,
   ]);
+  const assetLocationText = normalizedHierarchyCode(
+    [
+      asset.locationCode,
+      asset.locationDesc,
+      asset.room,
+      asset.sourceLocation,
+      asset.sourceEquipmentLocation,
+    ]
+      .filter(Boolean)
+      .join(" "),
+  );
 
   const isRoomScope =
     Boolean(selectedRoom) ||
@@ -8261,8 +8272,12 @@ function strictAssetMatchesSelectedHierarchy(
 
   if (isRoomScope) {
     return Boolean(
-      (selectedCode && assetDirectCodes.has(selectedCode)) ||
-        (selectedRoom && assetDirectCodes.has(selectedRoom)),
+      (selectedCode &&
+        (assetDirectCodes.has(selectedCode) ||
+          assetLocationText.includes(selectedCode))) ||
+        (selectedRoom &&
+          (assetDirectCodes.has(selectedRoom) ||
+            assetLocationText.includes(selectedRoom))),
     );
   }
 
@@ -8802,6 +8817,8 @@ function ServiceRequestForm({
     initialLocation ? locationSelectLabel(initialLocation) : "",
   );
   const [assetTagValue, setAssetTagValue] = useState(request?.assetTag ?? "");
+  const [locationAssetRows, setLocationAssetRows] = useState<any[]>([]);
+  const [locationAssetsLoading, setLocationAssetsLoading] = useState(false);
   const [categoryValue, setCategoryValue] = useState(request?.category ?? "");
   const [showCategoryCreate, setShowCategoryCreate] = useState(false);
   const [categoryName, setCategoryName] = useState("");
@@ -8991,20 +9008,64 @@ function ServiceRequestForm({
   const locationValue = selectedLocation
     ? serviceRequestLocationLabel(selectedLocation)
     : locationSearchValue || locationCodeValue || "";
+
+  useEffect(() => {
+    const selectedCode = selectedLocation?.code || locationCodeValue;
+    if (!selectedCode) {
+      setLocationAssetRows([]);
+      setLocationAssetsLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setLocationAssetsLoading(true);
+    const params = new URLSearchParams({
+      locationCode: selectedCode,
+      locationQuery: selectedCode,
+      strictLocation: "true",
+      pageSize: "all",
+    });
+    fetch(`/api/assets/filter?${params.toString()}`, {
+      signal: controller.signal,
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((result) => {
+        if (!result?.assets) return;
+        setLocationAssetRows(result.assets);
+      })
+      .catch((error) => {
+        if (error?.name !== "AbortError") setLocationAssetRows([]);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLocationAssetsLoading(false);
+      });
+    return () => controller.abort();
+  }, [locationCodeValue, selectedLocation?.code]);
+
+  const serviceRequestAssetSource = useMemo<any[]>(() => {
+    const rows: any[] = locationCodeValue ? [...locationAssetRows, ...assets] : assets;
+    const uniqueAssets = rows.reduce<Map<string, any>>((map, asset) => {
+      const key = String(asset.tag || asset.id || "").trim();
+      if (!key || map.has(key)) return map;
+      map.set(key, asset);
+      return map;
+    }, new Map<string, any>());
+    return Array.from(uniqueAssets.values());
+  }, [assets, locationAssetRows, locationCodeValue]);
+
   const filteredAssets = useMemo(
     () =>
       scopedAssetOptions(
-        assets,
+        serviceRequestAssetSource,
         departmentCode,
         selectedTeamCode,
         locationValue,
         selectedLocation,
       ),
-    [assets, departmentCode, selectedTeamCode, locationValue, selectedLocation],
+    [serviceRequestAssetSource, departmentCode, selectedTeamCode, locationValue, selectedLocation],
   );
-  const selectedFormAsset = useMemo(
-    () => assets.find((asset) => asset.tag === assetTagValue),
-    [assets, assetTagValue],
+  const selectedFormAsset = useMemo<any | undefined>(
+    () => serviceRequestAssetSource.find((asset) => asset.tag === assetTagValue),
+    [serviceRequestAssetSource, assetTagValue],
   );
   const relevantServiceTeams = useMemo(
     () =>
@@ -9110,7 +9171,7 @@ function ServiceRequestForm({
 
   function applyAssetSelection(tag: string) {
     setAssetTagValue(tag);
-    const asset = assets.find((item) => item.tag === tag);
+    const asset = serviceRequestAssetSource.find((item) => item.tag === tag);
     if (!asset) return;
     if (asset.departmentCode) setDepartmentCode(asset.departmentCode);
     const category = assetCategoryValue(asset);
@@ -9378,7 +9439,9 @@ function ServiceRequestForm({
           >
             <option value="">
               {locationCodeValue
-                ? `Location assets (${filteredAssets.length})`
+                ? locationAssetsLoading
+                  ? "Loading linked location assets..."
+                  : `Location assets (${filteredAssets.length})`
                 : departmentCode || selectedTeamCode
                   ? `Department assets (${filteredAssets.length})`
                   : "Select location, department or service"}
@@ -9410,7 +9473,12 @@ function ServiceRequestForm({
               department/service to narrow them.
             </span>
           )}
-          {locationCodeValue && !filteredAssets.length && (
+          {locationCodeValue && locationAssetsLoading && (
+            <span className="text-xs font-black text-slate-500">
+              Loading assets mapped to this location from the asset register...
+            </span>
+          )}
+          {locationCodeValue && !locationAssetsLoading && !filteredAssets.length && (
             <span className="text-xs font-black text-amber-700">
               No assets are linked to the selected location hierarchy.
             </span>
