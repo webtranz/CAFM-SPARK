@@ -964,14 +964,23 @@ function liveWorkOrderSort(rows: any[]) {
     const time = new Date(String(value || "")).getTime();
     return Number.isFinite(time) ? time : 0;
   };
+  const activityTime = (work: any) =>
+    timeValue(
+      work?.clientActivityAt ||
+        work?.updatedAt ||
+        work?.finishedAt ||
+        work?.resolutionAt ||
+        work?.responseAt ||
+        work?.createdAt,
+    );
   return [...rows].sort((left, right) => {
+    const rightActivity = activityTime(right);
+    const leftActivity = activityTime(left);
+    if (rightActivity !== leftActivity) return rightActivity - leftActivity;
     const leftPriority = priority(left);
     const rightPriority = priority(right);
     if (leftPriority !== rightPriority) return leftPriority - rightPriority;
-    return (
-      timeValue(right.updatedAt || right.finishedAt || right.createdAt) -
-      timeValue(left.updatedAt || left.finishedAt || left.createdAt)
-    );
+    return timeValue(right.dueAt) - timeValue(left.dueAt);
   });
 }
 
@@ -1530,13 +1539,18 @@ export function CafmConsole({
 
   function mergeWorkOrderRecord(updated: any) {
     if (!updated?.id) return;
+    const stamped = {
+      ...updated,
+      updatedAt: updated.updatedAt || new Date().toISOString(),
+      clientActivityAt: new Date().toISOString(),
+    };
     setRecords((current) => {
       const exists = current.workOrders.some((work) => work.id === updated.id);
       const nextRows = exists
         ? current.workOrders.map((work) =>
-            work.id === updated.id ? { ...work, ...updated } : work,
+            work.id === updated.id ? { ...work, ...stamped } : work,
           )
-        : [{ ...updated }, ...current.workOrders];
+        : [{ ...stamped }, ...current.workOrders];
       return {
         ...current,
         workOrders: liveWorkOrderSort(nextRows),
@@ -5878,23 +5892,7 @@ function WorkOrders({
   useEffect(() => {
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
-      const defaultFilters =
-        page === 1 &&
-        !search &&
-        statusFilter === "All" &&
-        priorityFilter === "All" &&
-        categoryFilter === "All" &&
-        departmentFilter === "All" &&
-        typeFilter === "All" &&
-        assignedFilter === "All" &&
-        !overdueOnly &&
-        !showOnlyDelayed;
-      if (defaultFilters && data.workOrders.length) {
-        setWorkRowsSource(data.workOrders);
-        setWorkTotal(data.workOrdersTotal ?? data.workOrders.length);
-        setWorkLoading(false);
-        return;
-      }
+
       setWorkLoading(true);
       try {
         const params = new URLSearchParams({
@@ -5921,9 +5919,9 @@ function WorkOrders({
           setWorkRowsSource((current) =>
             page === 1
               ? nextRows.length || nextTotal === 0
-                ? nextRows
+                ? liveWorkOrderSort(nextRows)
                 : current
-              : [...current, ...nextRows],
+              : liveWorkOrderSort([...current, ...nextRows]),
           );
           setWorkTotal(nextTotal);
         }
@@ -5979,30 +5977,35 @@ function WorkOrders({
 
   function mergeLocalWorkOrder(updated: any) {
     if (!updated?.id) return;
+    const stamped = {
+      ...updated,
+      updatedAt: updated.updatedAt || new Date().toISOString(),
+      clientActivityAt: new Date().toISOString(),
+    };
     let nextCount = workRowsSource.length;
     setWorkRowsSource((current) => {
       const exists = current.some((work) => work.id === updated.id);
       const nextRows = exists
         ? current.map((work) =>
-            work.id === updated.id ? { ...work, ...updated } : work,
+            work.id === updated.id ? { ...work, ...stamped } : work,
           )
-        : [{ ...updated }, ...current];
+        : [{ ...stamped }, ...current];
       nextCount = nextRows.length;
       return liveWorkOrderSort(nextRows);
     });
     setWorkTotal((current) => Math.max(current, nextCount));
     workScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     setPreviewWork((current: any) =>
-      current?.id === updated.id ? { ...current, ...updated } : current,
+      current?.id === stamped.id ? { ...current, ...stamped } : current,
     );
     setEditing((current: any) =>
-      current?.id === updated.id ? { ...current, ...updated } : current,
+      current?.id === stamped.id ? { ...current, ...stamped } : current,
     );
     setReviewWork((current) => {
-      if (!current || current.work?.id !== updated.id) return current;
-      return { action: current.action, work: { ...current.work, ...updated } };
+      if (!current || current.work?.id !== stamped.id) return current;
+      return { action: current.action, work: { ...current.work, ...stamped } };
     });
-    setSelectedWorkId(updated.id);
+    setSelectedWorkId(stamped.id);
   }
   async function quickPatchWork(work: any, body: Record<string, string>) {
     const formData = new FormData();
@@ -6117,7 +6120,7 @@ function WorkOrders({
       });
       if (!response.ok) return;
       const result = await response.json();
-      setWorkRowsSource(result.workOrders ?? []);
+      setWorkRowsSource(liveWorkOrderSort(result.workOrders ?? []));
       setWorkTotal(Number(result.total ?? result.workOrders?.length ?? 0));
     } finally {
       setWorkLoading(false);

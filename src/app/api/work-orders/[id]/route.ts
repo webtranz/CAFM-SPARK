@@ -88,7 +88,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const supervisorDepartment = String(user?.department ?? "").trim().toLowerCase();
     const isGenericSupervisor = role === "supervisor" && (!supervisorDepartment || ["general", "all", "fbc"].includes(supervisorDepartment));
     const isSupervisorTeamOwner = role === "supervisor" && (current.assignedToId === user?.id || Boolean(current.assignedTeamCode && current.assignedTeamCode === user?.team?.code));
-    const isSupervisorOrAdmin = canManageDepartmentRecord(user, current.departmentCode) || isGenericSupervisor || isSupervisorTeamOwner || Boolean(reviewStatus && scopeAllows(reviewScope, "Facility"));
+    const hasApprovedReviewPermission = Boolean(reviewStatus && ["admin", "supervisor"].includes(role));
+    const isSupervisorOrAdmin = canManageDepartmentRecord(user, current.departmentCode) || isGenericSupervisor || isSupervisorTeamOwner || hasApprovedReviewPermission || Boolean(reviewStatus && scopeAllows(reviewScope, "Facility"));
     if (!isSupervisorOrAdmin && !isAssignedTechnician) {
       return apiError(new Error("You do not have permission for this work order."), "Access denied", 403);
     }
@@ -161,6 +162,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const updated = await prisma.workOrder.update({
       where: { id },
       data: updateData,
+      include: {
+        assignedTo: { select: { name: true, email: true } },
+        asset: { select: { tag: true, name: true, assetDescription: true, buildingCode: true, floor: true, room: true } },
+        request: { select: { ticketNo: true, title: true, description: true, requester: true, attachmentUrls: true, location: true, category: true, createdAt: true } },
+      },
     });
 
     if (input.inventoryUsed !== undefined && input.inventoryUsed !== current.inventoryUsed) {
