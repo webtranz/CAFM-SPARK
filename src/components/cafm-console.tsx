@@ -648,6 +648,18 @@ async function processBulkDeleteBatches<T>(
 }
 const HOUSING_FIELD_CLASS =
   "h-11 rounded-lg border border-slate-200 bg-white px-3 outline-none focus:border-lagoon";
+
+function formatLocalDateTimeInput(date = new Date()) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function addHours(date: Date, hours: number) {
+  const next = new Date(date);
+  next.setHours(next.getHours() + hours);
+  return next;
+}
+
 const HOUSING_NATIONALITIES = [
   "Saudi Arabian",
   "Indian",
@@ -25039,6 +25051,15 @@ function HousingBookingForm({
   const [nationality, setNationality] = useState("");
   const [contactNumber, setContactNumber] = useState("");
   const [gender, setGender] = useState("");
+  const minBookingDateTime = useMemo(() => formatLocalDateTimeInput(), []);
+  const [checkInValue, setCheckInValue] = useState(minBookingDateTime);
+  const [checkOutValue, setCheckOutValue] = useState(() =>
+    formatLocalDateTimeInput(addHours(new Date(), 24)),
+  );
+  const [showCompanyAdd, setShowCompanyAdd] = useState(false);
+  const [newCompanyName, setNewCompanyName] = useState("");
+  const [showDepartmentAdd, setShowDepartmentAdd] = useState(false);
+  const [newDepartmentName, setNewDepartmentName] = useState("");
   const selectResident = (option: SearchableOption) => {
     const resident = residents.find((item) => item.id === option.value);
     setResidentId(option.value);
@@ -25087,20 +25108,92 @@ function HousingBookingForm({
           placeholder="Employee name *"
           className={HOUSING_FIELD_CLASS}
         />
-        <input
-          name="companyName"
-          value={companyName}
-          onChange={(event) => setCompanyName(event.target.value)}
-          placeholder="Company name"
-          className={HOUSING_FIELD_CLASS}
-        />
-        <input
-          name="departmentCode"
-          value={departmentCode}
-          onChange={(event) => setDepartmentCode(event.target.value)}
-          placeholder="Department"
-          className={HOUSING_FIELD_CLASS}
-        />
+        <div className="grid gap-2">
+          <div className="flex gap-2">
+            <input
+              name="companyName"
+              value={companyName}
+              onChange={(event) => setCompanyName(event.target.value)}
+              placeholder="Company name"
+              className={`${HOUSING_FIELD_CLASS} min-w-0 flex-1`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowCompanyAdd((value) => !value)}
+              className="h-11 w-11 rounded-lg border border-emerald-200 bg-emerald-50 text-lg font-black text-emerald-700"
+              aria-label="Add new company"
+              title="Add new company"
+            >
+              +
+            </button>
+          </div>
+          {showCompanyAdd ? (
+            <div className="flex gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-2">
+              <input
+                value={newCompanyName}
+                onChange={(event) => setNewCompanyName(event.target.value)}
+                placeholder="New company name"
+                className={`${HOUSING_FIELD_CLASS} min-w-0 flex-1`}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const value = newCompanyName.trim();
+                  if (!value) return;
+                  setCompanyName(value);
+                  setNewCompanyName("");
+                  setShowCompanyAdd(false);
+                }}
+                className="h-11 rounded-lg bg-lagoon px-4 text-sm font-black text-white"
+              >
+                Add
+              </button>
+            </div>
+          ) : null}
+        </div>
+        <div className="grid gap-2">
+          <div className="flex gap-2">
+            <input
+              name="departmentCode"
+              value={departmentCode}
+              onChange={(event) => setDepartmentCode(event.target.value)}
+              placeholder="Department"
+              className={`${HOUSING_FIELD_CLASS} min-w-0 flex-1`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowDepartmentAdd((value) => !value)}
+              className="h-11 w-11 rounded-lg border border-emerald-200 bg-emerald-50 text-lg font-black text-emerald-700"
+              aria-label="Add new department"
+              title="Add new department"
+            >
+              +
+            </button>
+          </div>
+          {showDepartmentAdd ? (
+            <div className="flex gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-2">
+              <input
+                value={newDepartmentName}
+                onChange={(event) => setNewDepartmentName(event.target.value)}
+                placeholder="New department"
+                className={`${HOUSING_FIELD_CLASS} min-w-0 flex-1`}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const value = newDepartmentName.trim();
+                  if (!value) return;
+                  setDepartmentCode(value);
+                  setNewDepartmentName("");
+                  setShowDepartmentAdd(false);
+                }}
+                className="h-11 rounded-lg bg-lagoon px-4 text-sm font-black text-white"
+              >
+                Add
+              </button>
+            </div>
+          ) : null}
+        </div>
         <select
           name="nationality"
           value={nationality}
@@ -25193,16 +25286,36 @@ function HousingBookingForm({
           placeholder="Bed number / override"
           className={HOUSING_FIELD_CLASS}
         />
-        <input
-          name="checkIn"
-          type="datetime-local"
-          className={HOUSING_FIELD_CLASS}
-        />
-        <input
-          name="checkOut"
-          type="datetime-local"
-          className={HOUSING_FIELD_CLASS}
-        />
+        <label className="grid gap-1 text-xs font-black uppercase tracking-wide text-slate-500">
+          Start Date & Time
+          <input
+            name="checkIn"
+            type="datetime-local"
+            required
+            min={minBookingDateTime}
+            value={checkInValue}
+            onChange={(event) => {
+              const value = event.target.value;
+              setCheckInValue(value);
+              if (checkOutValue && value && checkOutValue < value) {
+                setCheckOutValue(value);
+              }
+            }}
+            className={HOUSING_FIELD_CLASS}
+          />
+        </label>
+        <label className="grid gap-1 text-xs font-black uppercase tracking-wide text-slate-500">
+          End Date & Time
+          <input
+            name="checkOut"
+            type="datetime-local"
+            required
+            min={checkInValue || minBookingDateTime}
+            value={checkOutValue}
+            onChange={(event) => setCheckOutValue(event.target.value)}
+            className={HOUSING_FIELD_CLASS}
+          />
+        </label>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
         <input

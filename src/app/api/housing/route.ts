@@ -584,6 +584,17 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
   }
   const bookingStart = input.checkIn ? new Date(input.checkIn) : new Date();
   const bookingEnd = input.checkOut ? new Date(input.checkOut) : bookingStart;
+  if (Number.isNaN(bookingStart.getTime()) || Number.isNaN(bookingEnd.getTime())) {
+    throw new Error("Valid start and end date/time are required for accommodation bookings.");
+  }
+  const currentMinute = new Date();
+  currentMinute.setSeconds(0, 0);
+  if (bookingStart < currentMinute) {
+    throw new Error("Accommodation booking start date/time cannot be in the past.");
+  }
+  if (bookingEnd < bookingStart) {
+    throw new Error("Accommodation booking end date/time cannot be before the start date/time.");
+  }
   await expireRoomHolds();
   await assertNoOverlappingHold(room.id, bookingStart, bookingEnd);
   const bed = input.bedId ? await prisma.housingBed.findUnique({ where: { id: input.bedId } }) : await prisma.housingBed.findFirst({ where: { roomId: room.id, status: "AVAILABLE" } });
