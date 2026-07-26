@@ -98,6 +98,7 @@ type ConsoleData = {
     gatePasses: any[];
     dailyReports: any[];
     fireDrills: any[];
+    checklists: any[];
   };
   totalEntries?: Record<string, number>;
   shiftRotation?: {
@@ -496,6 +497,7 @@ const moduleGroups: ModuleGroup[] = [
       { id: "security", label: "Gate Pass Issuance", icon: FileText, view: "security-gate-passes" },
       { id: "security", label: "Security Locations", icon: MapPinned, view: "security-locations" },
       { id: "security", label: "Daily Reports", icon: ClipboardCheck, view: "security-daily-reports" },
+      { id: "security", label: "Daily Checklist", icon: ClipboardCheck, view: "security-checklists" },
       { id: "security", label: "Fire Alarm Drill Reports", icon: AlertTriangle, view: "security-fire-drills" },
     ],
   },
@@ -2322,8 +2324,11 @@ export function CafmConsole({
           )}
           {canViewActive && active === "security" && (
             <SecurityModule
-              security={records.security ?? { locations: [], gatePasses: [], dailyReports: [], fireDrills: [] }}
+              security={records.security ?? { locations: [], gatePasses: [], dailyReports: [], fireDrills: [], checklists: [] }}
               view={activeView}
+              teams={records.teams}
+              services={records.services}
+              departments={records.departments}
               saving={saving}
               canApprove={can("security.approve")}
               canManage={can("security.manage") || can("security.create")}
@@ -19613,6 +19618,18 @@ function securityDate(value: unknown) {
   return date.toLocaleString();
 }
 
+const SECURITY_DAILY_CHECKLIST_ITEMS = [
+  { code: "SEC-ACCESS-01", section: "Access Control", item: "Main gate and access control point checked, manned and secure", departmentCode: "SEC", serviceCode: "SECURITY", priority: "HIGH" },
+  { code: "SEC-ACCESS-02", section: "Access Control", item: "Visitor, contractor and vehicle entries verified against gate pass register", departmentCode: "SEC", serviceCode: "SECURITY", priority: "HIGH" },
+  { code: "SEC-CCTV-01", section: "CCTV & Monitoring", item: "CCTV monitoring screens and cameras are operational with no blank critical camera", departmentCode: "ELC", serviceCode: "CCTV", priority: "HIGH" },
+  { code: "SEC-FIRE-01", section: "Fire & Life Safety", item: "Fire alarm panel checked and no active fault, alarm or isolation is pending", departmentCode: "FLS", serviceCode: "FLS", priority: "CRITICAL" },
+  { code: "SEC-PATROL-01", section: "Patrol", item: "Patrol route completed and all abnormal observations recorded", departmentCode: "SEC", serviceCode: "SECURITY", priority: "MEDIUM" },
+  { code: "SEC-LIGHT-01", section: "Lighting", item: "Security lighting, emergency lights and gate lights are operational", departmentCode: "ELC", serviceCode: "LIGHTING", priority: "HIGH" },
+  { code: "SEC-HSK-01", section: "Housekeeping", item: "Security post, access lanes and surrounding areas are clean and unobstructed", departmentCode: "HSK", serviceCode: "HOUSEKEEPING", priority: "MEDIUM" },
+  { code: "SEC-SAFETY-01", section: "Safety", item: "Unsafe conditions, hazards, incidents or near misses are reported", departmentCode: "HSE", serviceCode: "SAFETY", priority: "CRITICAL" },
+  { code: "SEC-EQUIP-01", section: "Equipment", item: "Radios, torches, barriers, keys and security registers are available and serviceable", departmentCode: "SEC", serviceCode: "SECURITY", priority: "MEDIUM" },
+  { code: "SEC-HANDOVER-01", section: "Handover", item: "Shift handover completed with pending actions and open issues listed", departmentCode: "SEC", serviceCode: "SECURITY", priority: "MEDIUM" },
+];
 function printGatePass(pass: any) {
   const popup = window.open("", "_blank", "width=900,height=700");
   if (!popup) return;
@@ -19642,14 +19659,20 @@ function printGatePass(pass: any) {
 function SecurityModule({
   security,
   view,
+  teams,
+  services,
+  departments,
   saving,
   canApprove,
   canManage,
   submitSecurity,
   updateGatePassStatus,
 }: {
-  security: { locations: any[]; gatePasses: any[]; dailyReports: any[]; fireDrills: any[] };
+  security: { locations: any[]; gatePasses: any[]; dailyReports: any[]; fireDrills: any[]; checklists: any[] };
   view: string;
+  teams: any[];
+  services: any[];
+  departments: any[];
   saving: boolean;
   canApprove: boolean;
   canManage: boolean;
@@ -19660,12 +19683,42 @@ function SecurityModule({
   const gatePasses = security.gatePasses ?? [];
   const dailyReports = security.dailyReports ?? [];
   const fireDrills = security.fireDrills ?? [];
+  const checklists = security.checklists ?? [];
   const pending = gatePasses.filter((pass) => pass.status === "PENDING_HELPDESK").length;
   const approved = gatePasses.filter((pass) => pass.status === "APPROVED").length;
   const rejected = gatePasses.filter((pass) => pass.status === "REJECTED").length;
   const today = new Date().toISOString().slice(0, 10);
   const [locationCode, setLocationCode] = useState(locations[0]?.code ?? "");
+  const [checklistItems, setChecklistItems] = useState(() =>
+    SECURITY_DAILY_CHECKLIST_ITEMS.map((item) => ({ ...item, status: "OK", createRequest: false, remarks: "", assignedTeamCode: "" })),
+  );
   const selectedLocation = locations.find((location) => location.code === locationCode);
+  const serviceOptionsFor = (departmentCode?: string) =>
+    services.filter((service) => {
+      const serviceDept = String(service.departmentCode ?? service.department ?? "").toUpperCase();
+      return !departmentCode || !serviceDept || serviceDept.includes(String(departmentCode).toUpperCase());
+    });
+  const teamOptionsFor = (item: any) =>
+    teams.filter((team) => {
+      const haystack = [team.code, team.name, team.departmentCode, team.department, team.serviceCode, team.service, team.locationCode]
+        .filter(Boolean)
+        .join(" ")
+        .toUpperCase();
+      const department = String(item.departmentCode ?? "").toUpperCase();
+      const service = String(item.serviceCode ?? "").toUpperCase();
+      return Boolean((department && haystack.includes(department)) || (service && haystack.includes(service)));
+    });
+  const updateChecklistItem = (code: string, patch: Record<string, any>) => {
+    setChecklistItems((items) =>
+      items.map((item) => {
+        if (item.code !== code) return item;
+        const next = { ...item, ...patch };
+        if (patch.status === "NOT_OK") next.createRequest = true;
+        if (patch.status === "OK" || patch.status === "NA") next.createRequest = false;
+        return next;
+      }),
+    );
+  };
 
   useEffect(() => {
     if (!locationCode && locations[0]?.code) setLocationCode(locations[0].code);
@@ -19676,7 +19729,11 @@ function SecurityModule({
       {location.code} - {location.name}
     </option>
   ));
-
+  const departmentOptions = departments.map((department) => (
+    <option key={department.id ?? department.code ?? department.name} value={department.code ?? department.name}>
+      {department.code ?? department.name} - {department.name ?? department.description ?? department.code}
+    </option>
+  ));
   const gateColumns: [string, string][] = [
     ["passNo", "PASS NO"],
     ["visitorName", "VISITOR"],
@@ -19695,6 +19752,16 @@ function SecurityModule({
     ["visitorCount", "VISITORS"],
     ["vehicleCount", "VEHICLES"],
     ["incidents", "INCIDENTS"],
+  ];
+  const checklistColumns: [string, string][] = [
+    ["checklistNo", "CHECKLIST NO"],
+    ["checklistDate", "DATE"],
+    ["shift", "SHIFT"],
+    ["securityLocationCode", "LOCATION"],
+    ["officerName", "OFFICER"],
+    ["status", "STATUS"],
+    ["totalItems", "TOTAL"],
+    ["failedItems", "FAILED"],
   ];
   const drillColumns: [string, string][] = [
     ["drillNo", "DRILL NO"],
@@ -19724,7 +19791,7 @@ function SecurityModule({
             ["Pending Helpdesk Approval", pending],
             ["Approved Gate Passes", approved],
             ["Rejected Gate Passes", rejected],
-            ["Security Reports", dailyReports.length + fireDrills.length],
+            ["Security Reports", dailyReports.length + fireDrills.length + checklists.length],
           ].map(([label, value]) => (
             <div key={String(label)} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-black uppercase text-slate-500">{label}</p>
@@ -19812,6 +19879,73 @@ function SecurityModule({
         </div>
       )}
 
+      {view === "security-checklists" && (
+        <div className="grid gap-4 xl:grid-cols-[1fr_460px]">
+          <Panel title="Security Daily Checklist" icon={ClipboardCheck}>
+            <ReportButtons type="security-checklists" label="Security daily checklist report" />
+            <DataTable rows={checklists} columns={checklistColumns} />
+          </Panel>
+          <form action={submitSecurity} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <input type="hidden" name="type" value="checklist" />
+            <input type="hidden" name="locationName" value={selectedLocation?.name ?? ""} />
+            <input type="hidden" name="checklistItemsJson" value={JSON.stringify(checklistItems)} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <input type="date" name="checklistDate" defaultValue={today} required className={FACILITY_FIELD_CLASS} />
+              <select name="shift" required className={FACILITY_FIELD_CLASS}><option>Day</option><option>Night</option><option>General</option></select>
+            </div>
+            <select name="securityLocationCode" value={locationCode} onChange={(event) => setLocationCode(event.target.value)} className={FACILITY_FIELD_CLASS}>
+              <option value="">Select security location</option>
+              {locationOptions}
+            </select>
+            <input name="officerName" required placeholder="Security officer name" className={FACILITY_FIELD_CLASS} />
+            <div className="rounded-lg border border-slate-200">
+              <div className="grid grid-cols-[1fr_96px_1fr] gap-2 border-b border-slate-200 bg-slate-50 p-3 text-xs font-black uppercase text-slate-500">
+                <span>Checklist item</span><span>Status</span><span>Action routing</span>
+              </div>
+              <div className="max-h-[560px] overflow-auto p-2">
+                {checklistItems.map((item) => {
+                  const mappedTeams = teamOptionsFor(item);
+                  const mappedServices = serviceOptionsFor(item.departmentCode);
+                  return (
+                    <div key={item.code} className="grid gap-2 border-b border-slate-100 p-2 text-xs last:border-b-0">
+                      <div className="grid gap-2 lg:grid-cols-[1fr_96px_1fr]">
+                        <div><p className="font-black text-navy">{item.section}</p><p className="mt-1 font-bold text-slate-700">{item.item}</p></div>
+                        <select value={item.status} onChange={(event) => updateChecklistItem(item.code, { status: event.target.value })} className={FACILITY_FIELD_CLASS}>
+                          <option value="OK">OK</option><option value="NOT_OK">Not OK</option><option value="NA">N/A</option>
+                        </select>
+                        <div className="grid gap-2">
+                          <select value={item.departmentCode ?? ""} onChange={(event) => updateChecklistItem(item.code, { departmentCode: event.target.value, assignedTeamCode: "" })} className={FACILITY_FIELD_CLASS}>
+                            <option value={item.departmentCode ?? ""}>{item.departmentCode || "Department"}</option>{departmentOptions}
+                          </select>
+                          <select value={item.serviceCode ?? ""} onChange={(event) => updateChecklistItem(item.code, { serviceCode: event.target.value, assignedTeamCode: "" })} className={FACILITY_FIELD_CLASS}>
+                            <option value={item.serviceCode ?? ""}>{item.serviceCode || "Service"}</option>
+                            {mappedServices.map((service) => <option key={service.id ?? service.code ?? service.name} value={service.code ?? service.name}>{service.code ?? service.name} - {service.name ?? service.description ?? service.code}</option>)}
+                          </select>
+                          <select value={item.assignedTeamCode ?? ""} onChange={(event) => updateChecklistItem(item.code, { assignedTeamCode: event.target.value })} className={FACILITY_FIELD_CLASS}>
+                            <option value="">{mappedTeams.length ? "Select mapped service team" : "No mapped team"}</option>
+                            {mappedTeams.map((team) => <option key={team.id ?? team.code ?? team.name} value={team.code ?? team.name}>{team.code ?? team.name} - {team.name ?? team.description ?? team.code}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      {item.status === "NOT_OK" && (
+                        <div className="grid gap-2 rounded-lg bg-amber-50 p-2 sm:grid-cols-[140px_1fr]">
+                          <label className="flex items-center gap-2 font-black text-amber-700"><input type="checkbox" checked={Boolean(item.createRequest)} onChange={(event) => updateChecklistItem(item.code, { createRequest: event.target.checked })} />Create SR</label>
+                          <select value={item.priority ?? "MEDIUM"} onChange={(event) => updateChecklistItem(item.code, { priority: event.target.value })} className={FACILITY_FIELD_CLASS}>
+                            <option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="CRITICAL">Critical</option><option value="LOW">Low</option>
+                          </select>
+                        </div>
+                      )}
+                      <textarea value={item.remarks ?? ""} onChange={(event) => updateChecklistItem(item.code, { remarks: event.target.value })} placeholder="Remarks / defect details" className={TICKET_PLAN_TEXTAREA_CLASS} rows={2} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <textarea name="remarks" placeholder="Overall checklist remarks" className={TICKET_PLAN_TEXTAREA_CLASS} rows={3} />
+            <button disabled={saving || !canManage} className="rounded-lg bg-navy px-4 py-3 font-black text-white disabled:opacity-50">Save Checklist & Create Service Requests</button>
+          </form>
+        </div>
+      )}
       {view === "security-fire-drills" && (
         <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
           <Panel title="Fire Alarm Drill Reports" icon={AlertTriangle}><ReportButtons type="security-fire-drills" label="Fire drill reports" /><DataTable rows={fireDrills} columns={drillColumns} /></Panel>
@@ -26729,6 +26863,7 @@ function Reports() {
             <option value="security-gate-passes">Security Gate Passes</option>
             <option value="security-locations">Security Locations</option>
             <option value="security-daily-reports">Security Daily Reports</option>
+            <option value="security-checklists">Security Daily Checklists</option>
             <option value="security-fire-drills">Security Fire Drill Reports</option>
             <option value="comments">Comments History</option>
             <option value="bulk-upload-jobs">Bulk Upload Jobs</option>

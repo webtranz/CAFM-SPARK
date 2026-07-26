@@ -38,6 +38,7 @@ export const emptyOperatingData = {
     gatePasses: [],
     dailyReports: [],
     fireDrills: [],
+    checklists: [],
   },
   housing: {
     properties: [],

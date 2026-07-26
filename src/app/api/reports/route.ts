@@ -260,6 +260,23 @@ async function reportRows(type: string, filters: ReturnType<typeof reportFilters
     const rows = await prisma.securityFireDrillReport.findMany({ orderBy: { drillDate: "desc" } });
     return rows.map((row) => ({ drillNo: row.drillNo, drillDate: dateValue(row.drillDate), securityLocationCode: row.securityLocationCode ?? "", locationName: row.locationName ?? "", alarmType: row.alarmType, conductedBy: row.conductedBy, evacuationTimeMin: row.evacuationTimeMin ?? "", participants: row.participants ?? "", observations: row.observations ?? "", correctiveActions: row.correctiveActions ?? "", status: row.status, createdBy: row.createdBy ?? "" }));
   }
+  if (type === "security-checklists") {
+    const rows = await prisma.securityChecklistReport.findMany({ orderBy: { checklistDate: "desc" } });
+    return rows.map((row) => ({
+      checklistNo: row.checklistNo,
+      checklistDate: dateValue(row.checklistDate),
+      shift: row.shift,
+      securityLocationCode: row.securityLocationCode ?? "",
+      locationName: row.locationName ?? "",
+      officerName: row.officerName,
+      status: row.status,
+      totalItems: row.totalItems,
+      failedItems: row.failedItems,
+      linkedRequests: Array.isArray(row.linkedRequests) ? row.linkedRequests.map((request: any) => request.ticketNo).join(", ") : "",
+      remarks: row.remarks ?? "",
+      createdBy: row.createdBy ?? "",
+    }));
+  }
   if (type === "total-entries") return totalEntriesReportRows();
   const rows = await prisma.asset.findMany({ include: { building: true, site: true }, orderBy: { tag: "asc" } });
   return rows.map((row) => ({

@@ -1304,6 +1304,28 @@ model SecurityDailyReport {
   @@index([reportDate, securityLocationCode])
 }
 
+
+model SecurityChecklistReport {
+  id                   String   @id @default(cuid())
+  checklistNo          String   @unique
+  checklistDate        DateTime
+  shift                String
+  securityLocationCode String?
+  locationName         String?
+  officerName          String
+  status               String   @default("SUBMITTED")
+  totalItems           Int      @default(0)
+  failedItems          Int      @default(0)
+  items                Json
+  linkedRequests       Json?
+  remarks              String?
+  createdBy            String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([checklistDate, securityLocationCode])
+  @@index([status, checklistDate])
+}
 model SecurityFireDrillReport {
   id                   String   @id @default(cuid())
   drillNo              String   @unique
