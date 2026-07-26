@@ -8596,6 +8596,31 @@ function locationOptionDetail(location: any) {
 
 type SearchableOption = { value: string; label: string };
 
+function mergeSearchableOptions(...optionGroups: SearchableOption[][]) {
+  const merged = new Map<string, SearchableOption>();
+  optionGroups.flat().forEach((option) => {
+    const value = String(option.value || "").trim();
+    if (!value) return;
+    const key = value.toLowerCase();
+    if (!merged.has(key)) merged.set(key, { value, label: option.label || value });
+  });
+  return Array.from(merged.values()).sort((first, second) =>
+    first.label.localeCompare(second.label, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }),
+  );
+}
+
+function uniqueTextOptions(rows: any[], valueFor: (row: any) => unknown) {
+  return mergeSearchableOptions(
+    rows.map((row) => {
+      const value = String(valueFor(row) || "").trim();
+      return { value, label: value };
+    }),
+  );
+}
+
 function uniqueLocationOptions(
   rows: any[],
   valueFor: (location: any) => string,
@@ -23375,6 +23400,7 @@ function HousingOperations({
               rooms={rooms}
               beds={housing.beds ?? []}
               residents={housing.residents ?? []}
+              bookings={bookings}
               holds={holds}
               saving={saving}
               onSubmit={async (formData) => {
@@ -25006,6 +25032,7 @@ function HousingBookingForm({
   rooms,
   beds,
   residents,
+  bookings,
   holds,
   saving,
   onSubmit,
@@ -25013,6 +25040,7 @@ function HousingBookingForm({
   rooms: any[];
   beds: any[];
   residents: any[];
+  bookings: any[];
   holds: any[];
   saving: boolean;
   onSubmit: (formData: FormData) => void;
@@ -25042,6 +25070,22 @@ function HousingBookingForm({
       })),
     [residents],
   );
+  const sourceCompanyOptions = useMemo(
+    () =>
+      mergeSearchableOptions(
+        uniqueTextOptions(residents, (resident) => resident.companyName || resident.companyId),
+        uniqueTextOptions(bookings, (booking) => booking.companyName || booking.companyId),
+      ),
+    [bookings, residents],
+  );
+  const sourceDepartmentOptions = useMemo(
+    () =>
+      mergeSearchableOptions(
+        uniqueTextOptions(residents, (resident) => resident.departmentCode),
+        uniqueTextOptions(bookings, (booking) => booking.departmentCode),
+      ),
+    [bookings, residents],
+  );
   const [residentId, setResidentId] = useState("");
   const [residentSearch, setResidentSearch] = useState("");
   const [employeeId, setEmployeeId] = useState("");
@@ -25058,8 +25102,18 @@ function HousingBookingForm({
   );
   const [showCompanyAdd, setShowCompanyAdd] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
+  const [customCompanyOptions, setCustomCompanyOptions] = useState<SearchableOption[]>([]);
   const [showDepartmentAdd, setShowDepartmentAdd] = useState(false);
   const [newDepartmentName, setNewDepartmentName] = useState("");
+  const [customDepartmentOptions, setCustomDepartmentOptions] = useState<SearchableOption[]>([]);
+  const companyOptions = useMemo(
+    () => mergeSearchableOptions(sourceCompanyOptions, customCompanyOptions),
+    [sourceCompanyOptions, customCompanyOptions],
+  );
+  const departmentOptions = useMemo(
+    () => mergeSearchableOptions(sourceDepartmentOptions, customDepartmentOptions),
+    [sourceDepartmentOptions, customDepartmentOptions],
+  );
   const selectResident = (option: SearchableOption) => {
     const resident = residents.find((item) => item.id === option.value);
     setResidentId(option.value);
@@ -25110,12 +25164,14 @@ function HousingBookingForm({
         />
         <div className="grid gap-2">
           <div className="flex gap-2">
-            <input
-              name="companyName"
+            <input type="hidden" name="companyName" value={companyName} />
+            <SearchableDropdownField
               value={companyName}
-              onChange={(event) => setCompanyName(event.target.value)}
+              options={companyOptions}
               placeholder="Company name"
-              className={`${HOUSING_FIELD_CLASS} min-w-0 flex-1`}
+              className="min-w-0 flex-1"
+              onInput={setCompanyName}
+              onSelect={(option) => setCompanyName(option.value)}
             />
             <button
               type="button"
@@ -25141,6 +25197,7 @@ function HousingBookingForm({
                   const value = newCompanyName.trim();
                   if (!value) return;
                   setCompanyName(value);
+                  setCustomCompanyOptions((current) => mergeSearchableOptions(current, [{ value, label: value }]));
                   setNewCompanyName("");
                   setShowCompanyAdd(false);
                 }}
@@ -25153,12 +25210,14 @@ function HousingBookingForm({
         </div>
         <div className="grid gap-2">
           <div className="flex gap-2">
-            <input
-              name="departmentCode"
+            <input type="hidden" name="departmentCode" value={departmentCode} />
+            <SearchableDropdownField
               value={departmentCode}
-              onChange={(event) => setDepartmentCode(event.target.value)}
+              options={departmentOptions}
               placeholder="Department"
-              className={`${HOUSING_FIELD_CLASS} min-w-0 flex-1`}
+              className="min-w-0 flex-1"
+              onInput={setDepartmentCode}
+              onSelect={(option) => setDepartmentCode(option.value)}
             />
             <button
               type="button"
@@ -25184,6 +25243,7 @@ function HousingBookingForm({
                   const value = newDepartmentName.trim();
                   if (!value) return;
                   setDepartmentCode(value);
+                  setCustomDepartmentOptions((current) => mergeSearchableOptions(current, [{ value, label: value }]));
                   setNewDepartmentName("");
                   setShowDepartmentAdd(false);
                 }}
