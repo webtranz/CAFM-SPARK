@@ -19692,33 +19692,48 @@ function SecurityModule({
   const [checklistItems, setChecklistItems] = useState(() =>
     SECURITY_DAILY_CHECKLIST_ITEMS.map((item) => ({ ...item, status: "OK", createRequest: false, remarks: "", assignedTeamCode: "" })),
   );
+  const [newChecklistItem, setNewChecklistItem] = useState({ section: "", item: "", departmentCode: "SEC" });
   const selectedLocation = locations.find((location) => location.code === locationCode);
-  const serviceOptionsFor = (departmentCode?: string) =>
-    services.filter((service) => {
-      const serviceDept = String(service.departmentCode ?? service.department ?? "").toUpperCase();
-      return !departmentCode || !serviceDept || serviceDept.includes(String(departmentCode).toUpperCase());
-    });
-  const teamOptionsFor = (item: any) =>
-    teams.filter((team) => {
-      const haystack = [team.code, team.name, team.departmentCode, team.department, team.serviceCode, team.service, team.locationCode]
-        .filter(Boolean)
-        .join(" ")
-        .toUpperCase();
-      const department = String(item.departmentCode ?? "").toUpperCase();
-      const service = String(item.serviceCode ?? "").toUpperCase();
-      return Boolean((department && haystack.includes(department)) || (service && haystack.includes(service)));
-    });
   const updateChecklistItem = (code: string, patch: Record<string, any>) => {
     setChecklistItems((items) =>
       items.map((item) => {
         if (item.code !== code) return item;
         const next = { ...item, ...patch };
-        if (patch.status === "OK" || patch.status === "NA") next.createRequest = false;
+        if (patch.status === "OK" || patch.status === "NA") {
+          next.createRequest = false;
+          next.remarks = "";
+        }
         return next;
       }),
     );
   };
 
+  const addChecklistItem = () => {
+    const itemText = newChecklistItem.item.trim();
+    if (!itemText) return;
+    const section = newChecklistItem.section.trim() || "Custom";
+    const departmentCode = newChecklistItem.departmentCode || "SEC";
+    setChecklistItems((items) => [
+      ...items,
+      {
+        code: `SEC-CUSTOM-${Date.now()}`,
+        section,
+        item: itemText,
+        departmentCode,
+        serviceCode: "SECURITY",
+        priority: "MEDIUM",
+        status: "OK",
+        createRequest: false,
+        remarks: "",
+        assignedTeamCode: "",
+      },
+    ]);
+    setNewChecklistItem({ section: "", item: "", departmentCode: "SEC" });
+  };
+
+  const deleteChecklistItem = (code: string) => {
+    setChecklistItems((items) => items.filter((item) => item.code !== code));
+  };
   useEffect(() => {
     if (!locationCode && locations[0]?.code) setLocationCode(locations[0].code);
   }, [locationCode, locations]);
@@ -19801,7 +19816,7 @@ function SecurityModule({
       </div>
 
       {(view === "security-dashboard" || view === "security-gate-passes") && (
-        <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+        <div className="grid gap-4">
           <Panel title="Gate Pass Issuance" icon={FileText}>
             <ReportButtons type="security-gate-passes" label="Gate passes report" />
             <div className="mb-3 inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">Helpdesk approval required</div>
@@ -19821,7 +19836,7 @@ function SecurityModule({
               </div>
             )}
           </Panel>
-          <form action={submitSecurity} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <form action={submitSecurity} className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <input type="hidden" name="type" value="gatePass" />
             <input name="requesterName" required placeholder="Requester name" className={FACILITY_FIELD_CLASS} />
             <input name="visitorName" required placeholder="Visitor name" className={FACILITY_FIELD_CLASS} />
@@ -19846,9 +19861,9 @@ function SecurityModule({
       )}
 
       {view === "security-locations" && (
-        <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+        <div className="grid gap-4">
           <Panel title="Security Locations" icon={MapPinned}><ReportButtons type="security-locations" label="Security locations report" /><DataTable rows={locations} columns={locationColumns} /></Panel>
-          <form action={submitSecurity} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <form action={submitSecurity} className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <input type="hidden" name="type" value="location" />
             <input name="code" required placeholder="Security location code" className={FACILITY_FIELD_CLASS} />
             <input name="name" required placeholder="Security location name" className={FACILITY_FIELD_CLASS} />
@@ -19861,9 +19876,9 @@ function SecurityModule({
       )}
 
       {view === "security-daily-reports" && (
-        <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+        <div className="grid gap-4">
           <Panel title="Security Daily Reports" icon={ClipboardCheck}><ReportButtons type="security-daily-reports" label="Security daily reports" /><DataTable rows={dailyReports} columns={reportColumns} /></Panel>
-          <form action={submitSecurity} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <form action={submitSecurity} className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <input type="hidden" name="type" value="dailyReport" />
             <input type="date" name="reportDate" defaultValue={today} required className={FACILITY_FIELD_CLASS} />
             <select name="shift" required className={FACILITY_FIELD_CLASS}><option>Day</option><option>Night</option><option>General</option></select>
@@ -19879,12 +19894,12 @@ function SecurityModule({
       )}
 
       {view === "security-checklists" && (
-        <div className="grid gap-4 xl:grid-cols-[1fr_460px]">
+        <div className="grid gap-4">
           <Panel title="Security Daily Checklist" icon={ClipboardCheck}>
             <ReportButtons type="security-checklists" label="Security daily checklist report" />
             <DataTable rows={checklists} columns={checklistColumns} />
           </Panel>
-          <form action={submitSecurity} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <form action={submitSecurity} className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <input type="hidden" name="type" value="checklist" />
             <input type="hidden" name="locationName" value={selectedLocation?.name ?? ""} />
             <input type="hidden" name="checklistItemsJson" value={JSON.stringify(checklistItems)} />
@@ -19897,14 +19912,38 @@ function SecurityModule({
               {locationOptions}
             </select>
             <input name="officerName" required placeholder="Security officer name" className={FACILITY_FIELD_CLASS} />
+            <div className="grid gap-3 rounded-lg border border-emerald-100 bg-emerald-50/40 p-3 md:grid-cols-[180px_1fr_190px_auto]">
+              <input
+                value={newChecklistItem.section}
+                onChange={(event) => setNewChecklistItem((current) => ({ ...current, section: event.target.value }))}
+                placeholder="Checklist section"
+                className={FACILITY_FIELD_CLASS}
+              />
+              <input
+                value={newChecklistItem.item}
+                onChange={(event) => setNewChecklistItem((current) => ({ ...current, item: event.target.value }))}
+                placeholder="New checklist item"
+                className={FACILITY_FIELD_CLASS}
+              />
+              <select
+                value={newChecklistItem.departmentCode}
+                onChange={(event) => setNewChecklistItem((current) => ({ ...current, departmentCode: event.target.value }))}
+                className={FACILITY_FIELD_CLASS}
+              >
+                {departmentOptions}
+              </select>
+              <button type="button" onClick={addChecklistItem} className="rounded-lg bg-lagoon px-4 py-2 text-sm font-black text-white">
+                + Add Checklist
+              </button>
+            </div>
             <div className="rounded-lg border border-slate-200">
-              <div className="grid grid-cols-[1fr_110px_1fr_120px] gap-2 border-b border-slate-200 bg-slate-50 p-3 text-xs font-black uppercase text-slate-500">
-                <span>Checklist item</span><span>Status</span><span>Department</span><span>Create SR</span>
+              <div className="grid gap-2 border-b border-slate-200 bg-slate-50 p-3 text-xs font-black uppercase text-slate-500 lg:grid-cols-[minmax(360px,1fr)_120px_220px_140px_110px]">
+                <span>Checklist item</span><span>Status</span><span>Department</span><span>Create SR</span><span>Delete</span>
               </div>
-              <div className="max-h-[560px] overflow-auto p-2">
+              <div className="max-h-[68vh] overflow-auto p-2">
                 {checklistItems.map((item) => (
                   <div key={item.code} className="grid gap-2 border-b border-slate-100 p-2 text-xs last:border-b-0">
-                    <div className="grid items-start gap-2 lg:grid-cols-[1fr_110px_1fr_120px]">
+                    <div className="grid items-start gap-2 lg:grid-cols-[minmax(360px,1fr)_120px_220px_140px_110px]">
                       <div>
                         <p className="font-black text-navy">{item.section}</p>
                         <p className="mt-1 font-bold text-slate-700">{item.item}</p>
@@ -19921,13 +19960,25 @@ function SecurityModule({
                         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-bold text-slate-400">-</div>
                       )}
                       {item.status === "NOT_OK" ? (
-                        <button type="button" onClick={() => updateChecklistItem(item.code, { createRequest: true })} className={item.createRequest ? "rounded-lg bg-lagoon px-3 py-2 font-black text-white" : "rounded-lg border border-lagoon px-3 py-2 font-black text-lagoon"}>
+                        <button type="button" onClick={() => updateChecklistItem(item.code, { createRequest: !item.createRequest })} className={item.createRequest ? "rounded-lg bg-lagoon px-3 py-2 font-black text-white" : "rounded-lg border border-lagoon px-3 py-2 font-black text-lagoon"}>
                           {item.createRequest ? "SR Ready" : "Create SR"}
                         </button>
                       ) : (
                         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-center font-bold text-slate-400">-</div>
                       )}
+                      <button type="button" onClick={() => deleteChecklistItem(item.code)} className="rounded-lg border border-red-200 px-3 py-2 font-black text-red-600">
+                        Delete
+                      </button>
                     </div>
+                    {item.status === "NOT_OK" && (
+                      <textarea
+                        value={item.remarks ?? ""}
+                        onChange={(event) => updateChecklistItem(item.code, { remarks: event.target.value })}
+                        placeholder="SR remarks / defect details. These remarks will appear in the created Service Request."
+                        className={`${TICKET_PLAN_TEXTAREA_CLASS} min-h-[72px]`}
+                        rows={2}
+                      />
+                    )}
                   </div>
                 ))}
               </div>
@@ -19937,9 +19988,9 @@ function SecurityModule({
         </div>
       )}
       {view === "security-fire-drills" && (
-        <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+        <div className="grid gap-4">
           <Panel title="Fire Alarm Drill Reports" icon={AlertTriangle}><ReportButtons type="security-fire-drills" label="Fire drill reports" /><DataTable rows={fireDrills} columns={drillColumns} /></Panel>
-          <form action={submitSecurity} className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <form action={submitSecurity} className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <input type="hidden" name="type" value="fireDrill" />
             <input type="datetime-local" name="drillDate" defaultValue={`${today}T09:00`} required className={FACILITY_FIELD_CLASS} />
             <select name="securityLocationCode" className={FACILITY_FIELD_CLASS}><option value="">Select security location</option>{locationOptions}</select>
