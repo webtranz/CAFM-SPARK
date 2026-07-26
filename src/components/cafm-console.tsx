@@ -1350,25 +1350,30 @@ export function CafmConsole({
     refresh = true,
   ) {
     setSaving(true);
-    const payload = Object.fromEntries(formData.entries());
-    const response = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const result = await response.json();
-    const linkedTickets = Array.isArray(result?.linkedRequests)
-      ? result.linkedRequests.map((request: any) => request.ticketNo).filter(Boolean)
-      : [];
-    setToast(
-      response.ok
-        ? linkedTickets.length
-          ? `${successLabel} saved. Created SR: ${linkedTickets.join(", ")}.`
-          : `${successLabel} saved.`
-        : cleanMessage(result.message ?? "Action failed."),
-    );
-    if (response.ok && refresh) await refreshData();
-    setSaving(false);
+    try {
+      const payload = Object.fromEntries(formData.entries());
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      const linkedTickets = Array.isArray(result?.linkedRequests)
+        ? result.linkedRequests.map((request: any) => request.ticketNo).filter(Boolean)
+        : [];
+      setToast(
+        response.ok
+          ? linkedTickets.length
+            ? `${successLabel} saved. Created SR: ${linkedTickets.join(", ")}.`
+            : `${successLabel} saved.`
+          : cleanMessage(result.message ?? "Action failed."),
+      );
+      if (response.ok && refresh) await refreshData();
+    } catch (error) {
+      setToast(cleanMessage(error instanceof Error ? error.message : "Action failed."));
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function bulkUpload(formData: FormData) {
@@ -2336,7 +2341,7 @@ export function CafmConsole({
               departments={records.departments}
               saving={saving}
               canApprove={can("security.approve")}
-              canManage={can("security.manage") || can("security.create")}
+              canManage={isAdmin || can("security.manage") || can("security.create") || can("security.edit") || can("security.approve")}
               submitSecurity={(formData) => postRecord("/api/security", formData, "Security record")}
               updateGatePassStatus={async (id, status, rejectionReason) => {
                 setSaving(true);
@@ -19681,7 +19686,7 @@ function SecurityModule({
   saving: boolean;
   canApprove: boolean;
   canManage: boolean;
-  submitSecurity: (formData: FormData) => void;
+  submitSecurity: (formData: FormData) => Promise<void> | void;
   updateGatePassStatus: (id: string, status: string, rejectionReason?: string) => Promise<void>;
 }) {
   const locations = security.locations ?? [];
@@ -19745,14 +19750,14 @@ function SecurityModule({
     setChecklistItems((items) =>
       items.map((item) => ({ ...item, status: "OK", createRequest: false, remarks: "" })),
     );
-    setChecklistReviewOpen(true);
+    window.setTimeout(() => setChecklistReviewOpen(true), 0);
   };
 
-  const submitReviewedChecklist = () => {
+  const submitReviewedChecklist = async () => {
     if (!checklistFormRef.current) return;
     const formData = new FormData(checklistFormRef.current);
     formData.set("checklistItemsJson", JSON.stringify(checklistItems));
-    submitSecurity(formData);
+    await Promise.resolve(submitSecurity(formData));
     setChecklistReviewOpen(false);
   };
   useEffect(() => {
@@ -19857,8 +19862,12 @@ function SecurityModule({
               </div>
             )}
           </Panel>
-          <form action={submitSecurity} className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <form action={submitSecurity} className="order-first grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <input type="hidden" name="type" value="gatePass" />
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-slate-50 p-3">
+              <div><p className="text-xs font-black uppercase text-slate-500">Gate pass request</p><p className="text-sm font-bold text-navy">Fill the details and create for Helpdesk approval.</p></div>
+              <button type="submit" disabled={saving || !canManage} className="rounded-lg bg-navy px-4 py-2 font-black text-white disabled:opacity-50">Create Gate Pass</button>
+            </div>
             <input name="requesterName" required placeholder="Requester name" className={FACILITY_FIELD_CLASS} />
             <input name="visitorName" required placeholder="Visitor name" className={FACILITY_FIELD_CLASS} />
             <input name="visitorCompany" placeholder="Visitor company" className={FACILITY_FIELD_CLASS} />
@@ -19884,8 +19893,12 @@ function SecurityModule({
       {view === "security-locations" && (
         <div className="grid gap-4">
           <Panel title="Security Locations" icon={MapPinned}><ReportButtons type="security-locations" label="Security locations report" /><DataTable rows={locations} columns={locationColumns} /></Panel>
-          <form action={submitSecurity} className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <form action={submitSecurity} className="order-first grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <input type="hidden" name="type" value="location" />
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-slate-50 p-3">
+              <div><p className="text-xs font-black uppercase text-slate-500">Security location</p><p className="text-sm font-bold text-navy">Create or update security posts and linked CAFM locations.</p></div>
+              <button type="submit" disabled={saving || !canManage} className="rounded-lg bg-navy px-4 py-2 font-black text-white disabled:opacity-50">Save Location</button>
+            </div>
             <input name="code" required placeholder="Security location code" className={FACILITY_FIELD_CLASS} />
             <input name="name" required placeholder="Security location name" className={FACILITY_FIELD_CLASS} />
             <input name="gateName" placeholder="Gate name / post" className={FACILITY_FIELD_CLASS} />
@@ -19899,8 +19912,12 @@ function SecurityModule({
       {view === "security-daily-reports" && (
         <div className="grid gap-4">
           <Panel title="Security Daily Reports" icon={ClipboardCheck}><ReportButtons type="security-daily-reports" label="Security daily reports" /><DataTable rows={dailyReports} columns={reportColumns} /></Panel>
-          <form action={submitSecurity} className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <form action={submitSecurity} className="order-first grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <input type="hidden" name="type" value="dailyReport" />
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-slate-50 p-3">
+              <div><p className="text-xs font-black uppercase text-slate-500">Daily security report</p><p className="text-sm font-bold text-navy">Record shift activity, incidents and handover notes.</p></div>
+              <button type="submit" disabled={saving || !canManage} className="rounded-lg bg-navy px-4 py-2 font-black text-white disabled:opacity-50">Save Daily Report</button>
+            </div>
             <input type="date" name="reportDate" defaultValue={today} required className={FACILITY_FIELD_CLASS} />
             <select name="shift" required className={FACILITY_FIELD_CLASS}><option>Day</option><option>Night</option><option>General</option></select>
             <select name="securityLocationCode" className={FACILITY_FIELD_CLASS}><option value="">Select security location</option>{locationOptions}</select>
@@ -19934,11 +19951,18 @@ function SecurityModule({
               event.preventDefault();
               setChecklistReviewOpen(true);
             }}
-            className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+            className="order-first grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
           >
             <input type="hidden" name="type" value="checklist" />
             <input type="hidden" name="locationName" value={selectedLocation?.name ?? ""} />
             <input type="hidden" name="checklistItemsJson" value={JSON.stringify(checklistItems)} />
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-slate-50 p-3">
+              <div><p className="text-xs font-black uppercase text-slate-500">Security checklist action</p><p className="text-sm font-bold text-navy">Review checklist, create SRs for failed items, then save.</p></div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" disabled={saving || !canManage} onClick={markChecklistDone} className="rounded-lg border border-lagoon bg-emerald-50 px-4 py-2 font-black text-lagoon disabled:opacity-50">Check Done</button>
+                <button type="submit" disabled={saving || !canManage} className="rounded-lg bg-navy px-4 py-2 font-black text-white disabled:opacity-50">Review & Save</button>
+              </div>
+            </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <input type="date" name="checklistDate" defaultValue={today} required className={FACILITY_FIELD_CLASS} />
               <select name="shift" required className={FACILITY_FIELD_CLASS}><option>Day</option><option>Night</option><option>General</option></select>
@@ -20073,8 +20097,12 @@ function SecurityModule({
       {view === "security-fire-drills" && (
         <div className="grid gap-4">
           <Panel title="Fire Alarm Drill Reports" icon={AlertTriangle}><ReportButtons type="security-fire-drills" label="Fire drill reports" /><DataTable rows={fireDrills} columns={drillColumns} /></Panel>
-          <form action={submitSecurity} className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <form action={submitSecurity} className="order-first grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
             <input type="hidden" name="type" value="fireDrill" />
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-slate-50 p-3">
+              <div><p className="text-xs font-black uppercase text-slate-500">Fire alarm drill</p><p className="text-sm font-bold text-navy">Save drill results, observations and corrective actions.</p></div>
+              <button type="submit" disabled={saving || !canManage} className="rounded-lg bg-navy px-4 py-2 font-black text-white disabled:opacity-50">Save Fire Drill</button>
+            </div>
             <input type="datetime-local" name="drillDate" defaultValue={`${today}T09:00`} required className={FACILITY_FIELD_CLASS} />
             <select name="securityLocationCode" className={FACILITY_FIELD_CLASS}><option value="">Select security location</option>{locationOptions}</select>
             <input name="alarmType" required placeholder="Alarm type" className={FACILITY_FIELD_CLASS} />

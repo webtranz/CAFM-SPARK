@@ -172,6 +172,15 @@ async function nextCode(prefix: string, model: "gatePass" | "dailyReport" | "fir
   return `${prefix}-${String(count + 1).padStart(6, "0")}`;
 }
 
+async function nextServiceRequestTicketNo(tx: any, reserveOffset = 0) {
+  const count = await tx.serviceRequest.count();
+  for (let attempt = 0; attempt < 10000; attempt += 1) {
+    const candidate = `SR-${String(count + 24001 + reserveOffset + attempt).padStart(5, "0")}`;
+    const existing = await tx.serviceRequest.findUnique({ where: { ticketNo: candidate }, select: { id: true } });
+    if (!existing) return candidate;
+  }
+  return `SR-${Date.now()}-${reserveOffset}`;
+}
 async function createChecklistServiceRequest(tx: any, item: ChecklistItem, input: SecurityInput, actor: string, ticketNo: string, checklistNo: string) {
   const priority = validPriority(item.priority);
   const slaHours = slaByPriority[priority];
@@ -313,13 +322,12 @@ async function saveSecurityRecord(input: SecurityInput, actor: string) {
     if (!items.length) throw new Error("At least one checklist item is required.");
     const failedItems = items.filter((item) => item.status === "NOT_OK").length;
     const actionableItems = items.filter((item) => item.status === "NOT_OK" && item.createRequest);
-    const startingTicketCount = await prisma.serviceRequest.count();
 
     return prisma.$transaction(async (tx) => {
       const linkedRequests = [];
       for (let index = 0; index < actionableItems.length; index += 1) {
         const item = actionableItems[index];
-        const ticketNo = `SR-${String(startingTicketCount + 24001 + index).padStart(5, "0")}`;
+        const ticketNo = await nextServiceRequestTicketNo(tx, index);
         const request = await createChecklistServiceRequest(tx, item, input, actor, ticketNo, checklistNo);
         linkedRequests.push({ itemCode: item.code, ticketNo: request.ticketNo, id: request.id, departmentCode: item.departmentCode ?? null });
       }
