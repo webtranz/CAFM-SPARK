@@ -8245,6 +8245,93 @@ function hierarchyCodeSet(values: unknown[]) {
 }
 
 
+
+type ParsedLocationHierarchy = {
+  site: string;
+  building: string;
+  floor: string;
+  room: string;
+  roomCode: string;
+};
+
+function parseServiceLocationHierarchy(...values: unknown[]): ParsedLocationHierarchy {
+  const parsed: ParsedLocationHierarchy = {
+    site: "",
+    building: "",
+    floor: "",
+    room: "",
+    roomCode: "",
+  };
+  const texts = values
+    .flatMap((value) => String(value || "").split(/[>/|,;\s]+/))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const normalizedTexts = [...texts, values.map((value) => String(value || "")).join(" ")]
+    .map(normalizedHierarchyCode)
+    .filter((value) => value.length > 1);
+
+  for (const text of normalizedTexts) {
+    if (!parsed.site && /L?FBC/.test(text)) parsed.site = "LFBC";
+    if (!parsed.building) {
+      const buildingMatch =
+        text.match(/L?FBC([A-Z]\d+)/) ||
+        text.match(/\b([A-Z]\d+)(?=F\d|R\d|ER\d|MR\d|FR\d|$)/);
+      if (buildingMatch?.[1]) parsed.building = buildingMatch[1];
+    }
+    if (!parsed.floor) {
+      const floorMatch = text.match(/(F\d+)(?=[A-Z]*R?\d|ER\d|MR\d|FR\d|$)/);
+      if (floorMatch?.[1]) parsed.floor = floorMatch[1];
+    }
+    if (!parsed.room) {
+      const roomMatch =
+        text.match(/(R\d+[A-Z]?)(?![A-Z0-9])/) ||
+        text.match(/((?:ER|MR|FR|OR|CR|KIT|LUG)\d+[A-Z]?)(?![A-Z0-9])/);
+      if (roomMatch?.[1]) parsed.room = roomMatch[1];
+    }
+    if (!parsed.roomCode) {
+      const compactRoomMatch = text.match(/((?:FBC)?[A-Z]\d+F\d+(?:[A-Z]{0,3})?R?\d+[A-Z]?)/);
+      if (compactRoomMatch?.[1]) parsed.roomCode = compactRoomMatch[1];
+    }
+  }
+
+  if (!parsed.room && parsed.roomCode) {
+    const roomOnly = parsed.roomCode.match(/(R\d+[A-Z]?)$/) || parsed.roomCode.match(/([A-Z]{1,3}\d+[A-Z]?)$/);
+    if (roomOnly?.[1]) parsed.room = roomOnly[1];
+  }
+  return parsed;
+}
+
+function hierarchyPartMatches(selected: string, asset: string) {
+  return !selected || !asset || selected === asset;
+}
+
+function assetParsedHierarchy(asset: any) {
+  return parseServiceLocationHierarchy(
+    asset.locationCode,
+    asset.locationDesc,
+    asset.room,
+    asset.floor,
+    asset.buildingCode,
+    asset.siteCode,
+    asset.sourceLocation,
+    asset.sourceEquipmentLocation,
+  );
+}
+
+function selectedParsedHierarchy(location: string, selectedLocation?: any) {
+  return parseServiceLocationHierarchy(
+    selectedLocation?.code,
+    selectedLocation?.description,
+    selectedLocation?.site,
+    selectedLocation?.building,
+    selectedLocation?.floor,
+    selectedLocation?.room,
+    selectedLocation?.parentLocation,
+    selectedLocation?.zone,
+    location,
+  );
+}
+
 function selectedLocationStrictCodes(location: string, selectedLocation?: any) {
   const selectedValues = selectedLocation
     ? [
@@ -8268,21 +8355,12 @@ function strictAssetMatchesSelectedHierarchy(
   location: string,
   selectedLocation?: any,
 ) {
-  const selectedCode = normalizedHierarchyCode(selectedLocation?.code);
-  const selectedRoom = normalizedHierarchyCode(selectedLocation?.room);
-  const selectedFloor = normalizedHierarchyCode(selectedLocation?.floor);
-  const selectedBuilding = normalizedHierarchyCode(selectedLocation?.building);
-  const selectedSite = normalizedHierarchyCode(selectedLocation?.site);
+  const selectedCode = normalizedHierarchyCode(selectedLocation?.code || location);
   const selectedClass = String(
     selectedLocation?.locationClass || selectedLocation?.type || "",
   ).toUpperCase();
-  const assetLocationCode = normalizedHierarchyCode(asset.locationCode);
-  const assetRoom = normalizedHierarchyCode(asset.room);
-  const assetFloor = normalizedHierarchyCode(asset.floor);
-  const assetBuilding = normalizedHierarchyCode(
-    asset.buildingCode || asset.building?.code || asset.building?.name,
-  );
-  const assetSite = normalizedHierarchyCode(asset.siteCode || asset.site?.name);
+  const selected = selectedParsedHierarchy(location, selectedLocation);
+  const assetHierarchy = assetParsedHierarchy(asset);
   const assetDirectCodes = hierarchyCodeSet([
     asset.locationCode,
     asset.room,
@@ -8294,6 +8372,9 @@ function strictAssetMatchesSelectedHierarchy(
       asset.locationCode,
       asset.locationDesc,
       asset.room,
+      asset.floor,
+      asset.buildingCode,
+      asset.siteCode,
       asset.sourceLocation,
       asset.sourceEquipmentLocation,
     ]
@@ -8302,49 +8383,51 @@ function strictAssetMatchesSelectedHierarchy(
   );
 
   const isRoomScope =
-    Boolean(selectedRoom) ||
+    Boolean(selected.room || selected.roomCode) ||
     selectedClass.includes("ROOM") ||
-    /R\d+$/i.test(selectedCode) ||
-    /ROOM/i.test(String(selectedLocation?.description || ""));
-  const isFloorScope = Boolean(selectedFloor) && !isRoomScope;
-  const isBuildingScope = Boolean(selectedBuilding) && !isFloorScope && !isRoomScope;
+    /R\d+[A-Z]?$/i.test(selectedCode) ||
+    /ROOM/i.test(String(selectedLocation?.description || location || ""));
+  const isFloorScope = Boolean(selected.floor) && !isRoomScope;
+  const isBuildingScope = Boolean(selected.building) && !isFloorScope && !isRoomScope;
 
   if (isRoomScope) {
-    return Boolean(
-      (selectedCode &&
-        (assetDirectCodes.has(selectedCode) ||
-          assetLocationText.includes(selectedCode))) ||
-        (selectedRoom &&
-          (assetDirectCodes.has(selectedRoom) ||
-            assetLocationText.includes(selectedRoom))),
+    const exactCodeMatch = Boolean(
+      (selectedCode && assetDirectCodes.has(selectedCode)) ||
+        (selected.roomCode && assetLocationText.includes(selected.roomCode)) ||
+        (selected.room && assetDirectCodes.has(selected.room)),
     );
+    const parsedRoomMatch = Boolean(
+      selected.room &&
+        assetHierarchy.room === selected.room &&
+        hierarchyPartMatches(selected.floor, assetHierarchy.floor) &&
+        hierarchyPartMatches(selected.building, assetHierarchy.building),
+    );
+    return exactCodeMatch || parsedRoomMatch;
   }
 
   if (isFloorScope) {
     return Boolean(
-      (selectedCode && assetLocationCode === selectedCode) ||
-        (selectedFloor &&
-          assetFloor === selectedFloor &&
-          (!selectedBuilding || assetBuilding === selectedBuilding)),
+      (selectedCode && assetDirectCodes.has(selectedCode)) ||
+        (assetHierarchy.floor === selected.floor &&
+          hierarchyPartMatches(selected.building, assetHierarchy.building)),
     );
   }
 
   if (isBuildingScope) {
     return Boolean(
-      (selectedCode && assetLocationCode === selectedCode) ||
-        (selectedBuilding && assetBuilding === selectedBuilding),
+      (selectedCode && assetDirectCodes.has(selectedCode)) ||
+        assetHierarchy.building === selected.building,
     );
   }
 
-  if (selectedSite) {
-    return assetSite === selectedSite || assetLocationCode === selectedSite;
+  if (selected.site) {
+    return assetHierarchy.site === selected.site;
   }
 
   const selectedCodes = selectedLocationStrictCodes(location, selectedLocation);
   if (!selectedCodes.size) return true;
   return Array.from(selectedCodes).some((code) => assetDirectCodes.has(code));
 }
-
 function assetCategoryValue(asset: any) {
   if (!asset) return "";
   return (
@@ -8375,12 +8458,13 @@ function assetLocationLabel(asset: any) {
 }
 function serviceRequestLocationHierarchySegments(location?: any) {
   if (!location) return [] as { label: string; value: string }[];
+  const parsed = selectedParsedHierarchy("", location);
   return [
-    ["Site", location.site],
+    ["Site", location.site || parsed.site],
     ["Parent / SP", location.parentLocation || location.zone],
-    ["Building", location.building],
-    ["Floor", location.floor],
-    ["Room / Location", location.room || location.code],
+    ["Building", location.building || parsed.building],
+    ["Floor", location.floor || parsed.floor],
+    ["Room / Location", location.room || parsed.room || parsed.roomCode || location.code],
     ["Class", location.locationClass || location.type],
   ]
     .map(([label, value]) => ({
@@ -8389,44 +8473,43 @@ function serviceRequestLocationHierarchySegments(location?: any) {
     }))
     .filter((item) => item.value && item.value.toLowerCase() !== "unassigned");
 }
-
 function serviceRequestAssetMatchLevel(asset: any, selectedLocation?: any) {
   if (!selectedLocation) return "All assets";
   const selectedCode = normalizedHierarchyCode(selectedLocation.code);
-  const selectedRoom = normalizedHierarchyCode(selectedLocation.room || selectedLocation.code);
-  const selectedFloor = normalizedHierarchyCode(selectedLocation.floor);
-  const selectedBuilding = normalizedHierarchyCode(selectedLocation.building);
-  const selectedSite = normalizedHierarchyCode(selectedLocation.site);
-  const assetLocationCode = normalizedHierarchyCode(asset.locationCode);
-  const assetRoom = normalizedHierarchyCode(asset.room || asset.locationCode);
-  const assetFloor = normalizedHierarchyCode(asset.floor);
-  const assetBuilding = normalizedHierarchyCode(
-    asset.buildingCode || asset.building?.code || asset.building?.name,
-  );
-  const assetSite = normalizedHierarchyCode(asset.siteCode || asset.site?.name);
-  const assetText = normalizedHierarchyCode(
+  const selected = selectedParsedHierarchy("", selectedLocation);
+  const assetHierarchy = assetParsedHierarchy(asset);
+  const assetDirectCodes = hierarchyCodeSet([
+    asset.locationCode,
+    asset.room,
+    asset.sourceLocation,
+    asset.sourceEquipmentLocation,
+  ]);
+  const assetLocationText = normalizedHierarchyCode(
     [asset.locationCode, asset.locationDesc, asset.room, asset.sourceLocation, asset.sourceEquipmentLocation]
       .filter(Boolean)
       .join(" "),
   );
   if (
-    (selectedCode && (assetLocationCode === selectedCode || assetText.includes(selectedCode))) ||
-    (selectedRoom && (assetRoom === selectedRoom || assetText.includes(selectedRoom)))
+    (selectedCode && assetDirectCodes.has(selectedCode)) ||
+    (selected.roomCode && assetLocationText.includes(selected.roomCode)) ||
+    (selected.room &&
+      assetHierarchy.room === selected.room &&
+      hierarchyPartMatches(selected.floor, assetHierarchy.floor) &&
+      hierarchyPartMatches(selected.building, assetHierarchy.building))
   ) {
     return "Exact room/location";
   }
   if (
-    selectedFloor &&
-    assetFloor === selectedFloor &&
-    (!selectedBuilding || !assetBuilding || assetBuilding === selectedBuilding)
+    selected.floor &&
+    assetHierarchy.floor === selected.floor &&
+    hierarchyPartMatches(selected.building, assetHierarchy.building)
   ) {
     return "Same floor";
   }
-  if (selectedBuilding && assetBuilding === selectedBuilding) return "Same building";
-  if (selectedSite && assetSite === selectedSite) return "Same site";
+  if (selected.building && assetHierarchy.building === selected.building) return "Same building";
+  if (selected.site && assetHierarchy.site === selected.site) return "Same site";
   return "Outside selected hierarchy";
 }
-
 function serviceRequestAssetMatchRank(asset: any, selectedLocation?: any) {
   const level = serviceRequestAssetMatchLevel(asset, selectedLocation);
   if (level === "Exact room/location") return 0;
@@ -9174,11 +9257,15 @@ function ServiceRequestForm({
       strictLocation: "true",
       pageSize: "all",
     });
-    if (selectedLocation?.site) params.set("hierarchySite", selectedLocation.site);
-    if (selectedLocation?.building) params.set("hierarchyBuilding", selectedLocation.building);
-    if (selectedLocation?.floor) params.set("hierarchyFloor", selectedLocation.floor);
-    if (selectedLocation?.room) params.set("hierarchyRoom", selectedLocation.room);
-    fetch(`/api/assets/filter?${params.toString()}`, {
+    const parsedLocation = selectedParsedHierarchy(selectedCode, selectedLocation);
+    const hierarchySite = selectedLocation?.site || parsedLocation.site;
+    const hierarchyBuilding = selectedLocation?.building || parsedLocation.building;
+    const hierarchyFloor = selectedLocation?.floor || parsedLocation.floor;
+    const hierarchyRoom = selectedLocation?.room || parsedLocation.room || parsedLocation.roomCode;
+    if (hierarchySite) params.set("hierarchySite", hierarchySite);
+    if (hierarchyBuilding) params.set("hierarchyBuilding", hierarchyBuilding);
+    if (hierarchyFloor) params.set("hierarchyFloor", hierarchyFloor);
+    if (hierarchyRoom) params.set("hierarchyRoom", hierarchyRoom);    fetch(`/api/assets/filter?${params.toString()}`, {
       signal: controller.signal,
     })
       .then((response) => (response.ok ? response.json() : null))

@@ -78,6 +78,48 @@ function compactUnique(values: Array<string | null | undefined>) {
   );
 }
 
+
+function normalizedHierarchyCode(value: unknown) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function parseHierarchyCode(...values: unknown[]) {
+  const parsed = { site: "", building: "", floor: "", room: "", roomCode: "" };
+  const normalizedTexts = values
+    .flatMap((value) => String(value || "").split(/[>/|,;\s]+/))
+    .concat(values.map((value) => String(value || "")).join(" "))
+    .map(normalizedHierarchyCode)
+    .filter((value) => value.length > 1);
+
+  for (const text of normalizedTexts) {
+    if (!parsed.site && /L?FBC/.test(text)) parsed.site = "L-FBC";
+    if (!parsed.building) {
+      const buildingMatch =
+        text.match(/L?FBC([A-Z]\d+)/) ||
+        text.match(/\b([A-Z]\d+)(?=F\d|R\d|ER\d|MR\d|FR\d|$)/);
+      if (buildingMatch?.[1]) parsed.building = buildingMatch[1];
+    }
+    if (!parsed.floor) {
+      const floorMatch = text.match(/(F\d+)(?=[A-Z]*R?\d|ER\d|MR\d|FR\d|$)/);
+      if (floorMatch?.[1]) parsed.floor = floorMatch[1];
+    }
+    if (!parsed.room) {
+      const roomMatch =
+        text.match(/(R\d+[A-Z]?)(?![A-Z0-9])/) ||
+        text.match(/((?:ER|MR|FR|OR|CR|KIT|LUG)\d+[A-Z]?)(?![A-Z0-9])/);
+      if (roomMatch?.[1]) parsed.room = roomMatch[1];
+    }
+    if (!parsed.roomCode) {
+      const compactRoomMatch = text.match(/((?:FBC)?[A-Z]\d+F\d+(?:[A-Z]{0,3})?R?\d+[A-Z]?)/);
+      if (compactRoomMatch?.[1]) parsed.roomCode = compactRoomMatch[1];
+    }
+  }
+  return parsed;
+}
+
 function insensitiveEquals(field: string, value: string) {
   return { [field]: { equals: value, mode: "insensitive" } };
 }
@@ -96,14 +138,61 @@ function hierarchyLocationFilter(values: {
   description?: string;
   parentLocation?: string;
   zone?: string;
+  strict?: boolean;
 }) {
+  const parsed = parseHierarchyCode(
+    values.locationCode,
+    values.locationQuery,
+    values.site,
+    values.building,
+    values.floor,
+    values.room,
+    values.description,
+    values.parentLocation,
+    values.zone,
+  );
+  const site = values.site || parsed.site;
+  const building = values.building || parsed.building;
+  const floor = values.floor || parsed.floor;
+  const room = values.room || parsed.room || parsed.roomCode;
+
+  if (values.strict) {
+    const strictMatches: any[] = [];
+    const exactCodes = compactUnique([values.locationCode, values.locationQuery, room, parsed.room, parsed.roomCode]);
+    exactCodes.forEach((code) => {
+      strictMatches.push(insensitiveEquals("locationCode", code));
+      strictMatches.push(insensitiveEquals("room", code));
+    });
+    if (room) {
+      strictMatches.push({
+        AND: [
+          { OR: [insensitiveEquals("room", room), insensitiveContains("locationCode", room)] },
+          ...(floor ? [{ OR: [insensitiveEquals("floor", floor), insensitiveContains("locationCode", floor)] }] : []),
+          ...(building ? [{ OR: [insensitiveEquals("buildingCode", building), insensitiveContains("locationCode", building)] }] : []),
+        ],
+      });
+    } else if (floor) {
+      strictMatches.push({
+        AND: [
+          { OR: [insensitiveEquals("floor", floor), insensitiveContains("locationCode", floor)] },
+          ...(building ? [{ OR: [insensitiveEquals("buildingCode", building), insensitiveContains("locationCode", building)] }] : []),
+        ],
+      });
+    } else if (building) {
+      strictMatches.push({ OR: [insensitiveEquals("buildingCode", building), insensitiveContains("locationCode", building)] });
+    } else if (site) {
+      strictMatches.push({ OR: [insensitiveEquals("siteCode", site), insensitiveContains("locationCode", site)] });
+    }
+    return { OR: strictMatches.length ? strictMatches : [insensitiveEquals("locationCode", values.locationCode || "__none__")] };
+  }
+
   const codes = compactUnique([
     values.locationCode,
     values.locationQuery,
-    values.room,
-    values.floor,
-    values.building,
-    values.site,
+    room,
+    floor,
+    building,
+    site,
     values.parentLocation,
     values.zone,
   ]);
@@ -120,27 +209,7 @@ function hierarchyLocationFilter(values: {
     insensitiveContains("locationDesc", description),
     insensitiveContains("room", description),
   ]);
-  const scopedMatches: any[] = [];
-  if (values.room) {
-    scopedMatches.push({
-      AND: [
-        insensitiveEquals("room", values.room),
-        ...(values.floor ? [insensitiveEquals("floor", values.floor)] : []),
-        ...(values.building ? [insensitiveEquals("buildingCode", values.building)] : []),
-      ],
-    });
-  }
-  if (values.floor) {
-    scopedMatches.push({
-      AND: [
-        insensitiveEquals("floor", values.floor),
-        ...(values.building ? [insensitiveEquals("buildingCode", values.building)] : []),
-      ],
-    });
-  }
-  if (values.building) scopedMatches.push(insensitiveEquals("buildingCode", values.building));
-  if (values.site) scopedMatches.push(insensitiveEquals("siteCode", values.site));
-  return { OR: [...directMatches, ...descriptionMatches, ...scopedMatches] };
+  return { OR: [...directMatches, ...descriptionMatches] };
 }
 export async function GET(request: Request) {
   const { error } = await requireUser();
@@ -225,6 +294,7 @@ export async function GET(request: Request) {
         description: selectedLocation?.description,
         parentLocation: selectedLocation?.parentLocation,
         zone: selectedLocation?.zone,
+        strict: strictLocation,
       }),
     );
   }
