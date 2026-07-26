@@ -1357,9 +1357,14 @@ export function CafmConsole({
       body: JSON.stringify(payload),
     });
     const result = await response.json();
+    const linkedTickets = Array.isArray(result?.linkedRequests)
+      ? result.linkedRequests.map((request: any) => request.ticketNo).filter(Boolean)
+      : [];
     setToast(
       response.ok
-        ? `${successLabel} saved.`
+        ? linkedTickets.length
+          ? `${successLabel} saved. Created SR: ${linkedTickets.join(", ")}.`
+          : `${successLabel} saved.`
         : cleanMessage(result.message ?? "Action failed."),
     );
     if (response.ok && refresh) await refreshData();
@@ -19693,6 +19698,8 @@ function SecurityModule({
     SECURITY_DAILY_CHECKLIST_ITEMS.map((item) => ({ ...item, status: "OK", createRequest: false, remarks: "", assignedTeamCode: "" })),
   );
   const [newChecklistItem, setNewChecklistItem] = useState({ section: "", item: "", departmentCode: "SEC" });
+  const [checklistReviewOpen, setChecklistReviewOpen] = useState(false);
+  const checklistFormRef = useRef<HTMLFormElement | null>(null);
   const selectedLocation = locations.find((location) => location.code === locationCode);
   const updateChecklistItem = (code: string, patch: Record<string, any>) => {
     setChecklistItems((items) =>
@@ -19733,6 +19740,20 @@ function SecurityModule({
 
   const deleteChecklistItem = (code: string) => {
     setChecklistItems((items) => items.filter((item) => item.code !== code));
+  };
+  const markChecklistDone = () => {
+    setChecklistItems((items) =>
+      items.map((item) => ({ ...item, status: "OK", createRequest: false, remarks: "" })),
+    );
+    setChecklistReviewOpen(true);
+  };
+
+  const submitReviewedChecklist = () => {
+    if (!checklistFormRef.current) return;
+    const formData = new FormData(checklistFormRef.current);
+    formData.set("checklistItemsJson", JSON.stringify(checklistItems));
+    submitSecurity(formData);
+    setChecklistReviewOpen(false);
   };
   useEffect(() => {
     if (!locationCode && locations[0]?.code) setLocationCode(locations[0].code);
@@ -19897,9 +19918,24 @@ function SecurityModule({
         <div className="grid gap-4">
           <Panel title="Security Daily Checklist" icon={ClipboardCheck}>
             <ReportButtons type="security-checklists" label="Security daily checklist report" />
-            <DataTable rows={checklists} columns={checklistColumns} />
+            <DataTable
+              rows={checklists.map((checklist) => ({
+                ...checklist,
+                linkedRequestsDisplay: Array.isArray(checklist.linkedRequests)
+                  ? checklist.linkedRequests.map((request: any) => request.ticketNo).filter(Boolean).join(", ") || "-"
+                  : "-",
+              }))}
+              columns={checklistColumns}
+            />
           </Panel>
-          <form action={submitSecurity} className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <form
+            ref={checklistFormRef}
+            onSubmit={(event) => {
+              event.preventDefault();
+              setChecklistReviewOpen(true);
+            }}
+            className="grid gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+          >
             <input type="hidden" name="type" value="checklist" />
             <input type="hidden" name="locationName" value={selectedLocation?.name ?? ""} />
             <input type="hidden" name="checklistItemsJson" value={JSON.stringify(checklistItems)} />
@@ -19983,8 +20019,55 @@ function SecurityModule({
                 ))}
               </div>
             </div>
-            <button disabled={saving || !canManage} className="rounded-lg bg-navy px-4 py-3 font-black text-white disabled:opacity-50">Save Checklist</button>
+            <textarea name="remarks" placeholder="Overall checklist remarks" className={TICKET_PLAN_TEXTAREA_CLASS} rows={3} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button type="button" disabled={saving || !canManage} onClick={markChecklistDone} className="rounded-lg border border-lagoon bg-emerald-50 px-4 py-3 font-black text-lagoon disabled:opacity-50">Check Done</button>
+              <button disabled={saving || !canManage} className="rounded-lg bg-navy px-4 py-3 font-black text-white disabled:opacity-50">Review & Save Checklist</button>
+            </div>
           </form>
+        </div>
+      )}
+      {view === "security-checklists" && checklistReviewOpen && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/60 p-4">
+          <div className="grid max-h-[92vh] w-full max-w-6xl overflow-hidden rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between bg-navy px-5 py-4 text-white">
+              <div>
+                <p className="text-xs font-black uppercase text-cyan-200">Checklist review</p>
+                <h3 className="text-lg font-black">Security Daily Checklist</h3>
+              </div>
+              <button type="button" onClick={() => setChecklistReviewOpen(false)} className="rounded-lg border border-cyan-300 px-3 py-2 text-sm font-black text-cyan-100">Cancel</button>
+            </div>
+            <div className="grid max-h-[70vh] gap-4 overflow-auto p-5">
+              <div className="grid gap-3 md:grid-cols-4">
+                <div className="rounded-lg bg-slate-50 p-3"><p className="text-xs font-black uppercase text-slate-500">Total</p><p className="text-xl font-black text-navy">{checklistItems.length}</p></div>
+                <div className="rounded-lg bg-emerald-50 p-3"><p className="text-xs font-black uppercase text-emerald-700">OK</p><p className="text-xl font-black text-emerald-700">{checklistItems.filter((item) => item.status === "OK").length}</p></div>
+                <div className="rounded-lg bg-red-50 p-3"><p className="text-xs font-black uppercase text-red-700">Not OK</p><p className="text-xl font-black text-red-700">{checklistItems.filter((item) => item.status === "NOT_OK").length}</p></div>
+                <div className="rounded-lg bg-cyan-50 p-3"><p className="text-xs font-black uppercase text-cyan-700">SR To Create</p><p className="text-xl font-black text-cyan-700">{checklistItems.filter((item) => item.status === "NOT_OK" && item.createRequest).length}</p></div>
+              </div>
+              <div className="overflow-auto rounded-lg border border-slate-200">
+                <table className="min-w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-500">
+                    <tr><th className="px-3 py-2">Item</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Department</th><th className="px-3 py-2">Create SR</th><th className="px-3 py-2">Remarks</th></tr>
+                  </thead>
+                  <tbody>
+                    {checklistItems.map((item) => (
+                      <tr key={item.code} className="border-t border-slate-100 align-top">
+                        <td className="px-3 py-2"><b>{item.section}</b><br />{item.item}</td>
+                        <td className="px-3 py-2 font-black">{item.status === "NOT_OK" ? "Not OK" : "OK"}</td>
+                        <td className="px-3 py-2">{item.status === "NOT_OK" ? item.departmentCode || "-" : "-"}</td>
+                        <td className="px-3 py-2">{item.status === "NOT_OK" && item.createRequest ? "Yes" : "-"}</td>
+                        <td className="px-3 py-2">{item.remarks || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="flex flex-wrap justify-end gap-3 border-t border-slate-200 p-4">
+              <button type="button" onClick={() => setChecklistReviewOpen(false)} className="rounded-lg border border-slate-200 px-4 py-2 font-black text-slate-600">Back to Edit</button>
+              <button type="button" disabled={saving || !canManage} onClick={submitReviewedChecklist} className="rounded-lg bg-navy px-5 py-2 font-black text-white disabled:opacity-50">Confirm & Create</button>
+            </div>
+          </div>
         </div>
       )}
       {view === "security-fire-drills" && (
