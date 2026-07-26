@@ -8373,6 +8373,69 @@ function assetLocationLabel(asset: any) {
     .filter(Boolean)
     .join(" > ");
 }
+function serviceRequestLocationHierarchySegments(location?: any) {
+  if (!location) return [] as { label: string; value: string }[];
+  return [
+    ["Site", location.site],
+    ["Parent / SP", location.parentLocation || location.zone],
+    ["Building", location.building],
+    ["Floor", location.floor],
+    ["Room / Location", location.room || location.code],
+    ["Class", location.locationClass || location.type],
+  ]
+    .map(([label, value]) => ({
+      label: String(label),
+      value: String(value || "").trim(),
+    }))
+    .filter((item) => item.value && item.value.toLowerCase() !== "unassigned");
+}
+
+function serviceRequestAssetMatchLevel(asset: any, selectedLocation?: any) {
+  if (!selectedLocation) return "All assets";
+  const selectedCode = normalizedHierarchyCode(selectedLocation.code);
+  const selectedRoom = normalizedHierarchyCode(selectedLocation.room || selectedLocation.code);
+  const selectedFloor = normalizedHierarchyCode(selectedLocation.floor);
+  const selectedBuilding = normalizedHierarchyCode(selectedLocation.building);
+  const selectedSite = normalizedHierarchyCode(selectedLocation.site);
+  const assetLocationCode = normalizedHierarchyCode(asset.locationCode);
+  const assetRoom = normalizedHierarchyCode(asset.room || asset.locationCode);
+  const assetFloor = normalizedHierarchyCode(asset.floor);
+  const assetBuilding = normalizedHierarchyCode(
+    asset.buildingCode || asset.building?.code || asset.building?.name,
+  );
+  const assetSite = normalizedHierarchyCode(asset.siteCode || asset.site?.name);
+  const assetText = normalizedHierarchyCode(
+    [asset.locationCode, asset.locationDesc, asset.room, asset.sourceLocation, asset.sourceEquipmentLocation]
+      .filter(Boolean)
+      .join(" "),
+  );
+  if (
+    (selectedCode && (assetLocationCode === selectedCode || assetText.includes(selectedCode))) ||
+    (selectedRoom && (assetRoom === selectedRoom || assetText.includes(selectedRoom)))
+  ) {
+    return "Exact room/location";
+  }
+  if (
+    selectedFloor &&
+    assetFloor === selectedFloor &&
+    (!selectedBuilding || !assetBuilding || assetBuilding === selectedBuilding)
+  ) {
+    return "Same floor";
+  }
+  if (selectedBuilding && assetBuilding === selectedBuilding) return "Same building";
+  if (selectedSite && assetSite === selectedSite) return "Same site";
+  return "Outside selected hierarchy";
+}
+
+function serviceRequestAssetMatchRank(asset: any, selectedLocation?: any) {
+  const level = serviceRequestAssetMatchLevel(asset, selectedLocation);
+  if (level === "Exact room/location") return 0;
+  if (level === "Same floor") return 1;
+  if (level === "Same building") return 2;
+  if (level === "Same site") return 3;
+  if (level === "All assets") return 4;
+  return 99;
+}
 
 function teamMatchesTicketScope(
   team: any,
@@ -8572,9 +8635,10 @@ function scopedAssetOptions(
 ) {
   const hasLocationScope = Boolean(location || selectedLocation);
   const locationScopedAssets = hasLocationScope
-    ? assets.filter((asset) =>
-        assetMatchesLocation(asset, location, selectedLocation),
-      )
+    ? assets.filter((asset) => {
+        if (!selectedLocation) return assetMatchesLocation(asset, location, selectedLocation);
+        return serviceRequestAssetMatchRank(asset, selectedLocation) < 99;
+      })
     : assets;
   const departmentScopedAssets = locationScopedAssets.filter((asset) =>
     assetMatchesDepartment(asset, departmentCode, assignedTeamCode),
@@ -8583,7 +8647,14 @@ function scopedAssetOptions(
     departmentCode || assignedTeamCode
       ? departmentScopedAssets
       : locationScopedAssets;
-  return [...chosenAssets].sort(sortAssetsForRequest).slice(0, 2500);
+  return [...chosenAssets]
+    .sort((first, second) => {
+      const firstRank = serviceRequestAssetMatchRank(first, selectedLocation);
+      const secondRank = serviceRequestAssetMatchRank(second, selectedLocation);
+      if (firstRank !== secondRank) return firstRank - secondRank;
+      return sortAssetsForRequest(first, second);
+    })
+    .slice(0, 2500);
 }
 
 function serviceRequestLocationLabel(location: any) {
@@ -9072,6 +9143,21 @@ function ServiceRequestForm({
   const locationValue = selectedLocation
     ? serviceRequestLocationLabel(selectedLocation)
     : locationSearchValue || locationCodeValue || "";
+  const selectedLocationSegments = useMemo(
+    () => serviceRequestLocationHierarchySegments(selectedLocation),
+    [selectedLocation],
+  );
+  const finalLocationDropdownOptions = useMemo(
+    () =>
+      finalLocationOptions.map((location) => ({
+        value: location.code,
+        label: serviceRequestLocationLabel(location),
+      })),
+    [finalLocationOptions],
+  );
+  const exactLocationDisplayValue = selectedLocation
+    ? serviceRequestLocationLabel(selectedLocation)
+    : locationSearchValue || locationCodeValue || "";
 
   useEffect(() => {
     const selectedCode = selectedLocation?.code || locationCodeValue;
@@ -9350,77 +9436,150 @@ function ServiceRequestForm({
         </div>
         <input type="hidden" name="priority" value={priority} />
         <input type="hidden" name="location" value={locationValue} />
-        <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-2">
+        <input type="hidden" name="locationCode" value={locationCodeValue} />
+        <input type="hidden" name="siteCode" value={siteValue} />
+        <input type="hidden" name="parentLocation" value={parentLocationValue} />
+        <input type="hidden" name="buildingCode" value={buildingValue} />
+        <input type="hidden" name="floor" value={floorValue} />
+        <input type="hidden" name="room" value={selectedLocation?.room || locationCodeValue} />
+        <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="grid gap-2">
+            <span className="text-xs font-black uppercase text-slate-500">
+              Location hierarchy for asset filtering
+            </span>
+            <SearchableDropdownField
+              value={locationSearchValue}
+              placeholder={
+                locationLoading
+                  ? "Loading all locations..."
+                  : `Search by site, building, floor, room or location code (${activeLocations.length.toLocaleString()} loaded)`
+              }
+              options={allLocationDropdownOptions}
+              onInput={(nextValue) => {
+                const selected = findLocationBySearch(activeLocations, nextValue);
+                setLocationSearchValue(nextValue);
+                setLocationCodeValue("");
+                setAssetTagValue("");
+                if (selected) applyLocationSelection(selected);
+              }}
+              onSelect={(option) => {
+                const selected = activeLocations.find(
+                  (location) => location.code === option.value,
+                );
+                setAssetTagValue("");
+                if (selected) applyLocationSelection(selected);
+              }}
+            />
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <SearchableDropdownField
+              value={siteValue}
+              placeholder="1. Site"
+              options={siteDropdownOptions}
+              onInput={(nextValue) => {
+                setSiteValue(nextValue);
+                setLocationCodeValue("");
+                setLocationSearchValue("");
+                setAssetTagValue("");
+              }}
+              onSelect={(option) => {
+                setSiteValue(option.value);
+                setParentLocationValue("");
+                setBuildingValue("");
+                setFloorValue("");
+                setLocationCodeValue("");
+                setLocationSearchValue("");
+                setAssetTagValue("");
+              }}
+            />
+            <SearchableDropdownField
+              value={parentLocationValue}
+              placeholder="2. SP / Parent / Region"
+              options={parentLocationDropdownOptions}
+              onInput={(nextValue) => {
+                setParentLocationValue(nextValue);
+                setLocationCodeValue("");
+                setLocationSearchValue("");
+                setAssetTagValue("");
+              }}
+              onSelect={(option) => {
+                setParentLocationValue(option.value);
+                setBuildingValue("");
+                setFloorValue("");
+                setLocationCodeValue("");
+                setLocationSearchValue("");
+                setAssetTagValue("");
+              }}
+            />
+            <SearchableDropdownField
+              value={buildingValue}
+              placeholder="3. Building / Block / Area"
+              options={buildingDropdownOptions}
+              onInput={(nextValue) => {
+                setBuildingValue(nextValue);
+                setLocationCodeValue("");
+                setLocationSearchValue("");
+                setAssetTagValue("");
+              }}
+              onSelect={(option) => {
+                setBuildingValue(option.value);
+                setFloorValue("");
+                setLocationCodeValue("");
+                setLocationSearchValue("");
+                setAssetTagValue("");
+              }}
+            />
+            <SearchableDropdownField
+              value={floorValue}
+              placeholder="4. Floor / Level"
+              options={floorDropdownOptions}
+              onInput={(nextValue) => {
+                setFloorValue(nextValue);
+                setLocationCodeValue("");
+                setLocationSearchValue("");
+                setAssetTagValue("");
+              }}
+              onSelect={(option) => {
+                setFloorValue(option.value);
+                setLocationCodeValue("");
+                setLocationSearchValue("");
+                setAssetTagValue("");
+              }}
+            />
+          </div>
           <SearchableDropdownField
-            value={locationSearchValue}
-            placeholder={
-              locationLoading
-                ? "Loading all locations..."
-                : `1. Location (${activeLocations.length.toLocaleString()} loaded)`
-            }
-            options={allLocationDropdownOptions}
-            className="md:col-span-2"
+            value={exactLocationDisplayValue}
+            placeholder={`5. Exact room / location (${finalLocationDropdownOptions.length.toLocaleString()} matching)`}
+            options={finalLocationDropdownOptions}
             onInput={(nextValue) => {
               const selected = findLocationBySearch(activeLocations, nextValue);
               setLocationSearchValue(nextValue);
               setLocationCodeValue("");
+              setAssetTagValue("");
               if (selected) applyLocationSelection(selected);
             }}
             onSelect={(option) => {
               const selected = activeLocations.find(
                 (location) => location.code === option.value,
               );
+              setAssetTagValue("");
               if (selected) applyLocationSelection(selected);
             }}
           />
-          <SearchableDropdownField
-            value={parentLocationValue}
-            placeholder="2. Parent Location"
-            options={parentLocationDropdownOptions}
-            disabled={!locationCodeValue}
-            onInput={(nextValue) => {
-              setParentLocationValue(nextValue);
-            }}
-            onSelect={(option) => {
-              setParentLocationValue(option.value);
-            }}
-          />
-          <SearchableDropdownField
-            value={siteValue}
-            placeholder="3. Site"
-            options={siteDropdownOptions}
-            disabled={!locationCodeValue}
-            onInput={(nextValue) => {
-              setSiteValue(nextValue);
-            }}
-            onSelect={(option) => {
-              setSiteValue(option.value);
-            }}
-          />
-          <SearchableDropdownField
-            value={buildingValue}
-            placeholder="4. Building / Area"
-            options={buildingDropdownOptions}
-            disabled={!locationCodeValue}
-            onInput={(nextValue) => {
-              setBuildingValue(nextValue);
-            }}
-            onSelect={(option) => {
-              setBuildingValue(option.value);
-            }}
-          />
-          <SearchableDropdownField
-            value={floorValue}
-            placeholder="5. Floor / Level"
-            options={floorDropdownOptions}
-            disabled={!locationCodeValue}
-            onInput={(nextValue) => {
-              setFloorValue(nextValue);
-            }}
-            onSelect={(option) => {
-              setFloorValue(option.value);
-            }}
-          />
+          {selectedLocationSegments.length > 0 && (
+            <div className="grid gap-2 rounded-lg border border-lagoon/20 bg-white p-3 sm:grid-cols-2 lg:grid-cols-3">
+              {selectedLocationSegments.map((segment) => (
+                <div key={segment.label} className="rounded-lg bg-slate-50 px-3 py-2">
+                  <p className="text-[10px] font-black uppercase text-slate-400">
+                    {segment.label}
+                  </p>
+                  <p className="truncate text-sm font-black text-ink">
+                    {segment.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <div className="grid gap-2">
@@ -9529,6 +9688,7 @@ function ServiceRequestForm({
                 {group.rows.map((asset) => (
                   <option key={asset.id ?? asset.tag} value={asset.tag}>
                     {asset.tag} - {asset.assetDescription || asset.name} /{" "}
+                    {serviceRequestAssetMatchLevel(asset, selectedLocation)} /{" "}
                     {[assetLocationLabel(asset), asset.departmentCode, assetCategoryValue(asset)]
                       .filter(Boolean)
                       .join(" > ")}
@@ -9539,7 +9699,7 @@ function ServiceRequestForm({
           </select>
           {locationCodeValue && filteredAssets.length > 0 && (
             <span className="text-xs font-black text-emerald-700">
-              Showing only assets mapped to the selected location hierarchy.
+              Showing assets inside the selected hierarchy, ordered by exact room/location first.
             </span>
           )}
           {!locationCodeValue && !departmentCode && !selectedTeamCode && (
@@ -9559,6 +9719,62 @@ function ServiceRequestForm({
             </span>
           )}
         </label>
+        {locationCodeValue && filteredAssets.length > 0 && (
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-black text-ink">Matched assets in selected hierarchy</p>
+              <span className="rounded-full bg-lagoon/10 px-3 py-1 text-xs font-black text-lagoon">
+                {filteredAssets.length.toLocaleString()} available
+              </span>
+            </div>
+            <div className="max-h-56 overflow-auto rounded-lg border border-slate-100">
+              <table className="min-w-full text-left text-xs">
+                <thead className="sticky top-0 bg-slate-50 text-slate-500">
+                  <tr>
+                    <th className="px-3 py-2 font-black">Asset</th>
+                    <th className="px-3 py-2 font-black">Match</th>
+                    <th className="px-3 py-2 font-black">Exact Location</th>
+                    <th className="px-3 py-2 font-black">Department</th>
+                    <th className="px-3 py-2 font-black">Category</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredAssets.slice(0, 50).map((asset) => (
+                    <tr
+                      key={asset.id ?? asset.tag}
+                      className="cursor-pointer border-t border-slate-100 hover:bg-lagoon/5"
+                      onClick={() => applyAssetSelection(asset.tag)}
+                    >
+                      <td className="px-3 py-2 font-black text-lagoon">
+                        {asset.tag || "-"}
+                        <p className="font-bold text-slate-600">
+                          {asset.assetDescription || asset.name || "-"}
+                        </p>
+                      </td>
+                      <td className="px-3 py-2 font-bold text-emerald-700">
+                        {serviceRequestAssetMatchLevel(asset, selectedLocation)}
+                      </td>
+                      <td className="px-3 py-2 font-bold text-slate-600">
+                        {assetLocationLabel(asset) || "-"}
+                      </td>
+                      <td className="px-3 py-2 font-bold text-slate-600">
+                        {asset.departmentCode || "-"}
+                      </td>
+                      <td className="px-3 py-2 font-bold text-slate-600">
+                        {assetCategoryValue(asset) || "-"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {filteredAssets.length > 50 && (
+              <p className="mt-2 text-xs font-bold text-slate-500">
+                Showing first 50 matched assets. Use the asset dropdown search/order to select the remaining records.
+              </p>
+            )}
+          </div>
+        )}
         {selectedFormAsset && (
           <div className="grid gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm font-bold text-slate-700 md:grid-cols-2">
             <span>Asset code: {selectedFormAsset.tag || "-"}</span>
