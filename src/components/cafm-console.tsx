@@ -9027,6 +9027,10 @@ function ServiceRequestForm({
       strictLocation: "true",
       pageSize: "all",
     });
+    if (selectedLocation?.site) params.set("hierarchySite", selectedLocation.site);
+    if (selectedLocation?.building) params.set("hierarchyBuilding", selectedLocation.building);
+    if (selectedLocation?.floor) params.set("hierarchyFloor", selectedLocation.floor);
+    if (selectedLocation?.room) params.set("hierarchyRoom", selectedLocation.room);
     fetch(`/api/assets/filter?${params.toString()}`, {
       signal: controller.signal,
     })
@@ -9059,12 +9063,19 @@ function ServiceRequestForm({
     () =>
       scopedAssetOptions(
         serviceRequestAssetSource,
-        departmentCode,
-        selectedTeamCode,
+        locationCodeValue ? "" : departmentCode,
+        locationCodeValue ? "" : selectedTeamCode,
         locationValue,
         selectedLocation,
       ),
-    [serviceRequestAssetSource, departmentCode, selectedTeamCode, locationValue, selectedLocation],
+    [
+      serviceRequestAssetSource,
+      departmentCode,
+      selectedTeamCode,
+      locationValue,
+      selectedLocation,
+      locationCodeValue,
+    ],
   );
   const selectedFormAsset = useMemo<any | undefined>(
     () => serviceRequestAssetSource.find((asset) => asset.tag === assetTagValue),
