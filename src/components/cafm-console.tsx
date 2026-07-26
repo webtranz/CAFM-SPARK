@@ -19713,7 +19713,6 @@ function SecurityModule({
       items.map((item) => {
         if (item.code !== code) return item;
         const next = { ...item, ...patch };
-        if (patch.status === "NOT_OK") next.createRequest = true;
         if (patch.status === "OK" || patch.status === "NA") next.createRequest = false;
         return next;
       }),
@@ -19899,50 +19898,41 @@ function SecurityModule({
             </select>
             <input name="officerName" required placeholder="Security officer name" className={FACILITY_FIELD_CLASS} />
             <div className="rounded-lg border border-slate-200">
-              <div className="grid grid-cols-[1fr_96px_1fr] gap-2 border-b border-slate-200 bg-slate-50 p-3 text-xs font-black uppercase text-slate-500">
-                <span>Checklist item</span><span>Status</span><span>Action routing</span>
+              <div className="grid grid-cols-[1fr_110px_1fr_120px] gap-2 border-b border-slate-200 bg-slate-50 p-3 text-xs font-black uppercase text-slate-500">
+                <span>Checklist item</span><span>Status</span><span>Department</span><span>Create SR</span>
               </div>
               <div className="max-h-[560px] overflow-auto p-2">
-                {checklistItems.map((item) => {
-                  const mappedTeams = teamOptionsFor(item);
-                  const mappedServices = serviceOptionsFor(item.departmentCode);
-                  return (
-                    <div key={item.code} className="grid gap-2 border-b border-slate-100 p-2 text-xs last:border-b-0">
-                      <div className="grid gap-2 lg:grid-cols-[1fr_96px_1fr]">
-                        <div><p className="font-black text-navy">{item.section}</p><p className="mt-1 font-bold text-slate-700">{item.item}</p></div>
-                        <select value={item.status} onChange={(event) => updateChecklistItem(item.code, { status: event.target.value })} className={FACILITY_FIELD_CLASS}>
-                          <option value="OK">OK</option><option value="NOT_OK">Not OK</option><option value="NA">N/A</option>
-                        </select>
-                        <div className="grid gap-2">
-                          <select value={item.departmentCode ?? ""} onChange={(event) => updateChecklistItem(item.code, { departmentCode: event.target.value, assignedTeamCode: "" })} className={FACILITY_FIELD_CLASS}>
-                            <option value={item.departmentCode ?? ""}>{item.departmentCode || "Department"}</option>{departmentOptions}
-                          </select>
-                          <select value={item.serviceCode ?? ""} onChange={(event) => updateChecklistItem(item.code, { serviceCode: event.target.value, assignedTeamCode: "" })} className={FACILITY_FIELD_CLASS}>
-                            <option value={item.serviceCode ?? ""}>{item.serviceCode || "Service"}</option>
-                            {mappedServices.map((service) => <option key={service.id ?? service.code ?? service.name} value={service.code ?? service.name}>{service.code ?? service.name} - {service.name ?? service.description ?? service.code}</option>)}
-                          </select>
-                          <select value={item.assignedTeamCode ?? ""} onChange={(event) => updateChecklistItem(item.code, { assignedTeamCode: event.target.value })} className={FACILITY_FIELD_CLASS}>
-                            <option value="">{mappedTeams.length ? "Select mapped service team" : "No mapped team"}</option>
-                            {mappedTeams.map((team) => <option key={team.id ?? team.code ?? team.name} value={team.code ?? team.name}>{team.code ?? team.name} - {team.name ?? team.description ?? team.code}</option>)}
-                          </select>
-                        </div>
+                {checklistItems.map((item) => (
+                  <div key={item.code} className="grid gap-2 border-b border-slate-100 p-2 text-xs last:border-b-0">
+                    <div className="grid items-start gap-2 lg:grid-cols-[1fr_110px_1fr_120px]">
+                      <div>
+                        <p className="font-black text-navy">{item.section}</p>
+                        <p className="mt-1 font-bold text-slate-700">{item.item}</p>
                       </div>
-                      {item.status === "NOT_OK" && (
-                        <div className="grid gap-2 rounded-lg bg-amber-50 p-2 sm:grid-cols-[140px_1fr]">
-                          <label className="flex items-center gap-2 font-black text-amber-700"><input type="checkbox" checked={Boolean(item.createRequest)} onChange={(event) => updateChecklistItem(item.code, { createRequest: event.target.checked })} />Create SR</label>
-                          <select value={item.priority ?? "MEDIUM"} onChange={(event) => updateChecklistItem(item.code, { priority: event.target.value })} className={FACILITY_FIELD_CLASS}>
-                            <option value="MEDIUM">Medium</option><option value="HIGH">High</option><option value="CRITICAL">Critical</option><option value="LOW">Low</option>
-                          </select>
-                        </div>
+                      <select value={item.status} onChange={(event) => updateChecklistItem(item.code, { status: event.target.value })} className={FACILITY_FIELD_CLASS}>
+                        <option value="OK">OK</option>
+                        <option value="NOT_OK">Not OK</option>
+                      </select>
+                      {item.status === "NOT_OK" ? (
+                        <select value={item.departmentCode ?? ""} onChange={(event) => updateChecklistItem(item.code, { departmentCode: event.target.value })} className={FACILITY_FIELD_CLASS}>
+                          <option value={item.departmentCode ?? ""}>{item.departmentCode || "Department"}</option>{departmentOptions}
+                        </select>
+                      ) : (
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-bold text-slate-400">-</div>
                       )}
-                      <textarea value={item.remarks ?? ""} onChange={(event) => updateChecklistItem(item.code, { remarks: event.target.value })} placeholder="Remarks / defect details" className={TICKET_PLAN_TEXTAREA_CLASS} rows={2} />
+                      {item.status === "NOT_OK" ? (
+                        <button type="button" onClick={() => updateChecklistItem(item.code, { createRequest: true })} className={item.createRequest ? "rounded-lg bg-lagoon px-3 py-2 font-black text-white" : "rounded-lg border border-lagoon px-3 py-2 font-black text-lagoon"}>
+                          {item.createRequest ? "SR Ready" : "Create SR"}
+                        </button>
+                      ) : (
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-center font-bold text-slate-400">-</div>
+                      )}
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             </div>
-            <textarea name="remarks" placeholder="Overall checklist remarks" className={TICKET_PLAN_TEXTAREA_CLASS} rows={3} />
-            <button disabled={saving || !canManage} className="rounded-lg bg-navy px-4 py-3 font-black text-white disabled:opacity-50">Save Checklist & Create Service Requests</button>
+            <button disabled={saving || !canManage} className="rounded-lg bg-navy px-4 py-3 font-black text-white disabled:opacity-50">Save Checklist</button>
           </form>
         </div>
       )}
