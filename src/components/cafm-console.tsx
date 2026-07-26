@@ -962,15 +962,37 @@ function workMetricRows(workOrders: any[], showOnlyDelayed: boolean) {
     );
 }
 
-function liveWorkOrderSort(rows: any[]) {
+function liveWorkOrderSort(rows: any[], role = "") {
   const priority = (work: any) => {
     const status = String(work?.status || "").toUpperCase();
-    if (status === "PENDING_SUPERVISOR_REVIEW") return 0;
-    if (status === "COMPLETED") return 1;
-    if (["IN_PROGRESS", "ON_HOLD"].includes(status)) return 2;
-    if (["ASSIGNED", "ACCEPTED", "PENDING_ASSIGNMENT", "OPEN", "NEW"].includes(status)) return 3;
-    if (["VERIFIED", "CLOSED"].includes(status)) return 4;
-    return 5;
+    const roleKind = roleKindLabel(role);
+    const reviewStatuses = ["PENDING_SUPERVISOR_REVIEW", "COMPLETED", "IN_REVIEW", "SUBMITTED"];
+    const activeStatuses = ["IN_PROGRESS"];
+    const assignedStatuses = ["ASSIGNED", "ACCEPTED", "PENDING_ASSIGNMENT", "OPEN", "NEW"];
+    const closedStatuses = ["VERIFIED", "CLOSED", "CANCELLED", "REJECTED"];
+
+    if (roleKind === "technician") {
+      if (activeStatuses.includes(status)) return 0;
+      if (status === "ON_HOLD") return 1;
+      if (assignedStatuses.includes(status)) return 2;
+      if (reviewStatuses.includes(status)) return 3;
+      if (closedStatuses.includes(status)) return 5;
+      return 4;
+    }
+
+    if (roleKind === "supervisor") {
+      if (reviewStatuses.includes(status)) return 0;
+      if (activeStatuses.includes(status) || status === "ON_HOLD") return 1;
+      if (assignedStatuses.includes(status)) return 2;
+      if (closedStatuses.includes(status)) return 5;
+      return 4;
+    }
+
+    if (reviewStatuses.includes(status)) return 0;
+    if (activeStatuses.includes(status) || status === "ON_HOLD") return 1;
+    if (assignedStatuses.includes(status)) return 2;
+    if (closedStatuses.includes(status)) return 5;
+    return 4;
   };
   const timeValue = (value: unknown) => {
     const time = new Date(String(value || "")).getTime();
@@ -986,12 +1008,12 @@ function liveWorkOrderSort(rows: any[]) {
         work?.createdAt,
     );
   return [...rows].sort((left, right) => {
-    const rightActivity = activityTime(right);
-    const leftActivity = activityTime(left);
-    if (rightActivity !== leftActivity) return rightActivity - leftActivity;
     const leftPriority = priority(left);
     const rightPriority = priority(right);
     if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+    const rightActivity = activityTime(right);
+    const leftActivity = activityTime(left);
+    if (rightActivity !== leftActivity) return rightActivity - leftActivity;
     return timeValue(right.dueAt) - timeValue(left.dueAt);
   });
 }
@@ -1565,7 +1587,7 @@ export function CafmConsole({
         : [{ ...stamped }, ...current.workOrders];
       return {
         ...current,
-        workOrders: liveWorkOrderSort(nextRows),
+        workOrders: liveWorkOrderSort(nextRows, user.role),
         workOrdersTotal: Math.max(
           current.workOrdersTotal ?? 0,
           nextRows.length,
@@ -5731,7 +5753,7 @@ function WorkOrders({
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [monthDate, setMonthDate] = useState(() => new Date());
   const [page, setPage] = useState(1);
-  const [workRowsSource, setWorkRowsSource] = useState<any[]>(data.workOrders);
+  const [workRowsSource, setWorkRowsSource] = useState<any[]>(() => liveWorkOrderSort(data.workOrders, role));
   const [workTotal, setWorkTotal] = useState(
     data.workOrdersTotal ?? data.workOrders.length,
   );
@@ -5832,8 +5854,9 @@ function WorkOrders({
             return work[key];
           },
         ),
+        role,
       ),
-    [rawVisibleWorks, workExcelColumns, workExcelFilters, workExcelSort],
+    [rawVisibleWorks, role, workExcelColumns, workExcelFilters, workExcelSort],
   );
   const selectedWork =
     visibleWorks.find((work) => work.id === selectedWorkId) ??
@@ -5883,12 +5906,12 @@ function WorkOrders({
         (data.workOrdersTotal ?? 0) > 0
       )
         return current;
-      return data.workOrders;
+      return liveWorkOrderSort(data.workOrders, role);
     });
     setWorkTotal((current) =>
       Math.max(current, data.workOrdersTotal ?? data.workOrders.length),
     );
-  }, [data.workOrders, data.workOrdersTotal]);
+  }, [data.workOrders, data.workOrdersTotal, role]);
 
   useEffect(() => {
     setSelectedWorkIds(
@@ -5931,9 +5954,9 @@ function WorkOrders({
           setWorkRowsSource((current) =>
             page === 1
               ? nextRows.length || nextTotal === 0
-                ? liveWorkOrderSort(nextRows)
+                ? liveWorkOrderSort(nextRows, role)
                 : current
-              : liveWorkOrderSort([...current, ...nextRows]),
+              : liveWorkOrderSort([...current, ...nextRows], role),
           );
           setWorkTotal(nextTotal);
         }
@@ -5961,6 +5984,7 @@ function WorkOrders({
     overdueOnly,
     showTimeMetrics,
     showOnlyDelayed,
+    role,
   ]);
 
   function handleWorkScroll(event: UIEvent<HTMLDivElement>) {
@@ -6003,7 +6027,7 @@ function WorkOrders({
           )
         : [{ ...stamped }, ...current];
       nextCount = nextRows.length;
-      return liveWorkOrderSort(nextRows);
+      return liveWorkOrderSort(nextRows, role);
     });
     setWorkTotal((current) => Math.max(current, nextCount));
     workScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
@@ -6132,7 +6156,7 @@ function WorkOrders({
       });
       if (!response.ok) return;
       const result = await response.json();
-      setWorkRowsSource(liveWorkOrderSort(result.workOrders ?? []));
+      setWorkRowsSource(liveWorkOrderSort(result.workOrders ?? [], role));
       setWorkTotal(Number(result.total ?? result.workOrders?.length ?? 0));
     } finally {
       setWorkLoading(false);
