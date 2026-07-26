@@ -965,6 +965,11 @@ model HousingBooking {
   transferReason     String?
   blacklistReason    String?
   noShowAt           DateTime?
+  extensionStatus    String?
+  extensionEndDate   DateTime?
+  extensionRemarks   String?
+  extensionRequestedAt DateTime?
+  extensionApprovedAt DateTime?
   resident           HousingResident?      @relation(fields: [residentId], references: [id])
   room               HousingRoom           @relation(fields: [roomId], references: [id])
   bed                HousingBed?           @relation(fields: [bedId], references: [id])

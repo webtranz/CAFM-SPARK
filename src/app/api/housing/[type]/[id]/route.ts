@@ -85,6 +85,21 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     if (!nextRoom) throw new Error("Selected room does not exist.");
     const nextCheckIn = status === "CHECKED_IN" && !input.checkIn ? new Date() : input.checkIn ? new Date(String(input.checkIn)) : current.checkIn;
     const nextCheckOut = status === "CHECKED_OUT" ? input.checkOut ? new Date(String(input.checkOut)) : new Date() : input.checkOut ? new Date(String(input.checkOut)) : current.checkOut || nextCheckIn;
+    const extensionStatusInput = text(input.extensionStatus).toUpperCase();
+    const isExtensionPending = extensionStatusInput === "EXTEND_PENDING";
+    const isExtensionApproved = extensionStatusInput === "EXTENDED";
+    const requestedExtensionEnd = input.extensionEndDate ? new Date(String(input.extensionEndDate)) : null;
+    if ((isExtensionPending || isExtensionApproved) && (!requestedExtensionEnd || Number.isNaN(requestedExtensionEnd.getTime()))) {
+      throw new Error("A valid extension end date/time is required.");
+    }
+    if (requestedExtensionEnd) {
+      const compareFrom = current.checkOut || current.checkIn;
+      if (requestedExtensionEnd <= compareFrom) throw new Error("Extension end date/time must be after the current end date.");
+      if (isExtensionApproved) {
+        await assertNoOverlappingHold(nextRoom.id, current.checkIn, requestedExtensionEnd);
+        await assertNoOverlappingBooking(nextRoom.id, current.checkIn, requestedExtensionEnd, id);
+      }
+    }
     if (["CHECKED_IN", "APPROVED", "PENDING_APPROVAL"].includes(effectiveStatus) && ["BLOCKED", "MAINTENANCE"].includes(nextRoom.status)) {
       throw new Error("Blocked or under-maintenance rooms cannot be allocated.");
     }
@@ -108,7 +123,7 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
         notes: text(input.notes) || undefined,
         attachmentUrls: text(input.attachmentUrls) || undefined,
         checkIn: status === "CHECKED_IN" || input.checkIn ? nextCheckIn : undefined,
-        checkOut: status === "CHECKED_IN" ? null : status === "CHECKED_OUT" || input.checkOut ? nextCheckOut : undefined,
+        checkOut: status === "CHECKED_IN" ? null : isExtensionApproved && requestedExtensionEnd ? requestedExtensionEnd : status === "CHECKED_OUT" || input.checkOut ? nextCheckOut : undefined,
         employeeId: text(input.employeeId) || undefined,
         companyName: text(input.companyName) || undefined,
         nationality: text(input.nationality) || undefined,
@@ -128,6 +143,11 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
         transferReason: text(input.transferReason) || undefined,
         blacklistReason: text(input.blacklistReason) || undefined,
         noShowAt: status === "NO_SHOW" ? new Date() : input.noShowAt ? new Date(String(input.noShowAt)) : undefined,
+        extensionStatus: isExtensionPending || isExtensionApproved ? extensionStatusInput : undefined,
+        extensionEndDate: requestedExtensionEnd || undefined,
+        extensionRemarks: text(input.extensionRemarks) || text(input.remarks) || undefined,
+        extensionRequestedAt: isExtensionPending ? new Date() : undefined,
+        extensionApprovedAt: isExtensionApproved ? new Date() : undefined,
       },
       include: { bed: true, room: true },
     });
@@ -147,7 +167,17 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     }
     if (roomChanged) await refreshRoomOccupancy(current.roomId);
     await refreshRoomOccupancy(booking.roomId);
-    await prisma.housingHistory.create({ data: { entity: "booking", entityId: id, bookingId: id, roomId: booking.roomId, actor, action: roomChanged ? "Room swapped" : `Booking ${status || "updated"}`, details: text(input.transferReason) || text(input.notes) || text(input.remarks) || "" } });
+    const bookingAction = isExtensionApproved
+      ? "Booking extension approved"
+      : isExtensionPending
+        ? "Booking extension requested"
+        : roomChanged
+          ? "Room swapped"
+          : `Booking ${status || "updated"}`;
+    const bookingDetails = isExtensionApproved || isExtensionPending
+      ? `Extend till ${requestedExtensionEnd?.toISOString() || ""}. ${text(input.extensionRemarks) || text(input.remarks) || ""}`.trim()
+      : text(input.transferReason) || text(input.notes) || text(input.remarks) || "";
+    await prisma.housingHistory.create({ data: { entity: "booking", entityId: id, bookingId: id, roomId: booking.roomId, actor, action: bookingAction, details: bookingDetails } });
     return booking;
   }
 
@@ -608,10 +638,11 @@ async function assertNoOverlappingHold(roomId: string, start: Date, end: Date, e
   if (overlap) throw new Error(`Room ${overlap.room.roomNumber} is already on hold from ${overlap.startDate.toISOString().slice(0, 10)} to ${overlap.endDate.toISOString().slice(0, 10)}.`);
 }
 
-async function assertNoOverlappingBooking(roomId: string, start: Date, end: Date) {
+async function assertNoOverlappingBooking(roomId: string, start: Date, end: Date, excludeId?: string) {
   const overlap = await prisma.housingBooking.findFirst({
     where: {
       roomId,
+      id: excludeId ? { not: excludeId } : undefined,
       status: { in: ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHECKED_IN"] as any },
       checkIn: { lte: end },
       OR: [{ checkOut: null }, { checkOut: { gte: start } }],

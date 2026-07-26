@@ -21969,6 +21969,7 @@ function HousingOperations({
   >(null);
   const [swapBooking, setSwapBooking] = useState<any | null>(null);
   const [checkoutBooking, setCheckoutBooking] = useState<any | null>(null);
+  const [extensionBooking, setExtensionBooking] = useState<any | null>(null);
   const [bulkCheckoutBookings, setBulkCheckoutBookings] = useState<any[]>([]);
   const [housingNotice, setHousingNotice] = useState("");
   const [runningAlerts, setRunningAlerts] = useState(false);
@@ -22891,6 +22892,7 @@ function HousingOperations({
                 ["bedNumber", "Bed"],
                 ["checkIn", "Start Date"],
                 ["checkOut", "End Date"],
+                ["extensionStatus", "Extension"],
                 ["bookingType", "Type"],
                 ["allocationType", "Allocation"],
                 ["status", "Checked-In Status"],
@@ -22965,6 +22967,18 @@ function HousingOperations({
                         className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-black text-white"
                       >
                         Swap Room
+                      </button>
+                    )}
+                    {!["CHECKED_OUT", "CANCELLED", "REJECTED", "NO_SHOW"].includes(record.status) && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setExtensionBooking(record);
+                        }}
+                        className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white"
+                      >
+                        Extend till
                       </button>
                     )}
                     {record.status !== "CHECKED_OUT" && (
@@ -23523,6 +23537,27 @@ function HousingOperations({
               setSwapBooking(null);
               setHousingNotice(
                 "Room swapped successfully. The new room is checked in and the previous room has been released.",
+              );
+            }}
+          />
+        </RequestModalShell>
+      )}
+      {extensionBooking && (
+        <RequestModalShell
+          title={`Extend till - ${extensionBooking.bookingNo || extensionBooking.residentName}`}
+          onClose={() => setExtensionBooking(null)}
+        >
+          <HousingBookingExtensionForm
+            booking={extensionBooking}
+            saving={saving}
+            canApprove={canApprove || canManage}
+            onSubmit={async (body) => {
+              await updateHousing("booking", extensionBooking.id, body);
+              setExtensionBooking(null);
+              setHousingNotice(
+                body.extensionStatus === "EXTENDED"
+                  ? "Booking end date extended and marked EXTENDED."
+                  : "Booking extension request saved as EXTEND_PENDING.",
               );
             }}
           />
@@ -24483,7 +24518,7 @@ function HousingCellValue({
   if (typeof value === "string") {
     const status = value.toUpperCase();
     if (
-      ["AVAILABLE", "APPROVED", "PASSED", "CHECKED_IN", "ACTIVE"].includes(
+      ["AVAILABLE", "APPROVED", "PASSED", "CHECKED_IN", "ACTIVE", "EXTENDED"].includes(
         status,
       )
     )
@@ -24498,6 +24533,7 @@ function HousingCellValue({
         "PENDING",
         "WAITING",
         "PENDING_APPROVAL",
+                "EXTEND_PENDING",
         "SCHEDULED",
         "RESERVED",
       ].includes(status)
@@ -25098,6 +25134,99 @@ function HousingSetupForms({
   );
 }
 
+function HousingBookingExtensionForm({
+  booking,
+  saving,
+  canApprove,
+  onSubmit,
+}: {
+  booking: any;
+  saving: boolean;
+  canApprove: boolean;
+  onSubmit: (body: Record<string, unknown>) => Promise<void> | void;
+}) {
+  const now = new Date();
+  const currentEnd = booking.checkOut ? new Date(booking.checkOut) : booking.checkIn ? new Date(booking.checkIn) : now;
+  const minBase = currentEnd > now ? currentEnd : now;
+  const minExtensionDate = new Date(minBase.getTime() + 60 * 1000);
+  const [extensionEnd, setExtensionEnd] = useState(
+    formatLocalDateTimeInput(
+      booking.extensionEndDate ? new Date(booking.extensionEndDate) : minExtensionDate,
+    ),
+  );
+  const [remarks, setRemarks] = useState(booking.extensionRemarks || "");
+  const [error, setError] = useState("");
+
+  async function submitExtension(extensionStatus: "EXTEND_PENDING" | "EXTENDED") {
+    const requestedDate = new Date(extensionEnd);
+    if (Number.isNaN(requestedDate.getTime())) {
+      setError("Select a valid extension date and time.");
+      return;
+    }
+    if (requestedDate <= minBase) {
+      setError("Extend till date/time must be after the current end date and current time.");
+      return;
+    }
+    setError("");
+    await onSubmit({
+      extensionStatus,
+      extensionEndDate: requestedDate.toISOString(),
+      extensionRemarks: remarks,
+      ...(extensionStatus === "EXTENDED" ? { checkOut: requestedDate.toISOString() } : {}),
+    });
+  }
+
+  return (
+    <div className="grid gap-4 rounded-lg border border-white/80 bg-white p-5 shadow-lift">
+      <div className="grid gap-3 md:grid-cols-2">
+        <PreviewField label="Booking" value={booking.bookingNo} />
+        <PreviewField label="Employee" value={`${booking.employeeId || "-"} / ${booking.residentName || "-"}`} />
+        <PreviewField label="Current end date" value={formatDateCell(booking.checkOut)} />
+        <PreviewField label="Extension" value={booking.extensionStatus || "-"} />
+      </div>
+      <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+        Extend till
+        <input
+          type="datetime-local"
+          min={formatLocalDateTimeInput(minExtensionDate)}
+          value={extensionEnd}
+          onChange={(event) => setExtensionEnd(event.target.value)}
+          className={HOUSING_FIELD_CLASS}
+        />
+      </label>
+      <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+        Extension remarks
+        <textarea
+          value={remarks}
+          onChange={(event) => setRemarks(event.target.value)}
+          placeholder="Reason / approval remarks"
+          className="min-h-24 rounded-lg border border-slate-200 bg-white p-3 text-sm outline-none focus:border-lagoon"
+        />
+      </label>
+      {error && <p className="rounded-lg bg-coral/10 px-3 py-2 text-sm font-black text-coral">{error}</p>}
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={saving}
+          onClick={() => submitExtension("EXTEND_PENDING")}
+          className="h-11 rounded-lg bg-amber-600 px-4 font-black text-white disabled:bg-slate-300"
+        >
+          Mark Extend Pending
+        </button>
+        {canApprove && (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => submitExtension("EXTENDED")}
+            className="h-11 rounded-lg bg-lagoon px-4 font-black text-white disabled:bg-slate-300"
+          >
+            Approve Extension
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 function HousingRoomSwapForm({
   booking,
   rooms,
