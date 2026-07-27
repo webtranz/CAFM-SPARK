@@ -13,7 +13,7 @@ export async function GET(request: Request) {
   const format = url.searchParams.get("format") || "preview";
   const filters = reportFilters(url);
   const rows = await reportRows(type, filters);
-  const kpis = type === "work-orders" ? workOrderKpis(rows) : null;
+  const kpis = reportKpis(type, rows);
 
   if (format === "csv") {
     return file(csv(rows), "text/csv", `${type}.csv`);
@@ -53,9 +53,31 @@ function numberParam(url: URL, key: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function reportKpis(type: string, rows: ReportRow[]) {
+  if (type === "work-orders") return workOrderKpis(rows);
+  if (type === "work-order-generated-summary") {
+    const summary = rows.filter((row) => row.rowType === "SUMMARY");
+    const countFor = (generatedType: string) =>
+      Number(
+        summary.find((row) => row.generatedType === generatedType)
+          ?.totalGenerated ?? 0,
+      );
+    return {
+      preventive_work_orders: countFor("Preventive"),
+      corrective_work_orders: countFor("Corrective"),
+      other_work_orders: countFor("Other"),
+      total_generated: countFor("Total"),
+    };
+  }
+  return null;
+}
+
 async function reportRows(type: string, filters: ReturnType<typeof reportFilters>): Promise<ReportRow[]> {
   if (type.startsWith("housing-")) {
     return housingReportRows(type, filters);
+  }
+  if (type === "work-order-generated-summary") {
+    return workOrderGeneratedReportRows(filters);
   }
   if (type === "work-orders") {
     const rows = await prisma.workOrder.findMany({
@@ -314,6 +336,114 @@ async function reportRows(type: string, filters: ReturnType<typeof reportFilters
   }));
 }
 
+async function workOrderGeneratedReportRows(filters: ReturnType<typeof reportFilters>) {
+  const createdAt = dateRangeFilter(filters.dateFrom, filters.dateTo);
+  const rows = await prisma.workOrder.findMany({
+    where: createdAt ? { createdAt } : undefined,
+    include: {
+      asset: true,
+      assignedTo: { select: { name: true, email: true } },
+      request: { select: { ticketNo: true, title: true, location: true } },
+    },
+    orderBy: [{ createdAt: "desc" }, { woNo: "desc" }],
+  });
+  const details = rows.map((row) => {
+    const generatedType = generatedWorkOrderType(row);
+    const location =
+      row.asset?.locationCode ||
+      row.asset?.room ||
+      row.request?.location ||
+      row.asset?.buildingCode ||
+      "";
+    return {
+      rowType: "DETAIL",
+      generatedType,
+      totalGenerated: "",
+      fromDate: filters.dateFrom || "All",
+      toDate: filters.dateTo || "All",
+      workOrderNumber: row.woNo,
+      title: row.title,
+      status: row.status,
+      priority: row.priority,
+      department: row.departmentCode ?? "",
+      service: row.serviceCode ?? "",
+      assignedTeam: row.assignedTeamCode ?? "",
+      assignedTo: row.assignedTo?.name ?? row.assignedTo?.email ?? "",
+      assetCode: row.asset?.tag ?? "",
+      assetName: row.asset?.assetDescription || row.asset?.name || "",
+      location,
+      workType: row.type,
+      plannedStart: dateValue(row.plannedStart),
+      dueDate: dateValue(row.dueAt),
+      generatedAt: dateValue(row.createdAt),
+      updatedAt: dateValue(row.updatedAt),
+      linkedTicket: row.request?.ticketNo ?? "",
+    };
+  });
+  const counts = details.reduce(
+    (acc, row) => {
+      acc[row.generatedType] = (acc[row.generatedType] ?? 0) + 1;
+      acc.Total += 1;
+      return acc;
+    },
+    { Preventive: 0, Corrective: 0, Other: 0, Total: 0 } as Record<string, number>,
+  );
+  const baseSummary = {
+    rowType: "SUMMARY",
+    totalGenerated: 0,
+    fromDate: filters.dateFrom || "All",
+    toDate: filters.dateTo || "All",
+    workOrderNumber: "",
+    title: "",
+    status: "",
+    priority: "",
+    department: "",
+    service: "",
+    assignedTeam: "",
+    assignedTo: "",
+    assetCode: "",
+    assetName: "",
+    location: "",
+    workType: "",
+    plannedStart: "",
+    dueDate: "",
+    generatedAt: "",
+    updatedAt: "",
+    linkedTicket: "",
+  };
+  const summaryRows = ["Preventive", "Corrective", "Other", "Total"].map(
+    (generatedType) => ({
+      ...baseSummary,
+      generatedType,
+      totalGenerated: counts[generatedType] ?? 0,
+      title:
+        generatedType === "Total"
+          ? "Total work orders generated"
+          : `${generatedType} work orders generated`,
+    }),
+  );
+  return [...summaryRows, ...details];
+}
+
+function dateRangeFilter(dateFrom: string, dateTo: string) {
+  const range: { gte?: Date; lte?: Date } = {};
+  if (dateFrom) {
+    const from = new Date(`${dateFrom}T00:00:00`);
+    if (!Number.isNaN(from.getTime())) range.gte = from;
+  }
+  if (dateTo) {
+    const to = new Date(`${dateTo}T23:59:59.999`);
+    if (!Number.isNaN(to.getTime())) range.lte = to;
+  }
+  return Object.keys(range).length ? range : null;
+}
+
+function generatedWorkOrderType(row: { type: string; title: string; jobPlan: string; ppmId?: string | null }) {
+  const text = `${row.type} ${row.title} ${row.jobPlan}`.toLowerCase();
+  if (row.ppmId || row.title.trim().toLowerCase().startsWith("ppm |") || text.includes("preventive") || text.includes("ppm")) return "Preventive";
+  if (text.includes("corrective") || text.includes("reactive") || text.includes("repair")) return "Corrective";
+  return "Other";
+}
 async function housingReportRows(type: string, filters: ReturnType<typeof reportFilters>): Promise<ReportRow[]> {
   if (type === "housing-dashboard") {
     const [rooms, bookings, inspections, assets, inventory, approvals, notifications] = await Promise.all([

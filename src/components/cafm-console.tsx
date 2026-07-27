@@ -5767,6 +5767,14 @@ function WorkOrders({
   const [assignedFilter, setAssignedFilter] = useState("All");
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [monthDate, setMonthDate] = useState(() => new Date());
+  const [generatedReportFrom, setGeneratedReportFrom] = useState(() => {
+    const date = new Date();
+    date.setDate(1);
+    return date.toISOString().slice(0, 10);
+  });
+  const [generatedReportTo, setGeneratedReportTo] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
   const [page, setPage] = useState(1);
   const [workRowsSource, setWorkRowsSource] = useState<any[]>(() => liveWorkOrderSort(data.workOrders, role));
   const [workTotal, setWorkTotal] = useState(
@@ -5887,6 +5895,15 @@ function WorkOrders({
     selectedVisibleWorks.length === visibleWorks.length;
   const someVisibleWorksSelected =
     selectedVisibleWorks.length > 0 && !allVisibleWorksSelected;
+  const generatedWorkOrderReportHref = (format: string) => {
+    const params = new URLSearchParams({
+      type: "work-order-generated-summary",
+      format,
+    });
+    if (generatedReportFrom) params.set("dateFrom", generatedReportFrom);
+    if (generatedReportTo) params.set("dateTo", generatedReportTo);
+    return `/api/reports?${params.toString()}`;
+  };
 
   useEffect(() => {
     if (
@@ -6223,6 +6240,60 @@ function WorkOrders({
     <section className="space-y-5">
       <Panel title="Work Orders" icon={Wrench}>
         <ReportButtons type="work-orders" label="Work orders report" />
+        <div className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm font-bold text-slate-700">
+          <div className="mr-auto min-w-[240px]">
+            <p className="text-xs font-black uppercase text-slate-500">
+              Generated Work Orders Report
+            </p>
+            <p className="text-sm font-black text-ink">
+              Preventive vs Corrective totals by generated date
+            </p>
+          </div>
+          <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+            From
+            <input
+              type="date"
+              value={generatedReportFrom}
+              onChange={(event) => setGeneratedReportFrom(event.target.value)}
+              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-ink outline-none focus:border-lagoon"
+            />
+          </label>
+          <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+            To
+            <input
+              type="date"
+              value={generatedReportTo}
+              onChange={(event) => setGeneratedReportTo(event.target.value)}
+              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-ink outline-none focus:border-lagoon"
+            />
+          </label>
+          <a
+            className="h-10 rounded-lg bg-white px-3 py-2.5 text-xs font-black text-ink shadow-sm hover:text-lagoon"
+            href={generatedWorkOrderReportHref("html")}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Preview
+          </a>
+          <a
+            className="h-10 rounded-lg bg-lagoon px-3 py-2.5 text-xs font-black text-white shadow-sm"
+            href={generatedWorkOrderReportHref("csv")}
+          >
+            CSV
+          </a>
+          <a
+            className="h-10 rounded-lg bg-leaf px-3 py-2.5 text-xs font-black text-white shadow-sm"
+            href={generatedWorkOrderReportHref("excel")}
+          >
+            Excel
+          </a>
+          <a
+            className="h-10 rounded-lg bg-coral px-3 py-2.5 text-xs font-black text-white shadow-sm"
+            href={generatedWorkOrderReportHref("pdf")}
+          >
+            PDF
+          </a>
+        </div>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
           <div className="flex gap-2">
             <button
