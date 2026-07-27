@@ -120,6 +120,7 @@ export async function GET(request: Request) {
         { departmentCode: { contains: query, mode: "insensitive" } },
         { serviceCode: { contains: query, mode: "insensitive" } },
         { assignedTeamCode: { contains: query, mode: "insensitive" } },
+        { jobPlanCode: { contains: query, mode: "insensitive" } },
         { jobPlan: { contains: query, mode: "insensitive" } },
         { asset: { is: { tag: { contains: query, mode: "insensitive" } } } },
         { asset: { is: { name: { contains: query, mode: "insensitive" } } } },

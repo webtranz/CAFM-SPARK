@@ -964,6 +964,46 @@ function workMetricRows(workOrders: any[], showOnlyDelayed: boolean) {
     );
 }
 
+function workOrderStatus(work: any) {
+  return String(work?.status ?? "").toUpperCase();
+}
+
+function workOrderPpmCode(work: any) {
+  const rawCode = String(work?.jobPlanCode ?? work?.ppmCode ?? "").trim();
+  if (rawCode && rawCode !== "-") return rawCode.toUpperCase();
+  const titleMatch = String(work?.title ?? "").match(/\bPPM\s*\|\s*([^|]+)/i);
+  if (titleMatch?.[1]?.trim()) return titleMatch[1].trim().toUpperCase();
+  const jobPlanMatch = String(work?.jobPlan ?? "").match(/\b(JP[A-Z0-9]+)\b/i);
+  return jobPlanMatch?.[1] ? jobPlanMatch[1].trim().toUpperCase() : "";
+}
+
+function isPreventiveWorkOrder(work: any) {
+  const type = String(work?.type ?? "").toLowerCase();
+  const title = String(work?.title ?? "").toUpperCase();
+  return Boolean(workOrderPpmCode(work)) && (type.includes("preventive") || title.startsWith("PPM |"));
+}
+
+function samePpmWorkOrder(work: any, ppmCode: string) {
+  return Boolean(ppmCode) && workOrderPpmCode(work) === ppmCode && isPreventiveWorkOrder(work);
+}
+
+function isReviewReadyWorkOrder(work: any) {
+  return ["PENDING_SUPERVISOR_REVIEW", "COMPLETED"].includes(workOrderStatus(work));
+}
+
+function isServiceActionableWorkOrder(work: any) {
+  return (
+    isPreventiveWorkOrder(work) &&
+    ![
+      "CLOSED",
+      "PENDING_SUPERVISOR_REVIEW",
+      "COMPLETED",
+      "VERIFIED",
+      "CANCELLED",
+      "REJECTED",
+    ].includes(workOrderStatus(work))
+  );
+}
 function liveWorkOrderSort(rows: any[], role = "") {
   const priority = (work: any) => {
     const status = String(work?.status || "").toUpperCase();
@@ -5888,6 +5928,20 @@ function WorkOrders({
     visibleWorks[0] ??
     workRowsSource[0] ??
     data.workOrders[0];
+  const selectedPpmCode = workOrderPpmCode(selectedWork);
+  const samePpmLoadedWorks = useMemo(
+    () =>
+      selectedPpmCode
+        ? workRowsSource.filter((work) => samePpmWorkOrder(work, selectedPpmCode))
+        : [],
+    [workRowsSource, selectedPpmCode],
+  );
+  const samePpmReviewLoadedCount = samePpmLoadedWorks.filter(
+    isReviewReadyWorkOrder,
+  ).length;
+  const samePpmServiceLoadedCount = samePpmLoadedWorks.filter(
+    isServiceActionableWorkOrder,
+  ).length;
   const hasMoreWorks = workRowsSource.length < workTotal;
   const selectedVisibleWorks = visibleWorks.filter((work) =>
     selectedWorkIds.has(work.id),
@@ -6197,6 +6251,164 @@ function WorkOrders({
     }
   }
 
+  function mergeFetchedWorkOrders(rows: any[]) {
+    if (!rows.length) return;
+    setWorkRowsSource((current) => {
+      const byId = new Map<string, any>();
+      current.forEach((work) => byId.set(work.id, work));
+      rows.forEach((work) => {
+        if (work?.id) byId.set(work.id, { ...(byId.get(work.id) ?? {}), ...work });
+      });
+      return liveWorkOrderSort(Array.from(byId.values()), role);
+    });
+    setWorkTotal((current) => Math.max(current, workRowsSource.length, rows.length));
+  }
+
+  async function loadSamePpmEligibleWorkOrders(
+    ppmCode: string,
+    mode: "review" | "service",
+  ) {
+    const params = new URLSearchParams({
+      page: "1",
+      pageSize: "all",
+      query: ppmCode,
+      status: "All",
+      priority: "All",
+      category: "All",
+      department: "All",
+      type: "All",
+      assigned: "All",
+      overdueOnly: "false",
+      delayedOnly: "false",
+    });
+    const response = await fetch(`/api/work-orders?${params.toString()}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error("Unable to load same PPM work orders.");
+    const result = await response.json();
+    const samePpmRows = (result.workOrders ?? []).filter((work: any) =>
+      samePpmWorkOrder(work, ppmCode),
+    );
+    mergeFetchedWorkOrders(samePpmRows);
+    return samePpmRows.filter(
+      mode === "review" ? isReviewReadyWorkOrder : isServiceActionableWorkOrder,
+    );
+  }
+
+  async function selectSamePpmWorkOrders(mode: "review" | "service") {
+    const ppmCode = selectedPpmCode;
+    if (!ppmCode || bulkProgress) return;
+    const targetLabel =
+      mode === "review"
+        ? "pending supervisor review work orders"
+        : "active service-team work orders";
+    setBulkProgress({
+      total: 1,
+      done: 0,
+      label: `Loading ${ppmCode} ${targetLabel}`,
+    });
+    try {
+      const eligible = await loadSamePpmEligibleWorkOrders(ppmCode, mode);
+      setSelectedWorkIds(new Set(eligible.map((work: any) => work.id)));
+      setBulkProgress({
+        total: Math.max(eligible.length, 1),
+        done: eligible.length,
+        label: eligible.length
+          ? `Selected ${eligible.length.toLocaleString()} ${targetLabel}`
+          : `No ${targetLabel} found for ${ppmCode}`,
+      });
+    } catch (error) {
+      console.error(error);
+      setBulkProgress({
+        total: 1,
+        done: 0,
+        label: `Unable to load ${ppmCode} work orders`,
+      });
+    } finally {
+      window.setTimeout(() => setBulkProgress(null), 1400);
+    }
+  }
+
+  async function bulkUpdateSamePpmWorkOrders(
+    targetStatus: "IN_PROGRESS" | "COMPLETED" | "CLOSED",
+    mode: "review" | "service",
+  ) {
+    const ppmCode = selectedPpmCode;
+    if (!ppmCode || bulkProgress) return;
+    const actionLabel =
+      targetStatus === "CLOSED"
+        ? "Closing pending supervisor review work orders"
+        : targetStatus === "COMPLETED"
+          ? "Submitting work orders for supervisor review"
+          : "Moving work orders to in progress";
+    setBulkProgress({
+      total: Math.max(1, samePpmLoadedWorks.length),
+      done: 0,
+      label: `Loading ${ppmCode} work orders`,
+    });
+    let eligible: any[] = [];
+    try {
+      eligible = await loadSamePpmEligibleWorkOrders(ppmCode, mode);
+    } catch (error) {
+      console.error(error);
+      setBulkProgress({
+        total: 1,
+        done: 0,
+        label: `Unable to load ${ppmCode} work orders`,
+      });
+      window.setTimeout(() => setBulkProgress(null), 1600);
+      return;
+    }
+    if (!eligible.length) {
+      setBulkProgress({
+        total: 1,
+        done: 0,
+        label: `No eligible work orders found for ${ppmCode}`,
+      });
+      window.setTimeout(() => setBulkProgress(null), 1600);
+      return;
+    }
+    if (
+      !window.confirm(
+        `${actionLabel} for ${eligible.length.toLocaleString()} preventive work orders under PPM ${ppmCode}?`,
+      )
+    ) {
+      setBulkProgress(null);
+      return;
+    }
+    setSelectedWorkIds(new Set(eligible.map((work) => work.id)));
+    setBulkProgress({ total: eligible.length, done: 0, label: actionLabel });
+    let success = 0;
+    const failedIds: string[] = [];
+    for (const work of eligible) {
+      try {
+        const updated = await updateWorkStatus(work.id, targetStatus);
+        if (updated?.id) {
+          mergeLocalWorkOrder(updated);
+          success += 1;
+        } else {
+          failedIds.push(work.id);
+        }
+      } catch (error) {
+        console.error(error);
+        failedIds.push(work.id);
+      }
+      setBulkProgress({
+        total: eligible.length,
+        done: success + failedIds.length,
+        label: actionLabel,
+      });
+    }
+    setSelectedWorkIds(new Set(failedIds));
+    setBulkProgress({
+      total: eligible.length,
+      done: success,
+      label: failedIds.length
+        ? `${actionLabel}: ${success.toLocaleString()} updated, ${failedIds.length.toLocaleString()} failed`
+        : `${actionLabel} complete`,
+    });
+    window.setTimeout(() => setBulkProgress(null), 2200);
+  }
   async function bulkDeleteSelectedWorks() {
     const ids = Array.from(selectedWorkIds);
     if (!ids.length) return;
@@ -6396,6 +6608,71 @@ function WorkOrders({
               done={bulkProgress.done}
               total={bulkProgress.total}
             />
+          </div>
+        )}
+        {selectedPpmCode && view === "list" && (canFinalReview || (canExecute && isTechnician)) && (
+          <div className="mb-4 rounded-lg border border-lagoon/20 bg-lagoon/5 p-3 text-sm font-bold text-slate-700">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="mr-auto min-w-[260px]">
+                <p className="text-xs font-black uppercase text-slate-500">
+                  Same PPM bulk actions
+                </p>
+                <p className="text-base font-black text-ink">
+                  PPM {selectedPpmCode}
+                </p>
+                <p className="text-xs font-bold text-slate-500">
+                  Loaded {samePpmLoadedWorks.length.toLocaleString()} same-code WOs - Review {samePpmReviewLoadedCount.toLocaleString()} - Active {samePpmServiceLoadedCount.toLocaleString()}
+                </p>
+              </div>
+              {canFinalReview && (
+                <>
+                  <button
+                    type="button"
+                    disabled={Boolean(bulkProgress)}
+                    onClick={() => selectSamePpmWorkOrders("review")}
+                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-lagoon disabled:bg-slate-100 disabled:text-slate-400"
+                  >
+                    Select All Pending Review
+                  </button>
+                  <button
+                    type="button"
+                    disabled={Boolean(bulkProgress)}
+                    onClick={() => bulkUpdateSamePpmWorkOrders("CLOSED", "review")}
+                    className="h-10 rounded-lg bg-ink px-3 text-xs font-black text-white disabled:bg-slate-300"
+                  >
+                    Close All Same PPM Review
+                  </button>
+                </>
+              )}
+              {canExecute && isTechnician && (
+                <>
+                  <button
+                    type="button"
+                    disabled={Boolean(bulkProgress)}
+                    onClick={() => selectSamePpmWorkOrders("service")}
+                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-lagoon disabled:bg-slate-100 disabled:text-slate-400"
+                  >
+                    Select All Active Same PPM
+                  </button>
+                  <button
+                    type="button"
+                    disabled={Boolean(bulkProgress)}
+                    onClick={() => bulkUpdateSamePpmWorkOrders("IN_PROGRESS", "service")}
+                    className="h-10 rounded-lg bg-lagoon px-3 text-xs font-black text-white disabled:bg-slate-300"
+                  >
+                    Make All In Progress
+                  </button>
+                  <button
+                    type="button"
+                    disabled={Boolean(bulkProgress)}
+                    onClick={() => bulkUpdateSamePpmWorkOrders("COMPLETED", "service")}
+                    className="h-10 rounded-lg bg-leaf px-3 text-xs font-black text-white disabled:bg-slate-300"
+                  >
+                    Submit All For Review
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         )}
         <div className="mb-4 flex flex-wrap gap-3 rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-700">
