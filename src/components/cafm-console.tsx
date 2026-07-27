@@ -8838,6 +8838,106 @@ function serviceRequestLocationHierarchySegments(location?: any) {
     }))
     .filter((item) => item.value && item.value.toLowerCase() !== "unassigned");
 }
+function serviceRequestLocationTokens(location: any) {
+  const parsed = selectedParsedHierarchy("", location);
+  return hierarchyCodeSet([
+    location?.code,
+    location?.description,
+    location?.site,
+    location?.parentLocation,
+    location?.zone,
+    location?.building,
+    location?.floor,
+    location?.room,
+    location?.locationClass,
+    location?.type,
+    parsed.site,
+    parsed.building,
+    parsed.floor,
+    parsed.room,
+    parsed.roomCode,
+  ]);
+}
+
+function serviceRequestLocationSiteValue(location: any) {
+  const parsed = selectedParsedHierarchy("", location);
+  return location?.site || parsed.site || "";
+}
+
+function serviceRequestLocationParentValue(location: any) {
+  return (
+    location?.parentLocation ||
+    location?.zone ||
+    serviceRequestLocationSiteValue(location) ||
+    ""
+  );
+}
+
+function serviceRequestLocationBuildingValue(location: any) {
+  const parsed = selectedParsedHierarchy("", location);
+  return location?.building || parsed.building || "";
+}
+
+function serviceRequestLocationFloorValue(location: any) {
+  const parsed = selectedParsedHierarchy("", location);
+  return location?.floor || parsed.floor || "";
+}
+
+function serviceRequestLocationRoomValue(location: any) {
+  const parsed = selectedParsedHierarchy("", location);
+  return location?.room || parsed.room || parsed.roomCode || location?.code || "";
+}
+
+function serviceRequestLocationMatchesValue(
+  location: any,
+  selectedValue: string,
+  directValues: unknown[],
+) {
+  const selected = normalizedHierarchyCode(selectedValue);
+  if (!selected) return true;
+  if (hierarchyCodeSet(directValues).has(selected)) return true;
+  return serviceRequestLocationTokens(location).has(selected);
+}
+
+function serviceRequestLocationMatchesSite(location: any, siteValue: string) {
+  const parsed = selectedParsedHierarchy("", location);
+  return serviceRequestLocationMatchesValue(location, siteValue, [
+    location?.site,
+    parsed.site,
+  ]);
+}
+
+function serviceRequestLocationMatchesParent(location: any, parentValue: string) {
+  const parsed = selectedParsedHierarchy("", location);
+  return serviceRequestLocationMatchesValue(location, parentValue, [
+    location?.parentLocation,
+    location?.zone,
+    location?.site,
+    parsed.site,
+    location?.building,
+    parsed.building,
+  ]);
+}
+
+function serviceRequestLocationMatchesBuilding(
+  location: any,
+  buildingValue: string,
+) {
+  const parsed = selectedParsedHierarchy("", location);
+  return serviceRequestLocationMatchesValue(location, buildingValue, [
+    location?.building,
+    parsed.building,
+  ]);
+}
+
+function serviceRequestLocationMatchesFloor(location: any, floorValue: string) {
+  const parsed = selectedParsedHierarchy("", location);
+  return serviceRequestLocationMatchesValue(location, floorValue, [
+    location?.floor,
+    parsed.floor,
+  ]);
+}
+
 function serviceRequestAssetMatchLevel(asset: any, selectedLocation?: any) {
   if (!selectedLocation) return "All assets";
   const selectedCode = normalizedHierarchyCode(selectedLocation.code);
@@ -9462,7 +9562,7 @@ function ServiceRequestForm({
     () =>
       uniqueLocationOptions(
         activeLocations,
-        (location) => location.site,
+        serviceRequestLocationSiteValue,
         (location, value) =>
           [value, locationOptionDetail(location)].filter(Boolean).join(" - "),
       ),
@@ -9470,8 +9570,8 @@ function ServiceRequestForm({
   );
   const parentLocationRows = useMemo(
     () =>
-      activeLocations.filter(
-        (location) => !siteValue || location.site === siteValue,
+      activeLocations.filter((location) =>
+        serviceRequestLocationMatchesSite(location, siteValue),
       ),
     [activeLocations, siteValue],
   );
@@ -9479,11 +9579,11 @@ function ServiceRequestForm({
     () =>
       uniqueLocationOptions(
         parentLocationRows,
-        (location) => location.parentLocation || location.zone || location.code,
+        serviceRequestLocationParentValue,
         (location, value) =>
           [
             value,
-            location.description || location.building,
+            location.description || serviceRequestLocationBuildingValue(location),
             location.locationClass,
           ]
             .filter(Boolean)
@@ -9491,23 +9591,27 @@ function ServiceRequestForm({
       ),
     [parentLocationRows],
   );
-  const buildingRows = useMemo(
-    () =>
-      activeLocations.filter(
-        (location) =>
-          (!siteValue || location.site === siteValue) &&
-          (!parentLocationValue ||
-            location.parentLocation === parentLocationValue ||
-            location.zone === parentLocationValue ||
-            location.code === parentLocationValue),
-      ),
-    [activeLocations, siteValue, parentLocationValue],
-  );
+  const buildingRows = useMemo(() => {
+    const scopedRows = activeLocations.filter(
+      (location) =>
+        serviceRequestLocationMatchesSite(location, siteValue) &&
+        serviceRequestLocationMatchesParent(location, parentLocationValue),
+    );
+    const rowsWithBuildings = scopedRows.filter((location) =>
+      serviceRequestLocationBuildingValue(location),
+    );
+    if (rowsWithBuildings.length) return rowsWithBuildings;
+    return activeLocations.filter(
+      (location) =>
+        serviceRequestLocationMatchesSite(location, siteValue) &&
+        serviceRequestLocationBuildingValue(location),
+    );
+  }, [activeLocations, siteValue, parentLocationValue]);
   const buildingDropdownOptions = useMemo(
     () =>
       uniqueLocationOptions(
         buildingRows,
-        (location) => location.building,
+        serviceRequestLocationBuildingValue,
         (location, value) =>
           [value, location.description, location.locationClass]
             .filter(Boolean)
@@ -9519,12 +9623,9 @@ function ServiceRequestForm({
     () =>
       activeLocations.filter(
         (location) =>
-          (!siteValue || location.site === siteValue) &&
-          (!parentLocationValue ||
-            location.parentLocation === parentLocationValue ||
-            location.zone === parentLocationValue ||
-            location.code === parentLocationValue) &&
-          (!buildingValue || location.building === buildingValue),
+          serviceRequestLocationMatchesSite(location, siteValue) &&
+          serviceRequestLocationMatchesParent(location, parentLocationValue) &&
+          serviceRequestLocationMatchesBuilding(location, buildingValue),
       ),
     [activeLocations, siteValue, parentLocationValue, buildingValue],
   );
@@ -9532,7 +9633,7 @@ function ServiceRequestForm({
     () =>
       uniqueLocationOptions(
         floorRows,
-        (location) => location.floor,
+        serviceRequestLocationFloorValue,
         (location, value) =>
           [value, location.description, location.locationClass]
             .filter(Boolean)
@@ -9545,13 +9646,10 @@ function ServiceRequestForm({
       activeLocations
         .filter(
           (location) =>
-            (!siteValue || location.site === siteValue) &&
-            (!parentLocationValue ||
-              location.parentLocation === parentLocationValue ||
-              location.zone === parentLocationValue ||
-              location.code === parentLocationValue) &&
-            (!buildingValue || location.building === buildingValue) &&
-            (!floorValue || location.floor === floorValue),
+            serviceRequestLocationMatchesSite(location, siteValue) &&
+            serviceRequestLocationMatchesParent(location, parentLocationValue) &&
+            serviceRequestLocationMatchesBuilding(location, buildingValue) &&
+            serviceRequestLocationMatchesFloor(location, floorValue),
         )
         .sort((first, second) =>
           serviceRequestLocationLabel(first).localeCompare(
@@ -9804,12 +9902,10 @@ function ServiceRequestForm({
     if (!location) return;
     setLocationCodeValue(location.code);
     setLocationSearchValue(locationSelectLabel(location));
-    setSiteValue(location.site || "");
-    setParentLocationValue(
-      location.parentLocation || location.zone || location.code || "",
-    );
-    setBuildingValue(location.building || "");
-    setFloorValue(location.floor || "");
+    setSiteValue(serviceRequestLocationSiteValue(location));
+    setParentLocationValue(serviceRequestLocationParentValue(location));
+    setBuildingValue(serviceRequestLocationBuildingValue(location));
+    setFloorValue(serviceRequestLocationFloorValue(location));
   }
 
   async function createCategory() {
@@ -9893,7 +9989,7 @@ function ServiceRequestForm({
         <input type="hidden" name="parentLocation" value={parentLocationValue} />
         <input type="hidden" name="buildingCode" value={buildingValue} />
         <input type="hidden" name="floor" value={floorValue} />
-        <input type="hidden" name="room" value={selectedLocation?.room || locationCodeValue} />
+        <input type="hidden" name="room" value={selectedLocation ? serviceRequestLocationRoomValue(selectedLocation) : locationCodeValue} />
         <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
           <div className="grid gap-2">
             <span className="text-xs font-black uppercase text-slate-500">
