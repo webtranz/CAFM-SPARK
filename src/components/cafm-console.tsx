@@ -2571,6 +2571,8 @@ export function CafmConsole({
               view={activeView}
               saving={saving}
               canManage={can("housing.manage")}
+              canCreateBookings={can("housing.manage") || can("housing.create")}
+              canOperateBookings={can("housing.manage") || can("housing.edit")}
               canApprove={can("housing.approve")}
               isAdmin={isAdmin}
               userRole={user.role}
@@ -22372,6 +22374,8 @@ function HousingOperations({
   view,
   saving,
   canManage,
+  canCreateBookings,
+  canOperateBookings,
   canApprove,
   isAdmin,
   userRole,
@@ -22384,6 +22388,8 @@ function HousingOperations({
   view: string;
   saving: boolean;
   canManage: boolean;
+  canCreateBookings: boolean;
+  canOperateBookings: boolean;
   canApprove: boolean;
   isAdmin: boolean;
   userRole: string;
@@ -22845,10 +22851,14 @@ function HousingOperations({
                         : view === "housing-reports"
                           ? "reports"
                           : "dashboard";
+  const normalizedHousingRole = String(userRole || "").toLowerCase();
   const canReceptionAllocate =
-    String(userRole || "")
-      .toLowerCase()
-      .includes("reception") || userRole === "Admin";
+    canOperateBookings &&
+    (canManage ||
+      normalizedHousingRole.includes("reception") ||
+      normalizedHousingRole.includes("helpdesk") ||
+      normalizedHousingRole.includes("help desk") ||
+      userRole === "Admin");
   const currentApprovalFor = (booking: any) =>
     (booking.approvals || []).find(
       (approval: any) => approval.status === "PENDING",
@@ -23262,13 +23272,13 @@ function HousingOperations({
       {activePanel === "bookings" && (
         <section className="grid gap-5">
           <div className="grid gap-3">
-            {canManage && (
+            {canCreateBookings && (
               <HousingCreateButton
                 label="Create New Booking"
                 onClick={() => setCreateHousingForm("booking")}
               />
             )}
-            {canManage && (
+            {canOperateBookings && (
               <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
                 <button
                   type="button"
@@ -23351,7 +23361,7 @@ function HousingOperations({
                 );
               }}
               actions={(record) =>
-                (canManage || canApprove) && (
+                (canOperateBookings || canApprove) && (
                   <div className="flex flex-wrap gap-2">
                     {canApprove && currentApprovalFor(record) && (
                       <button
@@ -23994,7 +24004,7 @@ function HousingOperations({
           <HousingBookingExtensionForm
             booking={extensionBooking}
             saving={saving}
-            canApprove={canApprove || canManage}
+            canApprove={canApprove || canOperateBookings}
             onSubmit={async (body) => {
               await updateHousing("booking", extensionBooking.id, body);
               setExtensionBooking(null);

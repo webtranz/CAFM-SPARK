@@ -74,7 +74,14 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
       const requestedRoomId = text(input.roomId);
       const isRoomSwap = Boolean(requestedRoomId && requestedRoomId !== current.roomId);
       const isSameDayRecheckIn = current.status === "CHECKED_OUT" && current.checkOut && current.checkOut.toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10);
-      if (!role.includes("reception") && role !== "admin") throw new Error("Only Reception Team can execute final room allocation.");
+      const canExecuteAllocation =
+        role === "admin" ||
+        role.includes("reception") ||
+        role.includes("helpdesk") ||
+        role.includes("help desk") ||
+        role.includes("housing manager") ||
+        role.includes("facility manager");
+      if (!canExecuteAllocation) throw new Error("Only Reception, Helpdesk, or Housing Operations can execute final room allocation.");
       if (current.status !== "APPROVED" && !isRoomSwap && !isSameDayRecheckIn) throw new Error("Room allocation can be executed only after Camp Manager final approval.");
       if (!input.keyHandoverAt) input.keyHandoverAt = new Date().toISOString();
     }
