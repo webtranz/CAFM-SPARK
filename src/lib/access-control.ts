@@ -26,6 +26,11 @@ export function accessRole(user: AccessUser | null) {
   return "requester";
 }
 
+export function isHelpdeskRole(user: AccessUser | null) {
+  const role = comparable(user?.role);
+  return role.includes("helpdesk");
+}
+
 export function sameDepartment(user: AccessUser | null, departmentCode?: string | null) {
   const recordDepartment = comparable(departmentCode);
   if (!recordDepartment) return false;

@@ -941,6 +941,48 @@ function localWorkMetric(work: any) {
   };
 }
 
+function compactTicketMatchText(...values: unknown[]) {
+  return values
+    .map((value) => String(value ?? ""))
+    .join(" ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function isHelpdeskRoleName(role: string) {
+  return compactTicketMatchText(role).includes("helpdesk");
+}
+
+function isHskHousekeepingReactiveTicket(record: any) {
+  const departmentText = compactTicketMatchText(
+    record?.departmentCode,
+    record?.serviceCode,
+    record?.assignedTeamCode,
+    record?.category,
+    record?.assetType,
+    record?.type,
+    record?.title,
+    record?.request?.departmentCode,
+    record?.request?.serviceCode,
+    record?.request?.assignedTeamCode,
+    record?.request?.category,
+    record?.request?.title,
+  );
+  const typeText = compactTicketMatchText(
+    record?.type,
+    record?.category,
+    record?.assetType,
+    record?.title,
+    record?.jobPlan,
+    record?.description,
+    record?.request?.category,
+    record?.request?.title,
+    record?.request?.description,
+  );
+  const isHousekeeping = departmentText.includes("hsk") || departmentText.includes("housekeeping");
+  const isPreventive = Boolean(record?.ppmId) || typeText.includes("ppm") || typeText.includes("preventive");
+  return isHousekeeping && !isPreventive;
+}
 function workMetricRows(workOrders: any[], showOnlyDelayed: boolean) {
   return workOrders
     .map((work) => {
@@ -1133,6 +1175,9 @@ function dashboardSubtitle(role: string, department?: string | null) {
   if (lower.includes("supervisor")) {
     return `Supervisor dashboard: department-specific requests, work orders and PPM for ${department || "your department"}.`;
   }
+  if (isHelpdeskRoleName(role)) {
+    return "Helpdesk dashboard: create, triage and close service requests, including HSK reactive tickets.";
+  }
   if (lower.includes("technician") || lower.includes("service team")) {
     return "Technician dashboard: assigned work orders, assigned requests and assigned PPM task execution.";
   }
@@ -1149,6 +1194,7 @@ function dashboardSubtitle(role: string, department?: string | null) {
 function roleKindLabel(role: string) {
   const lower = role.toLowerCase();
   if (lower === "admin" || lower.includes("super admin")) return "admin";
+  if (isHelpdeskRoleName(role)) return "helpdesk";
   if (lower.includes("supervisor")) return "supervisor";
   if (lower.includes("technician") || lower.includes("service team"))
     return "technician";
@@ -5862,11 +5908,15 @@ function WorkOrders({
   );
   const [workLoading, setWorkLoading] = useState(false);
   const workScrollRef = useRef<HTMLDivElement | null>(null);
-  const isTechnician = roleKindLabel(role) === "technician";
-  const isAdmin = roleKindLabel(role) === "admin";
+  const roleKind = roleKindLabel(role);
+  const isTechnician = roleKind === "technician";
+  const isHelpdeskView = roleKind === "helpdesk";
+  const isAdmin = roleKind === "admin";
   const canAssignOrEdit = permissions.manageWork && !isTechnician;
   const canExecute = permissions.executeWork;
   const canFinalReview = permissions.verifyWork && !isTechnician;
+  const canHelpdeskManageHskWork = (work: any) =>
+    isHelpdeskView && isHskHousekeepingReactiveTicket(work);
   const statuses = [
     "All",
     ...Array.from(
@@ -7028,7 +7078,7 @@ function WorkOrders({
                               Edit
                             </button>
                           )}
-                          {canExecute &&
+                          {(canExecute || canHelpdeskManageHskWork(work)) &&
                             work.status !== "CLOSED" &&
                             work.status !== "PENDING_SUPERVISOR_REVIEW" && (
                               <button
@@ -7047,7 +7097,7 @@ function WorkOrders({
                                   : "In Progress"}
                               </button>
                             )}
-                          {canExecute &&
+                          {(canExecute || canHelpdeskManageHskWork(work)) &&
                             work.status !== "CLOSED" &&
                             work.status !== "PENDING_SUPERVISOR_REVIEW" && (
                               <button
@@ -7066,7 +7116,7 @@ function WorkOrders({
                                   : "On Hold"}
                               </button>
                             )}
-                          {canExecute &&
+                          {(canExecute || canHelpdeskManageHskWork(work)) &&
                             work.status !== "CLOSED" &&
                             work.status !== "PENDING_SUPERVISOR_REVIEW" && (
                               <button
@@ -7088,7 +7138,7 @@ function WorkOrders({
                                   : "Submit Review"}
                               </button>
                             )}
-                          {canFinalReview &&
+                          {(canFinalReview || canHelpdeskManageHskWork(work)) &&
                             ["PENDING_SUPERVISOR_REVIEW", "COMPLETED"].includes(
                               work.status,
                             ) && (
@@ -7105,7 +7155,7 @@ function WorkOrders({
                                 Close Work Order
                               </button>
                             )}
-                          {canFinalReview &&
+                          {(canFinalReview || canHelpdeskManageHskWork(work)) &&
                             ["PENDING_SUPERVISOR_REVIEW", "COMPLETED"].includes(
                               work.status,
                             ) && (
@@ -7226,7 +7276,8 @@ function WorkOrders({
           inventory={data.inventory}
           onClose={() => setPreviewWork(null)}
           onStatusChange={
-            previewWork.status !== "CLOSED"
+            previewWork.status !== "CLOSED" &&
+            (canExecute || canFinalReview || canHelpdeskManageHskWork(previewWork))
               ? (status) =>
                   runWorkAction(
                     `${previewWork.id}:${status}`,
@@ -7245,7 +7296,7 @@ function WorkOrders({
               : undefined
           }
           onCloseWork={
-            canFinalReview &&
+            (canFinalReview || canHelpdeskManageHskWork(previewWork)) &&
             ["PENDING_SUPERVISOR_REVIEW", "COMPLETED"].includes(
               previewWork.status,
             )
@@ -7256,7 +7307,7 @@ function WorkOrders({
               : undefined
           }
           onReopenWork={
-            canFinalReview &&
+            (canFinalReview || canHelpdeskManageHskWork(previewWork)) &&
             ["PENDING_SUPERVISOR_REVIEW", "COMPLETED"].includes(
               previewWork.status,
             )
@@ -7630,9 +7681,14 @@ function Helpdesk({
   const [priorityFilter, setPriorityFilter] = useState("All");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [overdueOnly, setOverdueOnly] = useState(false);
-  const isSupervisorView =
-    roleKindLabel(role) === "admin" || roleKindLabel(role) === "supervisor";
-  const isAdmin = roleKindLabel(role) === "admin";
+  const roleKind = roleKindLabel(role);
+  const isSupervisorView = roleKind === "admin" || roleKind === "supervisor";
+  const isHelpdeskView = roleKind === "helpdesk";
+  const isAdmin = roleKind === "admin";
+  const canManageRequestRows = permissions.manageRequests && (isSupervisorView || isHelpdeskView);
+  const canApproveRequest = (request: any) =>
+    (isSupervisorView && permissions.approveRequests) ||
+    (isHelpdeskView && isHskHousekeepingReactiveTicket(request));
   const requestCategories = [
     "All",
     ...Array.from(
@@ -8270,7 +8326,7 @@ function Helpdesk({
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex min-w-[260px] flex-wrap gap-2">
-                        {isSupervisorView && permissions.manageRequests && (
+                        {canManageRequestRows && (
                           <button
                             type="button"
                             onClick={(event) => {
@@ -8294,7 +8350,7 @@ function Helpdesk({
                         >
                           Preview
                         </button>
-                        {isSupervisorView && permissions.manageRequests && (
+                        {canManageRequestRows && (
                           <button
                             type="button"
                             disabled={
@@ -8322,7 +8378,7 @@ function Helpdesk({
                                 : "Create WO"}
                           </button>
                         )}
-                        {isSupervisorView && permissions.approveRequests && (
+                        {canApproveRequest(request) && (
                           <button
                             type="button"
                             disabled={requestAction === `${request.id}:reject`}
@@ -8353,6 +8409,37 @@ function Helpdesk({
                               : "Reject"}
                           </button>
                         )}
+                        {canApproveRequest(request) && request.status !== "CLOSED" && (
+                          <button
+                            type="button"
+                            disabled={requestAction === `${request.id}:close`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              runRequestAction(
+                                `${request.id}:close`,
+                                request,
+                                () =>
+                                  updateRequest(
+                                    request.id,
+                                    requestFormData(
+                                      request,
+                                      "CLOSED",
+                                      "Closed by helpdesk/supervisor",
+                                      {
+                                        assignedTeamCode:
+                                          assignment.assignedTeamCode,
+                                      },
+                                    ),
+                                  ),
+                              );
+                            }}
+                            className="rounded-lg bg-leaf px-3 py-2 text-xs font-black text-white disabled:bg-slate-400"
+                          >
+                            {requestAction === `${request.id}:close`
+                              ? "Closing..."
+                              : "Close"}
+                          </button>
+                        )}
                         {isAdmin && permissions.manageRequests && (
                           <button
                             type="button"
@@ -8373,7 +8460,7 @@ function Helpdesk({
                           </button>
                         )}
                       </div>
-                      {isSupervisorView && permissions.manageRequests && (
+                      {canManageRequestRows && (
                         <select
                           value={assignment.assignedTeamCode}
                           onClick={(event) => event.stopPropagation()}
@@ -8481,8 +8568,8 @@ function Helpdesk({
           assets={assets}
           teams={teams}
           assignment={assignmentFor(previewRequest)}
-          canManage={isSupervisorView && permissions.manageRequests}
-          canApprove={isSupervisorView && permissions.approveRequests}
+          canManage={canManageRequestRows}
+          canApprove={canApproveRequest(previewRequest)}
           savingKey={requestAction}
           onClose={() => setPreviewRequest(null)}
           onEdit={() => {
@@ -8555,6 +8642,28 @@ function Helpdesk({
                 ),
             )
           }
+          onCloseTicket={async () => {
+            await runRequestAction(
+              `${previewRequest.id}:close`,
+              previewRequest,
+              () =>
+                updateRequest(
+                  previewRequest.id,
+                  requestFormData(
+                    previewRequest,
+                    "CLOSED",
+                    "Closed by helpdesk/supervisor",
+                    {
+                      assignedTeamCode:
+                        assignmentFor(previewRequest).assignedTeamCode,
+                    },
+                  ),
+                ),
+            );
+            setPreviewRequest((current: any) =>
+              current ? { ...current, status: "CLOSED" } : current,
+            );
+          }}
         />
       )}
     </section>
@@ -10500,6 +10609,7 @@ function RequestPreviewModal({
   onReview,
   onCreateWorkOrder,
   onReject,
+  onCloseTicket,
 }: {
   request: any;
   assets: any[];
@@ -10519,6 +10629,7 @@ function RequestPreviewModal({
   onReview: () => Promise<void> | void;
   onCreateWorkOrder: () => Promise<void> | void;
   onReject: () => Promise<void> | void;
+  onCloseTicket: () => Promise<void> | void;
 }) {
   const images = attachmentList(request.attachmentUrls);
   const reviewedStatuses = ["TRIAGED", "APPROVED"];
@@ -10898,6 +11009,16 @@ function RequestPreviewModal({
                   : isReviewed
                     ? "Create Work Order"
                     : "Create Work Order Locked"}
+            </button>
+          )}
+          {canApprove && request.status !== "CLOSED" && (
+            <button
+              type="button"
+              disabled={savingKey === `${request.id}:close`}
+              onClick={onCloseTicket}
+              className="rounded-lg bg-leaf px-4 py-3 text-sm font-black text-white disabled:bg-slate-400"
+            >
+              {savingKey === `${request.id}:close` ? "Closing..." : "Close"}
             </button>
           )}
           {canApprove && (

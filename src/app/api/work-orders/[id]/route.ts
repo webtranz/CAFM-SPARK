@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api-response";
-import { accessRole, canManageDepartmentRecord, sameDepartment, scopeAllows } from "@/lib/access-control";
-import { requireAdmin, requirePermission } from "@/lib/api-auth";
+import { accessRole, canManageDepartmentRecord, isHelpdeskRole, sameDepartment, scopeAllows } from "@/lib/access-control";
+import { requireAdmin, requirePermission, requireUser } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { defaultPermissionScopeForRole, expandPermissionCode } from "@/lib/default-role-permissions";
 import { prisma } from "@/lib/prisma";
@@ -70,26 +70,108 @@ function partQuantities(value?: string) {
   }, new Map<string, number>());
 }
 
+const HELPDESK_HSK_WORK_ORDER_STATUSES = new Set([
+  "OPEN",
+  "NEW",
+  "TRIAGED",
+  "APPROVED",
+  "REJECTED",
+  "PENDING_ASSIGNMENT",
+  "ASSIGNED",
+  "ACCEPTED",
+  "IN_PROGRESS",
+  "ON_HOLD",
+  "COMPLETED",
+  "PENDING_SUPERVISOR_REVIEW",
+  "VERIFIED",
+  "REOPENED",
+  "CLOSED",
+]);
+
+function compactMatchText(...values: unknown[]) {
+  return values
+    .map((value) => String(value ?? ""))
+    .join(" ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function isHskHousekeepingReactiveWorkOrder(work: Record<string, any>) {
+  const departmentText = compactMatchText(
+    work.departmentCode,
+    work.serviceCode,
+    work.assignedTeamCode,
+    work.assetType,
+    work.type,
+    work.title,
+    work.request?.departmentCode,
+    work.request?.serviceCode,
+    work.request?.assignedTeamCode,
+    work.request?.category,
+    work.request?.title,
+  );
+  const typeText = compactMatchText(
+    work.type,
+    work.title,
+    work.assetType,
+    work.jobPlan,
+    work.request?.category,
+    work.request?.title,
+    work.request?.description,
+  );
+  const isHousekeeping = departmentText.includes("hsk") || departmentText.includes("housekeeping");
+  const isPreventive = Boolean(work.ppmId) || typeText.includes("ppm") || typeText.includes("preventive");
+  return isHousekeeping && !isPreventive;
+}
+
+function canHelpdeskChangeHskReactiveWorkOrderStatus(user: any, work: Record<string, any>, status?: string) {
+  return Boolean(
+    status &&
+      HELPDESK_HSK_WORK_ORDER_STATUSES.has(status) &&
+      isHelpdeskRole(user) &&
+      isHskHousekeepingReactiveWorkOrder(work),
+  );
+}
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
     const input = schema.parse(await request.json());
-    const current = await prisma.workOrder.findUnique({ where: { id }, include: { asset: true } });
+    const current = await prisma.workOrder.findUnique({
+      where: { id },
+      include: {
+        asset: true,
+        request: {
+          select: {
+            title: true,
+            category: true,
+            departmentCode: true,
+            serviceCode: true,
+            assignedTeamCode: true,
+            description: true,
+          },
+        },
+      },
+    });
     if (!current) throw new Error("Work order not found");
     const priority = input.priority && ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(input.priority) ? input.priority as any : undefined;
     const status = input.status && ["OPEN", "NEW", "TRIAGED", "APPROVED", "REJECTED", "PENDING_ASSIGNMENT", "ASSIGNED", "ACCEPTED", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "PENDING_SUPERVISOR_REVIEW", "VERIFIED", "REOPENED", "CLOSED"].includes(input.status) ? input.status as any : undefined;
     const reviewStatus = status && ["CLOSED", "REOPENED", "VERIFIED"].includes(status);
     const permissionCode = reviewStatus ? "workorders.approve" : "workorders.edit";
-    const { error: permissionError, user } = await requirePermission(permissionCode);
-    if (permissionError) return permissionError;
+    const { error: authError, user } = await requireUser();
+    if (authError) return authError;
+    const canHelpdeskManageHskReactive = canHelpdeskChangeHskReactiveWorkOrderStatus(user, current, status);
+    if (!canHelpdeskManageHskReactive) {
+      const { error: permissionError } = await requirePermission(permissionCode);
+      if (permissionError) return permissionError;
+    }
     const role = accessRole(user);
     const isAssignedTechnician = role === "technician" && (current.assignedToId === user?.id || Boolean(current.assignedTeamCode && current.assignedTeamCode === user?.team?.code) || sameDepartment(user, current.departmentCode));
     const reviewScope = reviewStatus ? await workOrderPermissionScope(user?.role, "workorders.approve") : null;
     const supervisorDepartment = String(user?.department ?? "").trim().toLowerCase();
     const isGenericSupervisor = role === "supervisor" && (!supervisorDepartment || ["general", "all", "fbc"].includes(supervisorDepartment));
     const isSupervisorTeamOwner = role === "supervisor" && (current.assignedToId === user?.id || Boolean(current.assignedTeamCode && current.assignedTeamCode === user?.team?.code));
-    const hasApprovedReviewPermission = Boolean(reviewStatus && ["admin", "supervisor"].includes(role));
-    const isSupervisorOrAdmin = canManageDepartmentRecord(user, current.departmentCode) || isGenericSupervisor || isSupervisorTeamOwner || hasApprovedReviewPermission || Boolean(reviewStatus && scopeAllows(reviewScope, "Facility"));
+    const hasApprovedReviewPermission = Boolean(reviewStatus && (["admin", "supervisor"].includes(role) || canHelpdeskManageHskReactive));
+    const isSupervisorOrAdmin = canManageDepartmentRecord(user, current.departmentCode) || isGenericSupervisor || isSupervisorTeamOwner || hasApprovedReviewPermission || canHelpdeskManageHskReactive || Boolean(reviewStatus && scopeAllows(reviewScope, "Facility"));
     if (!isSupervisorOrAdmin && !isAssignedTechnician) {
       return apiError(new Error("You do not have permission for this work order."), "Access denied", 403);
     }
@@ -157,7 +239,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           actualHours: status && ["COMPLETED", "PENDING_SUPERVISOR_REVIEW", "VERIFIED", "CLOSED"].includes(status) ? 4 : undefined,
         };
     if (!isSupervisorOrAdmin && (status === "CLOSED" || status === "REOPENED")) {
-      return apiError(new Error("Only Supervisor or Admin can close or reopen work orders."), "Access denied", 403);
+      return apiError(new Error("Only Supervisor, Admin, or Helpdesk for HSK reactive work orders can close or reopen work orders."), "Access denied", 403);
     }
     const updated = await prisma.workOrder.update({
       where: { id },
