@@ -92,8 +92,73 @@ export async function GET(request: Request) {
   const pageSizeInput = pageSizeParam === "all" ? Number.MAX_SAFE_INTEGER : Number(pageSizeParam);
   const page = Number.isFinite(pageInput) ? Math.max(1, Math.floor(pageInput)) : 1;
   const pageSize = pageSizeParam === "all" ? 20000 : Number.isFinite(pageSizeInput) ? Math.min(500, Math.max(25, Math.floor(pageSizeInput))) : 100;
+  const baseWhere = visibleWorkWhere(user);
+  if (url.searchParams.get("options") === "true") {
+    const cleanValues = (rows: Array<Record<string, unknown>>, key: string) =>
+      Array.from(
+        new Set(
+          rows
+            .map((row) => String(row[key] ?? "").trim())
+            .filter(Boolean),
+        ),
+      ).sort((first, second) =>
+        first.localeCompare(second, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }),
+      );
+    const [statuses, priorities, categories, departments, types, teams] =
+      await Promise.all([
+        prisma.workOrder.findMany({
+          where: baseWhere,
+          distinct: ["status"],
+          select: { status: true },
+          orderBy: { status: "asc" },
+        }),
+        prisma.workOrder.findMany({
+          where: baseWhere,
+          distinct: ["priority"],
+          select: { priority: true },
+          orderBy: { priority: "asc" },
+        }),
+        prisma.workOrder.findMany({
+          where: baseWhere,
+          distinct: ["assetType"],
+          select: { assetType: true },
+          orderBy: { assetType: "asc" },
+        }),
+        prisma.workOrder.findMany({
+          where: baseWhere,
+          distinct: ["departmentCode"],
+          select: { departmentCode: true },
+          orderBy: { departmentCode: "asc" },
+        }),
+        prisma.workOrder.findMany({
+          where: baseWhere,
+          distinct: ["type"],
+          select: { type: true },
+          orderBy: { type: "asc" },
+        }),
+        prisma.workOrder.findMany({
+          where: baseWhere,
+          distinct: ["assignedTeamCode"],
+          select: { assignedTeamCode: true },
+          orderBy: { assignedTeamCode: "asc" },
+        }),
+      ]);
+    return NextResponse.json({
+      options: {
+        statuses: cleanValues(statuses, "status"),
+        priorities: cleanValues(priorities, "priority"),
+        categories: cleanValues(categories, "assetType"),
+        departments: cleanValues(departments, "departmentCode"),
+        types: cleanValues(types, "type"),
+        teams: cleanValues(teams, "assignedTeamCode"),
+      },
+    });
+  }
   const where: any = {
-    ...visibleWorkWhere(user),
+    ...baseWhere,
     ...(status && status !== "All" ? { status } : {}),
     ...(priority && priority !== "All" ? { priority } : {}),
     ...(category && category !== "All" ? { assetType: category } : {}),

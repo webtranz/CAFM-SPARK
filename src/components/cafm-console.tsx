@@ -1029,6 +1029,22 @@ function samePpmWorkOrder(work: any, ppmCode: string) {
   return Boolean(ppmCode) && workOrderPpmCode(work) === ppmCode && isPreventiveWorkOrder(work);
 }
 
+function sortedUniqueStrings(...groups: Array<unknown[] | undefined>) {
+  return Array.from(
+    new Set(
+      groups
+        .flatMap((group) => group ?? [])
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean),
+    ),
+  ).sort((first, second) =>
+    first.localeCompare(second, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }),
+  );
+}
+
 function isReviewReadyWorkOrder(work: any) {
   return ["PENDING_SUPERVISOR_REVIEW", "COMPLETED"].includes(workOrderStatus(work));
 }
@@ -5906,6 +5922,16 @@ function WorkOrders({
   const [workTotal, setWorkTotal] = useState(
     data.workOrdersTotal ?? data.workOrders.length,
   );
+  const [pinnedWorkActivity, setPinnedWorkActivity] = useState<Record<string, number>>({});
+  const workFilterOptionsLoadedRef = useRef(false);
+  const [workFilterOptions, setWorkFilterOptions] = useState<{
+    statuses: string[];
+    priorities: string[];
+    categories: string[];
+    departments: string[];
+    types: string[];
+    teams: string[];
+  } | null>(null);
   const [workLoading, setWorkLoading] = useState(false);
   const workScrollRef = useRef<HTMLDivElement | null>(null);
   const roleKind = roleKindLabel(role);
@@ -5917,40 +5943,44 @@ function WorkOrders({
   const canFinalReview = permissions.verifyWork && !isTechnician;
   const canHelpdeskManageHskWork = (work: any) =>
     isHelpdeskView && isHskHousekeepingReactiveTicket(work);
-  const statuses = [
-    "All",
-    ...Array.from(
-      new Set(workRowsSource.map((work) => work.status).filter(Boolean)),
-    ),
-  ];
-  const categories = [
-    "All",
-    ...Array.from(
-      new Set(workRowsSource.map((work) => work.assetType).filter(Boolean)),
-    ),
-  ];
-  const departments = [
-    "All",
-    ...Array.from(
-      new Set(
-        workRowsSource.map((work) => work.departmentCode).filter(Boolean),
-      ),
-    ),
-  ];
-  const types = [
-    "All",
-    ...Array.from(
-      new Set(workRowsSource.map((work) => work.type).filter(Boolean)),
-    ),
-  ];
-  const teams = [
-    "All",
-    ...Array.from(
-      new Set(
-        workRowsSource.map((work) => work.assignedTeamCode).filter(Boolean),
-      ),
-    ),
-  ];
+  const workStatusOptions = sortedUniqueStrings(
+    workFilterOptions?.statuses,
+    workRowsSource.map((work) => work.status),
+  );
+  const workPriorityOptions = sortedUniqueStrings(
+    workFilterOptions?.priorities,
+    workRowsSource.map((work) => work.priority),
+  );
+  const workCategoryOptions = sortedUniqueStrings(
+    workFilterOptions?.categories,
+    workRowsSource.map((work) => work.assetType),
+  );
+  const workDepartmentOptions = sortedUniqueStrings(
+    workFilterOptions?.departments,
+    workRowsSource.map((work) => work.departmentCode),
+  );
+  const workTypeOptions = sortedUniqueStrings(
+    workFilterOptions?.types,
+    workRowsSource.map((work) => work.type),
+  );
+  const workTeamOptions = sortedUniqueStrings(
+    workFilterOptions?.teams,
+    workRowsSource.map((work) => work.assignedTeamCode),
+  );
+  const statuses = ["All", ...workStatusOptions];
+  const categories = ["All", ...workCategoryOptions];
+  const departments = ["All", ...workDepartmentOptions];
+  const types = ["All", ...workTypeOptions];
+  const teams = ["All", ...workTeamOptions];
+  const workExcelOptionValues: Record<string, string[]> = {
+    status: workStatusOptions,
+    priority: workPriorityOptions,
+    assetType: workCategoryOptions,
+    departmentCode: workDepartmentOptions,
+    type: workTypeOptions,
+    assignedTo: workTeamOptions,
+    isIncidentCase: ["No", "Yes"],
+  };
   const workExcelColumns: ExcelColumn[] = [
     ["title", "Title"],
     ["status", "Status"],
@@ -5979,38 +6009,55 @@ function WorkOrders({
         : workRowsSource,
     [workRowsSource, showTimeMetrics, showOnlyDelayed],
   );
-  const visibleWorks = useMemo(
-    () =>
-      liveWorkOrderSort(
-        applyExcelTableFilters(
-          rawVisibleWorks,
-          workExcelColumns,
-          workExcelFilters,
-          workExcelSort,
-          (work, key) => {
-            if (key === "asset") return work.asset?.tag ?? work.assetTag ?? "";
-            if (key === "location")
-              return (
-                work.asset?.buildingCode ||
-                work.asset?.floor ||
-                work.location ||
-                ""
-              );
-            if (key === "description")
-              return work.jobPlan || work.workNotes || work.title;
-            if (key === "assignedTo")
-              return work.assignedTo?.email ?? work.assignedTeamCode ?? "";
-            if (key === "isIncidentCase")
-              return work.isIncidentCase ? "Yes" : "No";
-            if (["dueAt", "createdAt", "updatedAt", "plannedStart"].includes(key))
-              return formatDateCell(work[key]);
-            return work[key];
-          },
-        ),
-        role,
-      ),
-    [rawVisibleWorks, role, workExcelColumns, workExcelFilters, workExcelSort],
-  );
+  const recentPinnedWorks = useMemo(() => {
+    const now = Date.now();
+    return workRowsSource.filter((work) => {
+      const activity = pinnedWorkActivity[work.id];
+      return Boolean(activity && now - activity <= RECENT_WORK_ORDER_ACTIVITY_MS);
+    });
+  }, [workRowsSource, pinnedWorkActivity]);
+  const visibleWorks = useMemo(() => {
+    const filtered = applyExcelTableFilters(
+      rawVisibleWorks,
+      workExcelColumns,
+      workExcelFilters,
+      workExcelSort,
+      (work, key) => {
+        if (key === "asset") return work.asset?.tag ?? work.assetTag ?? "";
+        if (key === "location")
+          return (
+            work.asset?.buildingCode ||
+            work.asset?.floor ||
+            work.location ||
+            ""
+          );
+        if (key === "description")
+          return work.jobPlan || work.workNotes || work.title;
+        if (key === "assignedTo")
+          return work.assignedTo?.email ?? work.assignedTeamCode ?? "";
+        if (key === "isIncidentCase")
+          return work.isIncidentCase ? "Yes" : "No";
+        if (["dueAt", "createdAt", "updatedAt", "plannedStart"].includes(key))
+          return formatDateCell(work[key]);
+        return work[key];
+      },
+    );
+    const byId = new Map<string, any>();
+    recentPinnedWorks.forEach((work) => {
+      if (work?.id) byId.set(work.id, work);
+    });
+    filtered.forEach((work) => {
+      if (work?.id) byId.set(work.id, work);
+    });
+    return liveWorkOrderSort(Array.from(byId.values()), role);
+  }, [
+    rawVisibleWorks,
+    recentPinnedWorks,
+    role,
+    workExcelColumns,
+    workExcelFilters,
+    workExcelSort,
+  ]);
   const selectedWork =
     visibleWorks.find((work) => work.id === selectedWorkId) ??
     visibleWorks[0] ??
@@ -6048,6 +6095,35 @@ function WorkOrders({
     if (generatedReportTo) params.set("dateTo", generatedReportTo);
     return `/api/reports?${params.toString()}`;
   };
+
+  const loadWorkFilterOptions = useCallback(async () => {
+    if (workFilterOptionsLoadedRef.current) return;
+    try {
+      const response = await fetch("/api/work-orders?options=true", {
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const result = await response.json();
+      const options = result.options ?? {};
+      setWorkFilterOptions({
+        statuses: Array.isArray(options.statuses) ? options.statuses : [],
+        priorities: Array.isArray(options.priorities) ? options.priorities : [],
+        categories: Array.isArray(options.categories) ? options.categories : [],
+        departments: Array.isArray(options.departments) ? options.departments : [],
+        types: Array.isArray(options.types) ? options.types : [],
+        teams: Array.isArray(options.teams) ? options.teams : [],
+      });
+      workFilterOptionsLoadedRef.current = true;
+    } catch (error) {
+      console.error(error);
+    }
+  }, []);
+
+  useEffect(() => {
+    workFilterOptionsLoadedRef.current = false;
+    setWorkFilterOptions(null);
+    void loadWorkFilterOptions();
+  }, [role, loadWorkFilterOptions]);
 
   useEffect(() => {
     if (
@@ -6189,11 +6265,16 @@ function WorkOrders({
 
   function mergeLocalWorkOrder(updated: any) {
     if (!updated?.id) return;
+    const activityAt = Date.now();
     const stamped = {
       ...updated,
-      updatedAt: updated.updatedAt || new Date().toISOString(),
-      clientActivityAt: new Date().toISOString(),
+      updatedAt: updated.updatedAt || new Date(activityAt).toISOString(),
+      clientActivityAt: new Date(activityAt).toISOString(),
     };
+    setPinnedWorkActivity((current) => ({
+      ...current,
+      [stamped.id]: activityAt,
+    }));
     let nextCount = workRowsSource.length;
     setWorkRowsSource((current) => {
       const exists = current.some((work) => work.id === updated.id);
@@ -6311,34 +6392,8 @@ function WorkOrders({
   }
 
   async function loadAllWorksForFilters() {
-    if (workLoading || workRowsSource.length >= workTotal) return;
-    setWorkLoading(true);
-    try {
-      const params = new URLSearchParams({
-        page: "1",
-        pageSize: "all",
-        query: search,
-        status: statusFilter,
-        priority: priorityFilter,
-        category: categoryFilter,
-        department: departmentFilter,
-        type: typeFilter,
-        assigned: assignedFilter,
-        overdueOnly: overdueOnly ? "true" : "false",
-        delayedOnly: showTimeMetrics && showOnlyDelayed ? "true" : "false",
-      });
-      const response = await fetch(`/api/work-orders?${params.toString()}`, {
-        cache: "no-store",
-      });
-      if (!response.ok) return;
-      const result = await response.json();
-      setWorkRowsSource((current) => mergeWorkOrderRows(current, result.workOrders ?? [], role, "recent"));
-      setWorkTotal(Number(result.total ?? result.workOrders?.length ?? 0));
-    } finally {
-      setWorkLoading(false);
-    }
+    await loadWorkFilterOptions();
   }
-
   function mergeFetchedWorkOrders(rows: any[]) {
     if (!rows.length) return;
     setWorkRowsSource((current) => mergeWorkOrderRows(current, rows, role, "all"));
@@ -6924,6 +6979,7 @@ function WorkOrders({
                           }
                           onSortChange={setWorkExcelSort}
                           onOpen={loadAllWorksForFilters}
+                          values={workExcelOptionValues[key]}
                           getValue={(work, valueKey) => {
                             if (valueKey === "asset")
                               return work.asset?.tag ?? work.assetTag ?? "";
@@ -28502,6 +28558,7 @@ function ExcelFilterHeader<T>({
   onSortChange,
   getValue,
   onOpen,
+  values,
 }: {
   label: string;
   columnKey: string;
@@ -28512,23 +28569,27 @@ function ExcelFilterHeader<T>({
   onSortChange: (sort: ExcelSort) => void;
   getValue?: (row: T, key: string) => unknown;
   onOpen?: () => Promise<void> | void;
+  values?: string[];
 }) {
   const [open, setOpen] = useState(false);
+  const [loadingOptions, setLoadingOptions] = useState(false);
   const [search, setSearch] = useState("");
   const allValues = useMemo(
     () =>
       Array.from(
         new Set(
-          rows.map((row) =>
-            excelCellText(
-              getValue ? getValue(row, columnKey) : (row as any)[columnKey],
-            ),
-          ),
+          values?.length
+            ? values.map((value) => excelCellText(value))
+            : rows.map((row) =>
+                excelCellText(
+                  getValue ? getValue(row, columnKey) : (row as any)[columnKey],
+                ),
+              ),
         ),
       ).sort((a, b) =>
         a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
       ),
-    [rows, columnKey, getValue],
+    [rows, columnKey, getValue, values],
   );
   const selectedValues = filters[columnKey] ?? allValues;
   const [draftValues, setDraftValues] = useState<Set<string>>(
@@ -28594,15 +28655,22 @@ function ExcelFilterHeader<T>({
       <button
         type="button"
         aria-label={`Filter ${label}`}
-        onClick={(event) => {
+        disabled={loadingOptions}
+        onClick={async (event) => {
           event.stopPropagation();
-          setOpen((current) => {
-            const next = !current;
-            if (next) void onOpen?.();
-            return next;
-          });
+          if (open) {
+            setOpen(false);
+            return;
+          }
+          setLoadingOptions(true);
+          try {
+            await onOpen?.();
+            setOpen(true);
+          } finally {
+            setLoadingOptions(false);
+          }
         }}
-        className={`grid h-5 w-5 place-items-center border shadow-sm ${active ? "border-lagoon bg-lagoon text-white" : "border-slate-300 bg-slate-100 text-slate-600"}`}
+        className={`grid h-5 w-5 place-items-center border shadow-sm disabled:cursor-wait disabled:opacity-60 ${active ? "border-lagoon bg-lagoon text-white" : "border-slate-300 bg-slate-100 text-slate-600"}`}
       >
         <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4">
           <path
