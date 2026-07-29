@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api-response";
-import { accessRole, canManageDepartmentRecord, scopeAllows } from "@/lib/access-control";
+import { accessRole, canManageDepartmentRecord, sameDepartment, scopeAllows } from "@/lib/access-control";
 import { requireAdmin, requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { defaultPermissionScopeForRole, expandPermissionCode } from "@/lib/default-role-permissions";
@@ -83,7 +83,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const { error: permissionError, user } = await requirePermission(permissionCode);
     if (permissionError) return permissionError;
     const role = accessRole(user);
-    const isAssignedTechnician = role === "technician" && (current.assignedToId === user?.id || Boolean(current.assignedTeamCode && current.assignedTeamCode === user?.team?.code));
+    const isAssignedTechnician = role === "technician" && (current.assignedToId === user?.id || Boolean(current.assignedTeamCode && current.assignedTeamCode === user?.team?.code) || sameDepartment(user, current.departmentCode));
     const reviewScope = reviewStatus ? await workOrderPermissionScope(user?.role, "workorders.approve") : null;
     const supervisorDepartment = String(user?.department ?? "").trim().toLowerCase();
     const isGenericSupervisor = role === "supervisor" && (!supervisorDepartment || ["general", "all", "fbc"].includes(supervisorDepartment));

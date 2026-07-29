@@ -78,6 +78,16 @@ function compactUnique(values: Array<string | null | undefined>) {
   );
 }
 
+function departmentValues(user: Awaited<ReturnType<typeof getCurrentUser>>) {
+  return Array.from(
+    new Set(
+      String(user?.department ?? "")
+        .split(/[;,|]/)
+        .map((department) => department.trim())
+        .filter(Boolean),
+    ),
+  );
+}
 
 function normalizedHierarchyCode(value: unknown) {
   return String(value || "")
@@ -108,8 +118,8 @@ function parseHierarchyCode(...values: unknown[]) {
     }
     if (!parsed.room) {
       const roomMatch =
-        text.match(/(R\d+[A-Z]?)(?![A-Z0-9])/) ||
-        text.match(/((?:ER|MR|FR|OR|CR|KIT|LUG)\d+[A-Z]?)(?![A-Z0-9])/);
+        text.match(/((?:ER|MR|FR|OR|CR|KIT|LUG)\d+[A-Z]?)(?![A-Z0-9])/) ||
+        text.match(/(R\d+[A-Z]?)(?![A-Z0-9])/);
       if (roomMatch?.[1]) parsed.room = roomMatch[1];
     }
     if (!parsed.roomCode) {
@@ -158,10 +168,12 @@ function hierarchyLocationFilter(values: {
 
   if (values.strict) {
     const strictMatches: any[] = [];
-    const exactCodes = compactUnique([values.locationCode, values.locationQuery, room, parsed.room, parsed.roomCode]);
+    const exactCodes = compactUnique([values.locationCode, values.locationQuery, parsed.roomCode]);
     exactCodes.forEach((code) => {
       strictMatches.push(insensitiveEquals("locationCode", code));
       strictMatches.push(insensitiveEquals("room", code));
+      strictMatches.push(insensitiveContains("locationCode", code));
+      strictMatches.push(insensitiveContains("room", code));
     });
     if (room) {
       strictMatches.push({
@@ -238,6 +250,7 @@ export async function GET(request: Request) {
   const pageSize = pageSizeParam === "all" ? 20000 : Number.isFinite(pageSizeInput) ? Math.min(500, Math.max(25, Math.floor(pageSizeInput))) : 100;
   const user = await getCurrentUser();
   const role = accessRole(user);
+  const userDepartments = departmentValues(user);
   const searchableFields = new Set([
     "tag",
     "name",
@@ -268,7 +281,7 @@ export async function GET(request: Request) {
     ...(floor ? { floor } : {}),
     ...(room ? { room } : {}),
     ...(status ? { assetStatusText: status } : {}),
-    ...(role === "supervisor" || role === "technician" ? { departmentCode: user?.department || "__none__" } : {}),
+    ...(role === "supervisor" || role === "technician" ? { departmentCode: { in: userDepartments.length ? userDepartments : ["__none__"] } } : {}),
   };
   const andFilters: any[] = [];
   const wantsUndefinedLocation = locationCode === "__unassigned__" || locationCode.toLowerCase() === "unassigned" || locationQuery.toLowerCase() === "unassigned";
@@ -342,7 +355,7 @@ export async function GET(request: Request) {
   }
   if (andFilters.length) where.AND = andFilters;
   const locationCountWhere: any = {
-    ...(role === "supervisor" || role === "technician" ? { departmentCode: user?.department || "__none__" } : {}),
+    ...(role === "supervisor" || role === "technician" ? { departmentCode: { in: userDepartments.length ? userDepartments : ["__none__"] } } : {}),
   };
   const [allTotal, total, locationGroups, assets] = await Promise.all([
     prisma.asset.count({ where: locationCountWhere }),

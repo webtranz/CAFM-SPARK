@@ -1060,6 +1060,44 @@ function liveWorkOrderSort(rows: any[], role = "") {
   });
 }
 
+const RECENT_WORK_ORDER_ACTIVITY_MS = 10 * 60 * 1000;
+
+function isRecentWorkOrderActivity(work: any, now = Date.now()) {
+  const activity = new Date(String(work?.clientActivityAt || "")).getTime();
+  return Number.isFinite(activity) && now - activity <= RECENT_WORK_ORDER_ACTIVITY_MS;
+}
+
+function mergeWorkOrderRows(
+  current: any[],
+  incoming: any[],
+  role = "",
+  preserve: "none" | "all" | "recent" = "all",
+) {
+  const now = Date.now();
+  const byId = new Map<string, any>();
+  if (preserve === "all") {
+    current.forEach((work) => {
+      if (work?.id) byId.set(work.id, work);
+    });
+  }
+  incoming.forEach((work) => {
+    if (!work?.id) return;
+    const previous = byId.get(work.id);
+    const keepLocalActivity = previous && isRecentWorkOrderActivity(previous, now);
+    byId.set(
+      work.id,
+      keepLocalActivity ? { ...work, ...previous } : { ...(previous ?? {}), ...work },
+    );
+  });
+  if (preserve === "recent") {
+    current.forEach((work) => {
+      if (!work?.id || !isRecentWorkOrderActivity(work, now)) return;
+      const incomingWork = byId.get(work.id);
+      byId.set(work.id, incomingWork ? { ...incomingWork, ...work } : work);
+    });
+  }
+  return liveWorkOrderSort(Array.from(byId.values()), role);
+}
 function DetailPanel({
   title,
   rows,
@@ -5994,7 +6032,7 @@ function WorkOrders({
         (data.workOrdersTotal ?? 0) > 0
       )
         return current;
-      return liveWorkOrderSort(data.workOrders, role);
+      return mergeWorkOrderRows(current, data.workOrders, role, "recent");
     });
     setWorkTotal((current) =>
       Math.max(current, data.workOrdersTotal ?? data.workOrders.length),
@@ -6039,13 +6077,13 @@ function WorkOrders({
           const result = await response.json();
           const nextRows = result.workOrders ?? [];
           const nextTotal = Number(result.total ?? nextRows.length ?? 0);
-          setWorkRowsSource((current) =>
-            page === 1
-              ? nextRows.length || nextTotal === 0
-                ? liveWorkOrderSort(nextRows, role)
-                : current
-              : liveWorkOrderSort([...current, ...nextRows], role),
-          );
+          setWorkRowsSource((current) => {
+            if (page === 1) {
+              if (!nextRows.length && nextTotal > 0) return current;
+              return mergeWorkOrderRows(current, nextRows, role, "recent");
+            }
+            return mergeWorkOrderRows(current, nextRows, role, "all");
+          });
           setWorkTotal(nextTotal);
         }
       } catch (error) {
@@ -6244,7 +6282,7 @@ function WorkOrders({
       });
       if (!response.ok) return;
       const result = await response.json();
-      setWorkRowsSource(liveWorkOrderSort(result.workOrders ?? [], role));
+      setWorkRowsSource((current) => mergeWorkOrderRows(current, result.workOrders ?? [], role, "recent"));
       setWorkTotal(Number(result.total ?? result.workOrders?.length ?? 0));
     } finally {
       setWorkLoading(false);
@@ -6253,14 +6291,7 @@ function WorkOrders({
 
   function mergeFetchedWorkOrders(rows: any[]) {
     if (!rows.length) return;
-    setWorkRowsSource((current) => {
-      const byId = new Map<string, any>();
-      current.forEach((work) => byId.set(work.id, work));
-      rows.forEach((work) => {
-        if (work?.id) byId.set(work.id, { ...(byId.get(work.id) ?? {}), ...work });
-      });
-      return liveWorkOrderSort(Array.from(byId.values()), role);
-    });
+    setWorkRowsSource((current) => mergeWorkOrderRows(current, rows, role, "all"));
     setWorkTotal((current) => Math.max(current, workRowsSource.length, rows.length));
   }
 
@@ -8649,8 +8680,8 @@ function parseServiceLocationHierarchy(...values: unknown[]): ParsedLocationHier
     }
     if (!parsed.room) {
       const roomMatch =
-        text.match(/(R\d+[A-Z]?)(?![A-Z0-9])/) ||
-        text.match(/((?:ER|MR|FR|OR|CR|KIT|LUG)\d+[A-Z]?)(?![A-Z0-9])/);
+        text.match(/((?:ER|MR|FR|OR|CR|KIT|LUG)\d+[A-Z]?)(?![A-Z0-9])/) ||
+        text.match(/(R\d+[A-Z]?)(?![A-Z0-9])/);
       if (roomMatch?.[1]) parsed.room = roomMatch[1];
     }
     if (!parsed.roomCode) {
@@ -8756,10 +8787,16 @@ function strictAssetMatchesSelectedHierarchy(
   const isBuildingScope = Boolean(selected.building) && !isFloorScope && !isRoomScope;
 
   if (isRoomScope) {
+    const scopedRoomMatch = Boolean(
+      selected.room &&
+        (assetDirectCodes.has(selected.room) || assetLocationText.includes(selected.room)) &&
+        (!selected.floor || assetHierarchy.floor === selected.floor || assetLocationText.includes(selected.floor)) &&
+        (!selected.building || assetHierarchy.building === selected.building || assetLocationText.includes(selected.building)),
+    );
     const exactCodeMatch = Boolean(
-      (selectedCode && assetDirectCodes.has(selectedCode)) ||
+      (selectedCode && (assetDirectCodes.has(selectedCode) || assetLocationText.includes(selectedCode))) ||
         (selected.roomCode && assetLocationText.includes(selected.roomCode)) ||
-        (selected.room && assetDirectCodes.has(selected.room)),
+        scopedRoomMatch,
     );
     const parsedRoomMatch = Boolean(
       selected.room &&
@@ -8950,13 +8987,29 @@ function serviceRequestAssetMatchLevel(asset: any, selectedLocation?: any) {
     asset.sourceEquipmentLocation,
   ]);
   const assetLocationText = normalizedHierarchyCode(
-    [asset.locationCode, asset.locationDesc, asset.room, asset.sourceLocation, asset.sourceEquipmentLocation]
+    [
+      asset.locationCode,
+      asset.locationDesc,
+      asset.room,
+      asset.floor,
+      asset.buildingCode,
+      asset.siteCode,
+      asset.sourceLocation,
+      asset.sourceEquipmentLocation,
+    ]
       .filter(Boolean)
       .join(" "),
   );
+  const scopedRoomMatch = Boolean(
+    selected.room &&
+      (assetDirectCodes.has(selected.room) || assetLocationText.includes(selected.room)) &&
+      (!selected.floor || assetHierarchy.floor === selected.floor || assetLocationText.includes(selected.floor)) &&
+      (!selected.building || assetHierarchy.building === selected.building || assetLocationText.includes(selected.building)),
+  );
   if (
-    (selectedCode && assetDirectCodes.has(selectedCode)) ||
+    (selectedCode && (assetDirectCodes.has(selectedCode) || assetLocationText.includes(selectedCode))) ||
     (selected.roomCode && assetLocationText.includes(selected.roomCode)) ||
+    scopedRoomMatch ||
     (selected.room &&
       assetHierarchy.room === selected.room &&
       hierarchyPartMatches(selected.floor, assetHierarchy.floor) &&
@@ -9728,7 +9781,8 @@ function ServiceRequestForm({
     if (hierarchySite) params.set("hierarchySite", hierarchySite);
     if (hierarchyBuilding) params.set("hierarchyBuilding", hierarchyBuilding);
     if (hierarchyFloor) params.set("hierarchyFloor", hierarchyFloor);
-    if (hierarchyRoom) params.set("hierarchyRoom", hierarchyRoom);    fetch(`/api/assets/filter?${params.toString()}`, {
+    if (hierarchyRoom) params.set("hierarchyRoom", hierarchyRoom);
+    fetch(`/api/assets/filter?${params.toString()}`, {
       signal: controller.signal,
     })
       .then((response) => (response.ok ? response.json() : null))
@@ -9843,6 +9897,8 @@ function ServiceRequestForm({
   useEffect(() => {
     if (
       locationCodeValue &&
+      fullLocationsLoaded &&
+      !activeLocations.some((location) => location.code === locationCodeValue) &&
       !finalLocationOptions.some(
         (location) => location.code === locationCodeValue,
       )
@@ -9850,7 +9906,7 @@ function ServiceRequestForm({
       setLocationCodeValue("");
       setLocationSearchValue("");
     }
-  }, [finalLocationOptions, locationCodeValue]);
+  }, [activeLocations, finalLocationOptions, fullLocationsLoaded, locationCodeValue]);
   const priorities = [
     {
       value: "LOW",
@@ -28313,6 +28369,8 @@ function applyExcelTableFilters<T>(
   });
 }
 
+const EXCEL_FILTER_RENDER_LIMIT = 500;
+
 function ExcelFilterHeader<T>({
   label,
   columnKey,
@@ -28357,6 +28415,11 @@ function ExcelFilterHeader<T>({
   );
   const visibleValues = allValues.filter((value) =>
     value.toLowerCase().includes(search.toLowerCase()),
+  );
+  const renderedVisibleValues = visibleValues.slice(0, EXCEL_FILTER_RENDER_LIMIT);
+  const hiddenVisibleValueCount = Math.max(
+    0,
+    visibleValues.length - renderedVisibleValues.length,
   );
   const allVisibleChecked =
     visibleValues.length > 0 &&
@@ -28492,7 +28555,7 @@ function ExcelFilterHeader<T>({
             (Select All)
           </label>
           <div className="mt-1 max-h-56 overflow-auto border border-slate-100 bg-white p-1">
-            {visibleValues.map((value) => (
+            {renderedVisibleValues.map((value) => (
               <label
                 key={value}
                 className="flex items-center gap-2 px-2 py-1 text-xs font-bold hover:bg-slate-50"
@@ -28507,6 +28570,11 @@ function ExcelFilterHeader<T>({
                 </span>
               </label>
             ))}
+            {hiddenVisibleValueCount > 0 && (
+              <p className="px-2 py-2 text-xs font-bold text-slate-500">
+                Showing first {EXCEL_FILTER_RENDER_LIMIT.toLocaleString()} matching values. Search to narrow the full list.
+              </p>
+            )}
             {!visibleValues.length && (
               <p className="px-2 py-4 text-center text-xs font-bold text-slate-400">
                 No values

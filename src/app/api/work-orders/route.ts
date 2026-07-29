@@ -37,7 +37,14 @@ const dueHours = {
 };
 
 function departmentValues(user: Awaited<ReturnType<typeof getCurrentUser>>) {
-  return [user?.department, user?.department?.trim()].filter(Boolean) as string[];
+  return Array.from(
+    new Set(
+      String(user?.department ?? "")
+        .split(/[;,|]/)
+        .map((department) => department.trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 function visibleWorkWhere(user: Awaited<ReturnType<typeof getCurrentUser>>) {
@@ -56,7 +63,14 @@ function visibleWorkWhere(user: Awaited<ReturnType<typeof getCurrentUser>>) {
     ].filter(Boolean) as any[];
     return conditions.length ? { OR: conditions } : { assignedToId: "__none__" };
   }
-  if (role === "technician") return { OR: [{ assignedToId: user?.id || "" }, { assignedTeamCode: teamCode || "" }] };
+  if (role === "technician") {
+    const conditions = [
+      user?.id ? { assignedToId: user.id } : null,
+      teamCode ? { assignedTeamCode: teamCode } : null,
+      departmentsForUser.length ? { departmentCode: { in: departmentsForUser } } : null,
+    ].filter(Boolean) as any[];
+    return conditions.length ? { OR: conditions } : { assignedToId: "__none__" };
+  }
   return { assignedToId: "__none__" };
 }
 

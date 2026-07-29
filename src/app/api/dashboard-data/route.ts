@@ -39,7 +39,14 @@ function visibleWorkWhere(user: DashboardUser) {
     ].filter(Boolean) as any[];
     return conditions.length ? { OR: conditions } : { assignedToId: "__none__" };
   }
-  if (role === "technician") return { OR: [{ assignedToId: user?.id || "" }, { assignedTeamCode: teamCode || "" }] };
+  if (role === "technician") {
+    const conditions = [
+      user?.id ? { assignedToId: user.id } : null,
+      teamCode ? { assignedTeamCode: teamCode } : null,
+      departmentsForUser.length ? { departmentCode: { in: departmentsForUser } } : null,
+    ].filter(Boolean) as any[];
+    return conditions.length ? { OR: conditions } : { assignedToId: "__none__" };
+  }
   return { assignedToId: "__none__" };
 }
 

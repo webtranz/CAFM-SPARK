@@ -48,8 +48,30 @@ export async function requireAnyPermission(codes: string[]) {
 }
 
 function defaultRoleAllows(role: string, code: string) {
-  if (!DEFAULT_ROLE_NAMES.includes(role as any)) return false;
-  return hasPermissionCode(new Set(defaultPermissionCodesForRole(role)), code);
+  const exactRole = DEFAULT_ROLE_NAMES.includes(role as any)
+    ? role
+    : DEFAULT_ROLE_NAMES.find((defaultRole) => {
+        const normalizedRole = role.toLowerCase();
+        const normalizedDefault = defaultRole.toLowerCase();
+        return (
+          normalizedRole === normalizedDefault ||
+          normalizedRole.includes(normalizedDefault) ||
+          normalizedDefault.includes(normalizedRole)
+        );
+      });
+  const fallbackRole =
+    exactRole ||
+    (accessRole({ role }) === "supervisor"
+      ? "Supervisor"
+      : accessRole({ role }) === "technician"
+        ? role.toLowerCase().includes("technician")
+          ? "Technician"
+          : "Service Team"
+        : accessRole({ role }) === "security"
+          ? "Security"
+          : null);
+  if (!fallbackRole) return false;
+  return hasPermissionCode(new Set(defaultPermissionCodesForRole(fallbackRole)), code);
 }
 
 export async function requireAdmin() {

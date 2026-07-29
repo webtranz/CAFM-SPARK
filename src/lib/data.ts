@@ -83,6 +83,11 @@ export async function getOperatingData(user: OperatingUser = null) {
       teamCode ? { assignedTeamCode: teamCode } : null,
       user?.id ? { assignedToId: user.id } : null,
     ].filter(Boolean) as any[];
+    const technicianWorkConditions = [
+      user?.id ? { assignedToId: user.id } : null,
+      teamCode ? { assignedTeamCode: teamCode } : null,
+      departmentsForUser.length ? { departmentCode: { in: departmentsForUser } } : null,
+    ].filter(Boolean) as any[];
     const visibleAssetWhere =
       kind === "admin" || kind === "readonly"
         ? {}
@@ -107,7 +112,9 @@ export async function getOperatingData(user: OperatingUser = null) {
           ? { OR: supervisorWorkConditions }
           : { assignedToId: "__none__" }
         : kind === "technician"
-        ? { OR: [{ assignedToId: user?.id || "" }, { assignedTeamCode: teamCode || "" }] }
+        ? technicianWorkConditions.length
+          ? { OR: technicianWorkConditions }
+          : { assignedToId: "__none__" }
         : { assignedToId: "__none__" };
     const visibleJobPlanWhere = kind === "admin" || kind === "readonly" ? {} : kind === "supervisor" || kind === "technician" ? { departmentCode: { in: departmentsForUser } } : {};
     const visibleUsersWhere =
