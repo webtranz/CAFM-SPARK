@@ -21,6 +21,8 @@ const actions = [
   "close",
   "cancel",
   "defect",
+  "preview_month",
+  "generate_month",
 ] as const;
 const workflowStatuses = [
   "DRAFT",
@@ -42,7 +44,7 @@ const previewRowSchema = z.object({
 });
 
 const schema = z.object({
-  ppmId: z.string().min(1),
+  ppmId: z.string().optional(),
   action: z.enum(actions),
   workflowStatus: z.enum(workflowStatuses).optional(),
   effectiveDate: z.string().optional(),
@@ -558,7 +560,9 @@ async function reconcileGeneratedPpmWorkOrders(
     newDueDate = result.newDueDate || newDueDate;
   }
   return { ppm: current, advanced, previousDueDate, newDueDate };
-}async function createPpmWorkOrder(
+}
+
+async function createPpmWorkOrder(
   ppm: PpmRecord,
   input: z.infer<typeof schema>,
   user: any,
@@ -797,21 +801,367 @@ async function buildPpmWorkOrderPreview(
   };
 }
 
+function ppmMonthPlanningWindow(input?: Pick<
+  z.infer<typeof schema>,
+  "effectiveDate" | "dueMonth" | "periodStart" | "periodEnd"
+>) {
+  const today = new Date();
+  const selectedMonthStart = monthStartFromInput(input?.dueMonth, today);
+  const selectedMonthEnd = new Date(
+    Date.UTC(
+      selectedMonthStart.getUTCFullYear(),
+      selectedMonthStart.getUTCMonth() + 1,
+      1,
+    ),
+  );
+  const rawPeriodStart = input?.periodStart
+    ? utcDateFromInput(
+        input.periodStart,
+        selectedMonthStart.toISOString().slice(0, 10),
+      )
+    : selectedMonthStart;
+  const rawPeriodEnd = input?.periodEnd
+    ? addOneDay(
+        utcDateFromInput(
+          input.periodEnd,
+          addDays(selectedMonthEnd, -1).toISOString().slice(0, 10),
+        ),
+      )
+    : selectedMonthEnd;
+  const effectiveDate = utcDateFromInput(input?.effectiveDate);
+  const rangeStart =
+    effectiveDate.getTime() > rawPeriodStart.getTime()
+      ? effectiveDate
+      : rawPeriodStart;
+  const rangeEnd =
+    rawPeriodEnd.getTime() > rangeStart.getTime()
+      ? rawPeriodEnd
+      : addOneDay(rangeStart);
+  return {
+    effectiveDate,
+    effectiveDateText: effectiveDate.toISOString().slice(0, 10),
+    dueMonth: monthKey(selectedMonthStart),
+    monthStart: rawPeriodStart,
+    monthEnd: rangeEnd,
+    periodStartText: rangeStart.toISOString().slice(0, 10),
+    periodEndText: addDays(rangeEnd, -1).toISOString().slice(0, 10),
+    dateFilter: { gte: rangeStart, lt: rangeEnd },
+  };
+}
+
+async function loadPpmRowsForMonth(input: z.infer<typeof schema>) {
+  const planningWindow = ppmMonthPlanningWindow(input);
+  const rows = await prisma.preventiveMaintenance.findMany({
+    where: {
+      active: true,
+      nextDue: { lt: planningWindow.dateFilter.lt },
+    },
+    orderBy: [
+      { nextDue: "asc" },
+      { ppmCode: "asc" },
+      { locationCode: "asc" },
+      { assetTag: "asc" },
+    ],
+    take: 100000,
+  });
+  return rows.filter((row) => ppmOccurrencesForPeriod([row], input).length > 0);
+}
+
+async function buildPpmMonthWorkOrderPreview(input: z.infer<typeof schema>) {
+  const planningWindow = ppmMonthPlanningWindow(input);
+  const rows = await loadPpmRowsForMonth(input);
+  const occurrences = ppmOccurrencesForPeriod(rows, input);
+  const rowIds = Array.from(new Set(rows.map((row) => row.id)));
+  const existingWorkOrders = rowIds.length
+    ? await prisma.workOrder.findMany({
+        where: {
+          ppmId: { in: rowIds },
+          plannedStart: planningWindow.dateFilter,
+          status: { notIn: [...INVALID_GENERATED_WORK_ORDER_STATUSES] as any },
+        },
+        select: {
+          id: true,
+          ppmId: true,
+          woNo: true,
+          status: true,
+          plannedStart: true,
+          dueAt: true,
+        },
+      })
+    : [];
+  const existingByPpmDate = new Map(
+    existingWorkOrders.map((workOrder) => [
+      `${workOrder.ppmId || ""}|${workOrder.plannedStart.toISOString().slice(0, 10)}`,
+      workOrder,
+    ]),
+  );
+  const previewRows = occurrences.map((occurrence) => {
+    const row = occurrence.row;
+    const scheduledDateText = occurrence.scheduledDate
+      .toISOString()
+      .slice(0, 10);
+    const existing = existingByPpmDate.get(`${row.id}|${scheduledDateText}`);
+    return {
+      ppmId: row.id,
+      ppmCode: row.ppmCode || ppmGroupCode(row),
+      code: row.code,
+      title: row.name,
+      assetTag: row.assetTag,
+      locationCode: row.locationCode,
+      departmentCode: row.departmentCode,
+      equipmentDescription: row.equipmentDescription,
+      frequency: row.frequency,
+      periodUom: row.periodUom,
+      nextDue: occurrence.scheduledDate,
+      plannedStart: occurrence.scheduledDate,
+      scheduledDate: scheduledDateText,
+      existingWorkOrderNo: existing?.woNo || "",
+      existingStatus: existing?.status || "",
+      willCreate: !existing,
+    };
+  });
+  return {
+    groupCode: "ALL_PPM",
+    effectiveDate: planningWindow.effectiveDateText,
+    dueMonth: planningWindow.dueMonth,
+    periodStart: planningWindow.periodStartText,
+    periodEnd: planningWindow.periodEndText,
+    monthStart: planningWindow.periodStartText,
+    monthEnd: planningWindow.periodEndText,
+    total: previewRows.length,
+    createCount: previewRows.filter((row) => row.willCreate).length,
+    reuseCount: previewRows.filter((row) => !row.willCreate).length,
+    rows: previewRows.slice(0, 300),
+    limited: previewRows.length > 300,
+  };
+}
+
+async function createPpmWorkOrdersForMonth(
+  input: z.infer<typeof schema>,
+  user: any,
+) {
+  const planningWindow = ppmMonthPlanningWindow(input);
+  const rows = await loadPpmRowsForMonth(input);
+  const occurrences = ppmOccurrencesForPeriod(rows, input).sort((left, right) => {
+    const dateDiff = left.scheduledDate.getTime() - right.scheduledDate.getTime();
+    if (dateDiff) return dateDiff;
+    return String(left.row.code).localeCompare(String(right.row.code));
+  });
+  if (!occurrences.length) {
+    throw new Error(
+      `No PPM work orders are due for ${planningWindow.periodStartText} to ${planningWindow.periodEndText}.`,
+    );
+  }
+  const generatedAt = new Date();
+  const assignmentData = {
+    assignedTeamCode: input.assignedTeamCode || undefined,
+    technicianEmail: input.technicianEmail || undefined,
+    supervisorEmail: input.supervisorEmail || undefined,
+  };
+  const results: Array<{
+    ppmId: string;
+    ppmCode: string;
+    code: string;
+    title: string;
+    assetTag?: string;
+    locationCode?: string;
+    departmentCode?: string;
+    equipmentDescription?: string | null;
+    frequency?: string;
+    periodUom?: string;
+    previousDue?: Date;
+    nextDue?: Date;
+    scheduledDate: Date;
+    workOrder: any;
+    created: boolean;
+    dueDateAdvanced: boolean;
+  }> = [];
+
+  for (const occurrence of occurrences) {
+    const row = occurrence.row;
+    const result = await prisma.$transaction(async (tx) => {
+      const ensured = await ensurePpmWorkOrder(
+        row,
+        input,
+        user,
+        occurrence.scheduledDate,
+        tx,
+      );
+      const dueUpdate = ensured.workOrder
+        ? await advancePpmAfterGeneratedWorkOrder(
+            tx,
+            row,
+            ensured.workOrder,
+            user,
+            generatedAt,
+            assignmentData,
+          )
+        : { ppm: row, advanced: false };
+      return { ...ensured, dueUpdate };
+    });
+    results.push({
+      ppmId: row.id,
+      ppmCode: row.ppmCode || ppmGroupCode(row),
+      code: row.code,
+      title: row.name,
+      assetTag: row.assetTag,
+      locationCode: row.locationCode,
+      departmentCode: row.departmentCode,
+      equipmentDescription: row.equipmentDescription,
+      frequency: row.frequency,
+      periodUom: row.periodUom,
+      previousDue: result.dueUpdate.previousDueDate || row.nextDue,
+      nextDue: result.dueUpdate.ppm?.nextDue || row.nextDue,
+      scheduledDate: occurrence.scheduledDate,
+      workOrder: result.workOrder,
+      created: result.created,
+      dueDateAdvanced: Boolean(result.dueUpdate.advanced),
+    });
+  }
+
+  const updatedIds = Array.from(new Set(results.map((item) => item.ppmId)));
+  const updatedPpms = updatedIds.length
+    ? await prisma.preventiveMaintenance.findMany({
+        where: { id: { in: updatedIds } },
+        orderBy: [
+          { nextDue: "asc" },
+          { ppmCode: "asc" },
+          { locationCode: "asc" },
+          { assetTag: "asc" },
+        ],
+      })
+    : [];
+  return {
+    groupCode: "ALL_PPM",
+    effectiveDate: planningWindow.effectiveDateText,
+    dueMonth: planningWindow.dueMonth,
+    periodStart: planningWindow.periodStartText,
+    periodEnd: planningWindow.periodEndText,
+    total: occurrences.length,
+    createdCount: results.filter((item) => item.created).length,
+    reusedCount: results.filter((item) => !item.created).length,
+    advancedCount: results.filter((item) => item.dueDateAdvanced).length,
+    results,
+    updatedPpms,
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const input = schema.parse(await request.json());
-    const requiredPermission = ["accept", "start", "hold", "submit"].includes(
+    const isMonthAction = ["preview_month", "generate_month"].includes(
       input.action,
-    )
-      ? "ppm.execute"
-      : ["approve", "reject", "rework", "close"].includes(input.action)
-        ? "ppm.approve"
-        : "ppm.manage";
+    );
+    const requiredPermission = isMonthAction
+      ? "ppm.manage"
+      : ["accept", "start", "hold", "submit"].includes(input.action)
+        ? "ppm.execute"
+        : ["approve", "reject", "rework", "close"].includes(input.action)
+          ? "ppm.approve"
+          : "ppm.manage";
     const { error, user } = await requireAnyPermission([
       requiredPermission,
       "ppm.manage",
     ]);
     if (error) return error;
+
+    if (input.action === "preview_month") {
+      const preview = await buildPpmMonthWorkOrderPreview(input);
+      return NextResponse.json({
+        preview,
+        groupCode: preview.groupCode,
+        dueMonth: preview.dueMonth,
+        totalWorkOrders: preview.total,
+        generatedCount: preview.createCount,
+        reusedCount: preview.reuseCount,
+        periodStart: preview.periodStart,
+        periodEnd: preview.periodEnd,
+      });
+    }
+
+    if (input.action === "generate_month") {
+      const generation = await createPpmWorkOrdersForMonth(input, user);
+      const preview = {
+        groupCode: generation.groupCode,
+        effectiveDate: generation.effectiveDate,
+        dueMonth: generation.dueMonth,
+        periodStart: generation.periodStart,
+        periodEnd: generation.periodEnd,
+        total: generation.total,
+        createCount: generation.createdCount,
+        reuseCount: generation.reusedCount,
+        rows: generation.results.slice(0, 300).map((item: any) => ({
+          ppmId: item.ppmId,
+          ppmCode: item.ppmCode,
+          code: item.code,
+          title: item.title,
+          assetTag: item.assetTag,
+          locationCode: item.locationCode,
+          departmentCode: item.departmentCode,
+          equipmentDescription: item.equipmentDescription,
+          previousDue: item.previousDue,
+          nextDue: item.nextDue,
+          scheduledDate: item.scheduledDate?.toISOString?.().slice(0, 10) || "",
+          frequency: item.frequency,
+          periodUom: item.periodUom,
+          workOrderNo: item.workOrder.woNo,
+          willCreate: item.created,
+          dueDateAdvanced: item.dueDateAdvanced,
+        })),
+        limited: generation.results.length > 300,
+      };
+      await auditAction({
+        user,
+        action: "PPM_WORKFLOW_GENERATE_MONTH",
+        entity: "preventive_maintenance",
+        entityId: generation.dueMonth,
+        details: {
+          input,
+          groupCode: generation.groupCode,
+          dueMonth: generation.dueMonth,
+          periodStart: generation.periodStart,
+          periodEnd: generation.periodEnd,
+          effectiveDate: generation.effectiveDate,
+          total: generation.total,
+          createdCount: generation.createdCount,
+          reusedCount: generation.reusedCount,
+          advancedCount: generation.advancedCount,
+        },
+      });
+      return NextResponse.json({
+        ppm: generation.updatedPpms[0] || null,
+        updatedPpms: generation.updatedPpms,
+        workOrders: generation.results.map((item) => item.workOrder),
+        generatedRows: generation.results.map((item: any) => ({
+          ppmId: item.ppmId,
+          code: item.code,
+          workOrderId: item.workOrder.id,
+          woNo: item.workOrder.woNo,
+          created: item.created,
+          previousDue: item.previousDue,
+          nextDue: item.nextDue,
+          scheduledDate: item.scheduledDate?.toISOString?.().slice(0, 10) || "",
+          frequency: item.frequency,
+          periodUom: item.periodUom,
+          generatedAt: item.workOrder.createdAt,
+          workflowStatus: item.dueDateAdvanced ? "SCHEDULED" : undefined,
+          dueDateAdvanced: item.dueDateAdvanced,
+        })),
+        preview,
+        groupCode: generation.groupCode,
+        effectiveDate: generation.effectiveDate,
+        dueMonth: generation.dueMonth,
+        totalWorkOrders: generation.total,
+        generatedCount: generation.createdCount,
+        reusedCount: generation.reusedCount,
+        advancedCount: generation.advancedCount,
+        periodStart: generation.periodStart,
+        periodEnd: generation.periodEnd,
+        message: `Created ${generation.createdCount.toLocaleString()} new PPM work orders and linked ${generation.total.toLocaleString()} work orders for ${generation.periodStart} to ${generation.periodEnd}. Next due dates were refreshed in the PPM planner.`,
+      });
+    }
+
+    if (!input.ppmId) throw new Error("PPM plan is required for this action.");
     const ppm = await loadPpm(input.ppmId);
     if (!ppm) throw new Error("PPM plan not found");
 

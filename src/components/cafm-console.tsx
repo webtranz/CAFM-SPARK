@@ -12709,7 +12709,19 @@ function Ppm({
   const [ppmRowsSource, setPpmRowsSource] = useState<any[]>(ppms);
   const [ppmTotal, setPpmTotal] = useState(ppmsTotal ?? ppms.length);
   const [ppmLoading, setPpmLoading] = useState(false);
+  const [bulkPpmMonth, setBulkPpmMonth] = useState(() =>
+    ppmMonthInputValue(new Date().toISOString()),
+  );
+  const [bulkPpmPreview, setBulkPpmPreview] = useState<any | null>(null);
+  const [bulkPpmBusy, setBulkPpmBusy] = useState<
+    "preview_month" | "generate_month" | null
+  >(null);
+  const [bulkPpmMessage, setBulkPpmMessage] = useState("");
   const ppmScrollRef = useRef<HTMLDivElement | null>(null);
+  const bulkPpmPeriodStart = bulkPpmMonth
+    ? `${bulkPpmMonth}-01`
+    : ppmPeriodStartInputValue(new Date().toISOString());
+  const bulkPpmPeriodEnd = ppmPeriodEndInputValue(bulkPpmPeriodStart);
   const grouped = ppmRowsSource.reduce((acc: Record<string, any[]>, ppm) => {
     const key = ppm.nextDue
       ? new Date(ppm.nextDue).toISOString().slice(0, 10)
@@ -12939,6 +12951,76 @@ function Ppm({
     }
   }
 
+  function applyBulkPpmMonthUpdates(result: any) {
+    const updates = new Map<string, any>();
+    (result.updatedPpms || []).forEach((row: any) => {
+      if (row?.id) updates.set(row.id, row);
+    });
+    (result.generatedRows || []).forEach((row: any) => {
+      if (!row?.ppmId) return;
+      updates.set(row.ppmId, {
+        ...(updates.get(row.ppmId) || {}),
+        id: row.ppmId,
+        nextDue: row.nextDue,
+        generatedWorkOrderId: row.workOrderId,
+        lastGeneratedAt: row.generatedAt,
+        workflowStatus: row.workflowStatus || "SCHEDULED",
+      });
+    });
+    if (!updates.size) return;
+    setPpmRowsSource((current) =>
+      current.map((row) =>
+        updates.has(row.id) ? { ...row, ...updates.get(row.id) } : row,
+      ),
+    );
+    setPreviewPpm((current: any) =>
+      current && updates.has(current.id)
+        ? { ...current, ...updates.get(current.id) }
+        : current,
+    );
+  }
+
+  async function runBulkPpmMonth(action: "preview_month" | "generate_month") {
+    if (!bulkPpmMonth || bulkPpmBusy) return;
+    setBulkPpmBusy(action);
+    setBulkPpmMessage("");
+    try {
+      const response = await fetch("/api/ppm/workflow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          dueMonth: bulkPpmMonth,
+          periodStart: bulkPpmPeriodStart,
+          periodEnd: bulkPpmPeriodEnd,
+          effectiveDate: PPM_WORK_ORDER_EFFECTIVE_DATE,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(result.message || "Unable to process monthly PPM work orders.");
+      if (result.preview) setBulkPpmPreview(result.preview);
+      if (action === "generate_month") {
+        applyBulkPpmMonthUpdates(result);
+        setBulkPpmMessage(
+          result.message ||
+            `Created ${Number(result.generatedCount || 0).toLocaleString()} new PPM work orders for ${bulkPpmPeriodStart} to ${bulkPpmPeriodEnd}.`,
+        );
+      } else {
+        const preview = result.preview || {};
+        setBulkPpmMessage(
+          `Preview ready: ${Number(preview.total || 0).toLocaleString()} total work orders, ${Number(preview.createCount || 0).toLocaleString()} new and ${Number(preview.reuseCount || 0).toLocaleString()} already linked.`,
+        );
+      }
+    } catch (error: any) {
+      setBulkPpmMessage(
+        error?.message || "Unable to process monthly PPM work orders.",
+      );
+    } finally {
+      setBulkPpmBusy(null);
+    }
+  }
+
   async function bulkDeleteSelectedPpms() {
     const ids = Array.from(selectedPpmIds);
     if (!ids.length) return;
@@ -12995,6 +13077,82 @@ function Ppm({
           ))}
         </div>
         <ReportButtons type="ppm" label="PPM report" />
+        <div className="mb-4 rounded-lg border border-lagoon/20 bg-lagoon/5 p-4">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase text-slate-500">
+                Bulk PPM Work Orders
+              </p>
+              <h3 className="mt-1 text-lg font-black text-ink">
+                Create all PPM WOs for selected month
+              </h3>
+              <p className="mt-1 text-xs font-bold text-slate-500">
+                Uses each PPM Perform Every and Period UOM, prevents duplicate
+                work orders, and refreshes Next Due in this planner.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+                Month
+                <input
+                  type="month"
+                  value={bulkPpmMonth}
+                  onChange={(event) => {
+                    setBulkPpmMonth(event.target.value);
+                    setBulkPpmPreview(null);
+                    setBulkPpmMessage("");
+                  }}
+                  className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold normal-case outline-none focus:border-lagoon"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={Boolean(bulkPpmBusy) || !bulkPpmMonth}
+                onClick={() => runBulkPpmMonth("preview_month")}
+                className="h-10 rounded-lg border border-lagoon/30 bg-white px-3 text-xs font-black text-lagoon hover:bg-lagoon hover:text-white disabled:bg-slate-100 disabled:text-slate-400"
+              >
+                {bulkPpmBusy === "preview_month" ? "Previewing..." : "Preview Month WOs"}
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(bulkPpmBusy) || !bulkPpmMonth}
+                onClick={() => runBulkPpmMonth("generate_month")}
+                className="h-10 rounded-lg bg-ink px-3 text-xs font-black text-white disabled:bg-slate-300"
+              >
+                {bulkPpmBusy === "generate_month"
+                  ? "Creating..."
+                  : bulkPpmPreview
+                    ? `Create ${Number(bulkPpmPreview.createCount || 0).toLocaleString()} New WOs`
+                    : "Create Month WOs"}
+              </button>
+            </div>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-4">
+            {[
+              ["Period", `${bulkPpmPeriodStart} to ${bulkPpmPeriodEnd}`],
+              ["Total Preview", Number(bulkPpmPreview?.total || 0).toLocaleString()],
+              ["New WOs", Number(bulkPpmPreview?.createCount || 0).toLocaleString()],
+              ["Already Linked", Number(bulkPpmPreview?.reuseCount || 0).toLocaleString()],
+            ].map(([label, value]) => (
+              <div
+                key={String(label)}
+                className="rounded-lg border border-white/70 bg-white px-3 py-2"
+              >
+                <p className="text-xs font-black uppercase text-slate-500">
+                  {label}
+                </p>
+                <p className="mt-1 text-sm font-black text-ink">{value}</p>
+              </div>
+            ))}
+          </div>
+          {bulkPpmMessage && (
+            <p
+              className={`mt-3 rounded-lg p-3 text-sm font-black ${/created|preview ready|refreshed|linked/i.test(bulkPpmMessage) ? "bg-emerald-50 text-emerald-700" : "bg-coral/10 text-coral"}`}
+            >
+              {bulkPpmMessage}
+            </p>
+          )}
+        </div>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
           <div className="flex gap-2">
             <button
