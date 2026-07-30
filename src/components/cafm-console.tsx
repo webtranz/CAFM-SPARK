@@ -1049,6 +1049,16 @@ function isReviewReadyWorkOrder(work: any) {
   return ["PENDING_SUPERVISOR_REVIEW", "COMPLETED"].includes(workOrderStatus(work));
 }
 
+function isPendingAssignmentWorkOrder(work: any) {
+  return ["PENDING_ASSIGNMENT", "ASSIGNED", "ACCEPTED", "OPEN", "NEW", "REOPENED"].includes(
+    workOrderStatus(work),
+  );
+}
+
+function isInProgressWorkOrder(work: any) {
+  return ["IN_PROGRESS", "ON_HOLD"].includes(workOrderStatus(work));
+}
+
 function isServiceActionableWorkOrder(work: any) {
   return (
     isPreventiveWorkOrder(work) &&
@@ -1772,11 +1782,15 @@ export function CafmConsole({
     return null;
   }
 
-  async function updateWorkStatusRecord(id: string, status: string) {
+  async function updateWorkStatusRecord(
+    id: string,
+    status: string,
+    body: Record<string, string> = {},
+  ) {
     setToast(`Updating work order status to ${readableStatus(status)}...`);
     const { ok, result } = await patchRecord(
       `/api/work-orders/${id}`,
-      { status },
+      { ...body, status },
       "Work order status updated.",
       false,
     );
@@ -5863,7 +5877,7 @@ function WorkOrders({
   permissions: ActionPermissions;
   role: string;
   updateWorkOrder: (id: string, formData: FormData) => Promise<any> | any;
-  updateWorkStatus: (id: string, status: string) => Promise<any> | any;
+  updateWorkStatus: (id: string, status: string, body?: Record<string, string>) => Promise<any> | any;
   deleteWorkOrder: (id: string) => Promise<void> | void;
   deleteWorkOrders: (
     ids: string[],
@@ -5941,6 +5955,11 @@ function WorkOrders({
   const canAssignOrEdit = permissions.manageWork && !isTechnician;
   const canExecute = permissions.executeWork;
   const canFinalReview = permissions.verifyWork && !isTechnician;
+  const canBulkSelectWorks =
+    view === "list" && (isAdmin || canAssignOrEdit || canExecute || canFinalReview);
+  const canBulkMoveToProgress = canExecute || canAssignOrEdit || canFinalReview;
+  const canBulkSubmitReview = canExecute || canAssignOrEdit || canFinalReview;
+  const canBulkCloseReview = canFinalReview;
   const canHelpdeskManageHskWork = (work: any) =>
     isHelpdeskView && isHskHousekeepingReactiveTicket(work);
   const workStatusOptions = sortedUniqueStrings(
@@ -6081,6 +6100,19 @@ function WorkOrders({
   const selectedVisibleWorks = visibleWorks.filter((work) =>
     selectedWorkIds.has(work.id),
   );
+  const selectedLoadedWorks = useMemo(() => {
+    if (!selectedWorkIds.size) return [];
+    return workRowsSource.filter((work) => selectedWorkIds.has(work.id));
+  }, [selectedWorkIds, workRowsSource]);
+  const selectedPendingAssignmentCount = selectedLoadedWorks.filter(
+    isPendingAssignmentWorkOrder,
+  ).length;
+  const selectedInProgressCount = selectedLoadedWorks.filter(
+    isInProgressWorkOrder,
+  ).length;
+  const selectedReviewReadyCount = selectedLoadedWorks.filter(
+    isReviewReadyWorkOrder,
+  ).length;
   const allVisibleWorksSelected =
     Boolean(visibleWorks.length) &&
     selectedVisibleWorks.length === visibleWorks.length;
@@ -6400,6 +6432,149 @@ function WorkOrders({
     setWorkTotal((current) => Math.max(current, workRowsSource.length, rows.length));
   }
 
+  async function loadSelectedWorkOrdersForBulk() {
+    const ids = Array.from(selectedWorkIds);
+    const selectedIdSet = new Set(ids);
+    const byId = new Map(
+      workRowsSource
+        .filter((work) => selectedIdSet.has(work.id))
+        .map((work) => [work.id, work]),
+    );
+    if (byId.size < ids.length) {
+      const params = new URLSearchParams({
+        page: "1",
+        pageSize: "all",
+        query: search,
+        status: statusFilter,
+        priority: priorityFilter,
+        category: categoryFilter,
+        department: departmentFilter,
+        type: typeFilter,
+        assigned: assignedFilter,
+        overdueOnly: overdueOnly ? "true" : "false",
+        delayedOnly: showTimeMetrics && showOnlyDelayed ? "true" : "false",
+      });
+      const response = await fetch(`/api/work-orders?${params.toString()}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error("Unable to load selected work orders.");
+      const result = await response.json();
+      const fetchedRows = (result.workOrders ?? []).filter((work: any) =>
+        selectedIdSet.has(work.id),
+      );
+      mergeFetchedWorkOrders(fetchedRows);
+      fetchedRows.forEach((work: any) => byId.set(work.id, work));
+    }
+    return ids.map((id) => byId.get(id)).filter(Boolean);
+  }
+
+  function eligibleWorkOrdersForBulkStatus(rows: any[], targetStatus: string) {
+    if (targetStatus === "IN_PROGRESS") {
+      return rows.filter(isPendingAssignmentWorkOrder);
+    }
+    if (targetStatus === "COMPLETED") {
+      return rows.filter(isInProgressWorkOrder);
+    }
+    if (targetStatus === "CLOSED") {
+      return rows.filter(isReviewReadyWorkOrder);
+    }
+    return [];
+  }
+
+  async function bulkUpdateSelectedWorkOrders(
+    targetStatus: "IN_PROGRESS" | "COMPLETED" | "CLOSED",
+  ) {
+    if (bulkProgress || !selectedWorkIds.size) return;
+    const actionLabel =
+      targetStatus === "CLOSED"
+        ? "Closing selected supervisor-review work orders"
+        : targetStatus === "COMPLETED"
+          ? "Submitting selected work orders for supervisor review"
+          : "Moving selected work orders to in progress";
+    setBulkProgress({
+      total: selectedWorkIds.size,
+      done: 0,
+      label: "Loading selected work orders",
+    });
+    let selectedRows: any[] = [];
+    try {
+      selectedRows = await loadSelectedWorkOrdersForBulk();
+    } catch (error) {
+      console.error(error);
+      setBulkProgress({
+        total: selectedWorkIds.size || 1,
+        done: 0,
+        label: "Unable to load selected work orders",
+      });
+      window.setTimeout(() => setBulkProgress(null), 1600);
+      return;
+    }
+    const eligible = eligibleWorkOrdersForBulkStatus(selectedRows, targetStatus);
+    if (!eligible.length) {
+      setBulkProgress({
+        total: Math.max(selectedRows.length, 1),
+        done: 0,
+        label: "No selected work orders match the required status",
+      });
+      window.setTimeout(() => setBulkProgress(null), 1800);
+      return;
+    }
+    const payload: Record<string, string> = {};
+    if (targetStatus === "CLOSED") {
+      const remarks = window.prompt(
+        `Enter supervisor close remarks for ${eligible.length.toLocaleString()} selected work orders:`,
+      );
+      if (remarks === null) {
+        setBulkProgress(null);
+        return;
+      }
+      if (!remarks.trim()) {
+        window.alert("Supervisor close remarks are required to close selected work orders.");
+        setBulkProgress(null);
+        return;
+      }
+      payload.supervisorDecision = remarks.trim();
+    } else if (
+      !window.confirm(
+        `${actionLabel} for ${eligible.length.toLocaleString()} selected work orders?`,
+      )
+    ) {
+      setBulkProgress(null);
+      return;
+    }
+    setBulkProgress({ total: eligible.length, done: 0, label: actionLabel });
+    let success = 0;
+    const failedIds: string[] = [];
+    for (const work of eligible) {
+      try {
+        const updated = await updateWorkStatus(work.id, targetStatus, payload);
+        if (updated?.id) {
+          mergeLocalWorkOrder(updated);
+          success += 1;
+        } else {
+          failedIds.push(work.id);
+        }
+      } catch (error) {
+        console.error(error);
+        failedIds.push(work.id);
+      }
+      setBulkProgress({
+        total: eligible.length,
+        done: success + failedIds.length,
+        label: actionLabel,
+      });
+    }
+    setSelectedWorkIds(new Set(failedIds));
+    setBulkProgress({
+      total: eligible.length,
+      done: success,
+      label: failedIds.length
+        ? `${actionLabel}: ${success.toLocaleString()} updated, ${failedIds.length.toLocaleString()} failed`
+        : `${actionLabel} complete`,
+    });
+    window.setTimeout(() => setBulkProgress(null), 2200);
+  }
+
   async function loadSamePpmEligibleWorkOrders(
     ppmCode: string,
     mode: "review" | "service",
@@ -6485,6 +6660,9 @@ function WorkOrders({
     let eligible: any[] = [];
     try {
       eligible = await loadSamePpmEligibleWorkOrders(ppmCode, mode);
+      if (mode === "service") {
+        eligible = eligibleWorkOrdersForBulkStatus(eligible, targetStatus);
+      }
     } catch (error) {
       console.error(error);
       setBulkProgress({
@@ -6504,7 +6682,22 @@ function WorkOrders({
       window.setTimeout(() => setBulkProgress(null), 1600);
       return;
     }
-    if (
+    const payload: Record<string, string> = {};
+    if (targetStatus === "CLOSED") {
+      const remarks = window.prompt(
+        `Enter supervisor close remarks for ${eligible.length.toLocaleString()} preventive work orders under PPM ${ppmCode}:`,
+      );
+      if (remarks === null) {
+        setBulkProgress(null);
+        return;
+      }
+      if (!remarks.trim()) {
+        window.alert("Supervisor close remarks are required to close selected work orders.");
+        setBulkProgress(null);
+        return;
+      }
+      payload.supervisorDecision = remarks.trim();
+    } else if (
       !window.confirm(
         `${actionLabel} for ${eligible.length.toLocaleString()} preventive work orders under PPM ${ppmCode}?`,
       )
@@ -6518,7 +6711,7 @@ function WorkOrders({
     const failedIds: string[] = [];
     for (const work of eligible) {
       try {
-        const updated = await updateWorkStatus(work.id, targetStatus);
+        const updated = await updateWorkStatus(work.id, targetStatus, payload);
         if (updated?.id) {
           mergeLocalWorkOrder(updated);
           success += 1;
@@ -6660,7 +6853,7 @@ function WorkOrders({
             >
               Calendar
             </button>
-            {isAdmin && view === "list" && (
+            {canBulkSelectWorks && (
               <>
                 <button
                   type="button"
@@ -6681,16 +6874,18 @@ function WorkOrders({
                   disabled={Boolean(bulkProgress)}
                   onSelect={selectAllWorks}
                 />
-                <button
-                  type="button"
-                  disabled={
-                    saving || !selectedWorkIds.size || Boolean(bulkProgress)
-                  }
-                  onClick={bulkDeleteSelectedWorks}
-                  className="h-10 rounded-lg bg-coral px-4 text-sm font-black text-white disabled:bg-slate-300"
-                >
-                  Delete Selected
-                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    disabled={
+                      saving || !selectedWorkIds.size || Boolean(bulkProgress)
+                    }
+                    onClick={bulkDeleteSelectedWorks}
+                    className="h-10 rounded-lg bg-coral px-4 text-sm font-black text-white disabled:bg-slate-300"
+                  >
+                    Delete Selected
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -6746,7 +6941,56 @@ function WorkOrders({
             />
           </div>
         )}
-        {selectedPpmCode && view === "list" && (canFinalReview || (canExecute && isTechnician)) && (
+        {view === "list" &&
+          selectedWorkIds.size > 0 &&
+          (canBulkMoveToProgress || canBulkSubmitReview || canBulkCloseReview) && (
+            <div className="mb-4 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm font-bold text-slate-700">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="mr-auto min-w-[280px]">
+                  <p className="text-xs font-black uppercase text-slate-500">
+                    Selected work order actions
+                  </p>
+                  <p className="text-base font-black text-ink">
+                    {selectedWorkIds.size.toLocaleString()} selected
+                  </p>
+                  <p className="text-xs font-bold text-slate-500">
+                    Loaded {selectedLoadedWorks.length.toLocaleString()} - Pending/Assigned {selectedPendingAssignmentCount.toLocaleString()} - In Progress {selectedInProgressCount.toLocaleString()} - In Review {selectedReviewReadyCount.toLocaleString()}
+                  </p>
+                </div>
+                {canBulkMoveToProgress && (
+                  <button
+                    type="button"
+                    disabled={Boolean(bulkProgress)}
+                    onClick={() => bulkUpdateSelectedWorkOrders("IN_PROGRESS")}
+                    className="h-10 rounded-lg bg-lagoon px-3 text-xs font-black text-white disabled:bg-slate-300"
+                  >
+                    Move Pending/Assigned to In Progress
+                  </button>
+                )}
+                {canBulkSubmitReview && (
+                  <button
+                    type="button"
+                    disabled={Boolean(bulkProgress)}
+                    onClick={() => bulkUpdateSelectedWorkOrders("COMPLETED")}
+                    className="h-10 rounded-lg bg-leaf px-3 text-xs font-black text-white disabled:bg-slate-300"
+                  >
+                    Submit In Progress to In Review
+                  </button>
+                )}
+                {canBulkCloseReview && (
+                  <button
+                    type="button"
+                    disabled={Boolean(bulkProgress)}
+                    onClick={() => bulkUpdateSelectedWorkOrders("CLOSED")}
+                    className="h-10 rounded-lg bg-ink px-3 text-xs font-black text-white disabled:bg-slate-300"
+                  >
+                    Close In Review With Remarks
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        {selectedPpmCode && view === "list" && (canFinalReview || canExecute) && (
           <div className="mb-4 rounded-lg border border-lagoon/20 bg-lagoon/5 p-3 text-sm font-bold text-slate-700">
             <div className="flex flex-wrap items-center gap-2">
               <div className="mr-auto min-w-[260px]">
@@ -6780,7 +7024,7 @@ function WorkOrders({
                   </button>
                 </>
               )}
-              {canExecute && isTechnician && (
+              {canExecute && (
                 <>
                   <button
                     type="button"
