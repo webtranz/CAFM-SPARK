@@ -253,6 +253,7 @@ model RosterEntry {
 model ServiceCatalog {
   id          String   @id @default(cuid())
   code        String   @unique
+  serviceCode String?
   name        String
   category    String
   type        String

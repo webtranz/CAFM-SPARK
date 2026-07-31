@@ -51,9 +51,11 @@ function inputCode(input: ServiceInput, currentCode: string) {
 async function serviceData(input: ServiceInput, currentCode: string) {
   const team = input.teamCode ? await prisma.team.findUnique({ where: { code: input.teamCode } }) : null;
   const departmentCode = cleanCode(input.departmentCode || input.category || input.departmentName);
+  const sourceServiceCode = cleanCode(input.serviceCode || input.code || currentCode);
   const name = input.name || input.departmentName || input.description || input.serviceCode || input.code || "General Service";
   return {
     code: inputCode(input, currentCode),
+    serviceCode: sourceServiceCode || null,
     name,
     category: departmentCode || input.category || name,
     type: input.type || "Service Code",

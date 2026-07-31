@@ -9550,7 +9550,7 @@ function serviceDepartmentCode(service: any) {
 }
 
 function serviceDisplayCode(service: any) {
-  return String(service.code || service.serviceCode || "").trim();
+  return String(service.serviceCode || service.code || "").trim();
 }
 
 function serviceDisplayName(service: any) {
@@ -10514,6 +10514,109 @@ function ServiceRequestForm({
           ))}
         </div>
         <input type="hidden" name="priority" value={priority} />
+        <div className="grid gap-3 rounded-lg border border-lagoon/20 bg-white p-3">
+          {serviceDepartmentOptions.length > 0 && (
+            <div className="rounded-lg border border-lagoon/20 bg-lagoon/5 p-3">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-black uppercase text-slate-500">
+                  Select department to load service codes
+                </p>
+                {departmentCode && (
+                  <button
+                    type="button"
+                    onClick={() => applyDepartmentSelection("")}
+                    className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-black text-slate-600"
+                  >
+                    Show all
+                  </button>
+                )}
+              </div>
+              <div className="flex max-h-32 flex-wrap gap-2 overflow-auto pr-1">
+                {serviceDepartmentOptions.map((department) => (
+                  <button
+                    key={department.code}
+                    type="button"
+                    onClick={() => applyDepartmentSelection(department.code)}
+                    className={`rounded-lg border px-3 py-2 text-xs font-black transition ${
+                      departmentCode === department.code
+                        ? "border-lagoon bg-lagoon text-white shadow-sm"
+                        : "border-lagoon/20 bg-white text-lagoon hover:bg-lagoon/10"
+                    }`}
+                    title={`${department.count.toLocaleString()} service codes`}
+                  >
+                    {department.label}
+                    <span className="ml-2 rounded-full bg-white/70 px-2 py-0.5 text-[10px] text-ink">
+                      {department.count.toLocaleString()}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="grid gap-3 md:grid-cols-2">
+            <select
+              name="departmentCode"
+              value={departmentCode}
+              onChange={(event) => applyDepartmentSelection(event.target.value)}
+              className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon"
+            >
+              <option value="">Department</option>
+              {departments.map((department) => (
+                <option key={department.id} value={department.code}>
+                  {department.code} - {department.name}
+                </option>
+              ))}
+              {serviceDepartmentOptions
+                .filter(
+                  (department) =>
+                    !departments.some(
+                      (item) => normalizeServiceScope(item.code) === department.code,
+                    ),
+                )
+                .map((department) => (
+                  <option key={department.code} value={department.code}>
+                    {department.label}
+                  </option>
+                ))}
+            </select>
+            <select
+              name="serviceCode"
+              value={serviceCode}
+              onChange={(event) => applyServiceSelection(event.target.value)}
+              className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon"
+            >
+              <option value="">
+                {departmentCode
+                  ? `Service code (${filteredServices.length})`
+                  : "Service code"}
+              </option>
+              {filteredServices.map((service) => (
+                <option key={service.id} value={service.code}>
+                  {serviceDisplayCode(service)} - {serviceDisplayName(service)}
+                </option>
+              ))}
+            </select>
+          </div>
+          {selectedService && (
+            <div className="grid gap-2 rounded-lg border border-lagoon/20 bg-lagoon/5 p-3 sm:grid-cols-3">
+              <div>
+                <p className="text-[10px] font-black uppercase text-slate-500">Service Code</p>
+                <p className="text-sm font-black text-ink">{serviceDisplayCode(selectedService)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-black uppercase text-slate-500">Service Name</p>
+                <p className="text-sm font-black text-ink">{serviceDisplayName(selectedService)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-black uppercase text-slate-500">Department</p>
+                <p className="text-sm font-black text-ink">{serviceDepartmentCode(selectedService) || "-"}</p>
+              </div>
+            </div>
+          )}
+          <span className="text-xs font-black text-slate-500">
+            Department buttons filter the service codes exactly as uploaded from the service-code workbook.
+          </span>
+        </div>
         <input type="hidden" name="location" value={locationValue} />
         <input type="hidden" name="locationCode" value={locationCodeValue} />
         <input type="hidden" name="siteCode" value={siteValue} />
@@ -10713,93 +10816,6 @@ function ServiceRequestForm({
             placeholder="Created by / requester"
             className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon"
           />
-        </div>
-        <div className="grid gap-3">
-          {serviceDepartmentOptions.length > 0 && (
-            <div className="rounded-lg border border-lagoon/20 bg-lagoon/5 p-3">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-black uppercase text-slate-500">
-                  Select department to load service codes
-                </p>
-                {departmentCode && (
-                  <button
-                    type="button"
-                    onClick={() => applyDepartmentSelection("")}
-                    className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-black text-slate-600"
-                  >
-                    Show all
-                  </button>
-                )}
-              </div>
-              <div className="flex max-h-32 flex-wrap gap-2 overflow-auto pr-1">
-                {serviceDepartmentOptions.map((department) => (
-                  <button
-                    key={department.code}
-                    type="button"
-                    onClick={() => applyDepartmentSelection(department.code)}
-                    className={`rounded-lg border px-3 py-2 text-xs font-black transition ${
-                      departmentCode === department.code
-                        ? "border-lagoon bg-lagoon text-white shadow-sm"
-                        : "border-lagoon/20 bg-white text-lagoon hover:bg-lagoon/10"
-                    }`}
-                    title={`${department.count.toLocaleString()} service codes`}
-                  >
-                    {department.label}
-                    <span className="ml-2 rounded-full bg-white/70 px-2 py-0.5 text-[10px] text-ink">
-                      {department.count.toLocaleString()}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="grid gap-3 md:grid-cols-2">
-            <select
-              name="departmentCode"
-              value={departmentCode}
-              onChange={(event) => applyDepartmentSelection(event.target.value)}
-              className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon"
-            >
-              <option value="">Department</option>
-              {departments.map((department) => (
-                <option key={department.id} value={department.code}>
-                  {department.code} - {department.name}
-                </option>
-              ))}
-              {serviceDepartmentOptions
-                .filter(
-                  (department) =>
-                    !departments.some(
-                      (item) => normalizeServiceScope(item.code) === department.code,
-                    ),
-                )
-                .map((department) => (
-                  <option key={department.code} value={department.code}>
-                    {department.label}
-                  </option>
-                ))}
-            </select>
-            <select
-              name="serviceCode"
-              value={serviceCode}
-              onChange={(event) => applyServiceSelection(event.target.value)}
-              className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon"
-            >
-              <option value="">
-                {departmentCode
-                  ? `Service code (${filteredServices.length})`
-                  : "Service code"}
-              </option>
-              {filteredServices.map((service) => (
-                <option key={service.id} value={service.code}>
-                  {serviceDepartmentCode(service)} | {serviceDisplayCode(service)} - {serviceDisplayName(service)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <span className="text-xs font-black text-slate-500">
-            Department buttons filter the service codes exactly as uploaded from the service-code workbook.
-          </span>
         </div>
         <label className="grid gap-2 text-sm font-bold text-slate-600">
           Related Asset

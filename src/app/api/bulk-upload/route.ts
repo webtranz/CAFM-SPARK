@@ -1822,8 +1822,10 @@ function serviceImportCode(row: Row) {
 
 function servicePayload(row: Row, teamId?: string) {
   const departmentCode = cleanServiceCode(value(row, "departmentCode", "Department", "Department Code", "sourceSheet", "category"));
+  const sourceServiceCode = cleanServiceCode(value(row, "serviceCode", "Service Code", "ServiceCode"));
   const name = value(row, "name", "Description", "description", "departmentName") || serviceImportCode(row);
   return {
+    serviceCode: sourceServiceCode || cleanServiceCode(value(row, "code", "Code")) || serviceImportCode(row),
     name,
     category: departmentCode || value(row, "category") || "General",
     type: value(row, "type") || "Service Code",
