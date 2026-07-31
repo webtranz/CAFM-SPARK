@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-auth";
 
 const templates: Record<string, string> = {
@@ -13,7 +13,7 @@ const templates: Record<string, string> = {
   departments: "code,name,siteLocation,description\n",
   employees: "name,email,companyId,nationalityType,departmentCode,siteLocation\n",
   teams: "name,companyIdNumber,departmentCode,service,email,phone\n",
-  services: "departmentName,departmentCode\n",
+  services: "code,serviceCode,departmentCode,name,category,type,priority,slaHours,teamCode,description,organization,equipmentUsability,equipmentUsabilityOrg,woClass,woClassOrg,sourceSheet\n",
   inventory: "sku,name,category,unit,onHand,reorderPoint,unitCost,vendor,location\n",
   requests: "ticketNo,title,category,departmentCode,serviceCode,assignedTeamCode,requester,channel,priority,status,location,attachmentUrls,rejectionReason,slaHours,description\n",
   workOrders: "woNo,title,type,assetType,departmentCode,serviceCode,assignedTeamCode,jobPlanCode,priority,status,assetTag,plannedStart,dueAt,finishedAt,resolutionAt,dateTimeCreated,estimatedHours,actualHours,cost,jobPlan,safetyNotes,workNotes,materialRequest,photoUrls,assetsUsed,inventoryUsed,supervisorDecision,sourceYear,sourceWorkOrder,sourceServiceRequest,sourceEquipmentLocation,sourceLocation,matchSource\n",
@@ -39,3 +39,4 @@ export async function GET(_request: Request, { params }: { params: Promise<{ typ
     },
   });
 }
+

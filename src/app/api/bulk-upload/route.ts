@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+﻿import { createHash } from "crypto";
 import { copyFile, mkdir, readFile, stat, writeFile } from "fs/promises";
 import path from "path";
 import { NextResponse } from "next/server";
@@ -1377,8 +1377,9 @@ async function importEmployee(row: Row, context: ImportContext = {}) {
 }
 
 async function importService(row: Row, context: ImportContext = {}) {
-  const team = row.teamCode ? await prisma.team.findUnique({ where: { code: row.teamCode } }) : null;
-  const code = row.departmentCode || required(row, "code");
+  const teamCode = value(row, "teamCode", "Team Code", "assignedTeamCode");
+  const team = teamCode ? await prisma.team.findUnique({ where: { code: teamCode } }) : null;
+  const code = serviceImportCode(row);
   const existing = await prisma.serviceCatalog.findUnique({ where: { code } });
   if (existing && !shouldReplace(context)) return existingResult("service_catalog", existing, code, existing.name);
   const service = await prisma.serviceCatalog.upsert({
@@ -1800,15 +1801,36 @@ function teamPayload(row: Row) {
   };
 }
 
+function cleanServiceCode(value: string) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^A-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function serviceImportCode(row: Row) {
+  const departmentCode = cleanServiceCode(value(row, "departmentCode", "Department", "Department Code", "sourceSheet", "category"));
+  const explicitCode = cleanServiceCode(value(row, "code", "Code"));
+  const sourceServiceCode = cleanServiceCode(value(row, "serviceCode", "Service Code", "ServiceCode"));
+  const sourceCode = explicitCode || sourceServiceCode;
+  if (sourceCode) return sourceCode.startsWith(`${departmentCode}-`) || !departmentCode ? sourceCode : `${departmentCode}-${sourceCode}`;
+  return departmentCode || required(row, "code", "serviceCode", "Service Code", "departmentCode");
+}
+
 function servicePayload(row: Row, teamId?: string) {
+  const departmentCode = cleanServiceCode(value(row, "departmentCode", "Department", "Department Code", "sourceSheet", "category"));
+  const name = value(row, "name", "Description", "description", "departmentName") || serviceImportCode(row);
   return {
-    name: row.departmentName || required(row, "name"),
-    category: row.departmentName || row.category || "General",
-    type: row.type || "Department Service",
-    priority: priority(row.priority),
-    slaHours: integer(row.slaHours, 24),
+    name,
+    category: departmentCode || value(row, "category") || "General",
+    type: value(row, "type") || "Service Code",
+    priority: priority(value(row, "priority", "Priority")),
+    slaHours: integer(value(row, "slaHours", "SLA Hours", "sla"), 24),
     teamId,
-    description: row.description || `Department ${row.departmentCode || row.code || ""}`,
+    description: value(row, "description", "Description") || name,
   };
 }
 
@@ -1998,3 +2020,5 @@ function risk(value: string | undefined) {
   const normalized = String(value || "MODERATE").toUpperCase();
   return ["LOW", "MODERATE", "HIGH", "EXTREME"].includes(normalized) ? normalized as "LOW" | "MODERATE" | "HIGH" | "EXTREME" : "MODERATE";
 }
+
+
