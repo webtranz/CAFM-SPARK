@@ -89,6 +89,24 @@ textarea {
 .cafm-data-table td {
   vertical-align: top;
 }
+.cafm-data-table tbody tr {
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.cafm-data-table tbody tr:has(input[type="checkbox"]:checked),
+.cafm-data-table tbody tr[aria-selected="true"],
+.cafm-row-selected {
+  background-color: #bfdbfe !important;
+  box-shadow: inset 4px 0 0 #2563eb;
+}
+
+.cafm-data-table tbody tr:has(input[type="checkbox"]:checked):hover,
+.cafm-data-table tbody tr[aria-selected="true"]:hover,
+.cafm-row-selected:hover {
+  background-color: #93c5fd !important;
+}
 
 @media (max-width: 1023px) {
   .cafm-shell {
