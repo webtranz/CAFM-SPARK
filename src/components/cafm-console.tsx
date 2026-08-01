@@ -221,6 +221,12 @@ const moduleGroups: ModuleGroup[] = [
     items: [
       { id: "helpdesk", label: "Service Requests", icon: TicketCheck },
       { id: "work", label: "Work Orders", icon: Wrench },
+      {
+        id: "work",
+        label: "PPM Today",
+        icon: CalendarCheck,
+        view: "ppm-today",
+      },
       { id: "jobPlans", label: "Job Plans", icon: ClipboardCheck },
       { id: "ppm", label: "PPM Planner", icon: CalendarCheck },
     ],
@@ -2275,6 +2281,7 @@ export function CafmConsole({
                 deleteRecord(`/api/work-orders/${id}`, "Work order deleted.")
               }
               deleteWorkOrders={deleteWorkOrders}
+              moduleView={activeView}
             />
           )}
           {canViewActive && active === "helpdesk" && (
@@ -5873,6 +5880,7 @@ function WorkOrders({
   updateWorkStatus,
   deleteWorkOrder,
   deleteWorkOrders,
+  moduleView = "work",
 }: {
   data: ConsoleData;
   submitWorkOrder: (formData: FormData) => void;
@@ -5894,6 +5902,7 @@ function WorkOrders({
     failed: number;
     results: { ok: boolean; message: string }[];
   } | void>;
+  moduleView?: string;
 }) {
   const [editing, setEditing] = useState<any | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -6212,6 +6221,7 @@ function WorkOrders({
   }, [workRowsSource]);
 
   useEffect(() => {
+    if (moduleView === "ppm-today") return;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
 
@@ -6272,6 +6282,7 @@ function WorkOrders({
     showTimeMetrics,
     showOnlyDelayed,
     role,
+    moduleView,
   ]);
 
   function handleWorkScroll(event: UIEvent<HTMLDivElement>) {
@@ -6741,6 +6752,10 @@ function WorkOrders({
     });
     window.setTimeout(() => setBulkProgress(null), 2200);
   }
+  if (moduleView === "ppm-today") {
+    return <PpmTodayWorkOrders role={role} />;
+  }
+
   async function bulkDeleteSelectedWorks() {
     const ids = Array.from(selectedWorkIds);
     if (!ids.length) return;
@@ -7658,6 +7673,323 @@ function WorkOrders({
   );
 }
 
+function localDateInputValue(value: Date | string = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 10);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
+  const printWindow = window.open("", "_blank", "width=1200,height=900");
+  if (!printWindow) {
+    window.alert("Allow pop-ups to print the PPM work orders.");
+    return;
+  }
+  const printedAt = new Date().toLocaleString();
+  const rowHtml = rows.length
+    ? rows
+        .map((work, index) => {
+          const ppmCode = workOrderPpmCode(work) || "-";
+          const asset = work.asset?.tag ?? work.assetTag ?? "-";
+          const location = work.asset?.buildingCode || work.asset?.floor || work.location || "-";
+          const description = work.jobPlan || work.workNotes || work.title || "-";
+          return `<tr>
+            <td>${index + 1}</td>
+            <td>${escapeHtml(String(work.woNo ?? "-"))}</td>
+            <td>${escapeHtml(ppmCode)}</td>
+            <td>${escapeHtml(String(work.title ?? "-"))}</td>
+            <td>${escapeHtml(String(work.status ?? "-"))}</td>
+            <td>${escapeHtml(String(work.departmentCode ?? "-"))}</td>
+            <td>${escapeHtml(String(asset))}</td>
+            <td>${escapeHtml(String(location))}</td>
+            <td>${escapeHtml(formatDateCell(work.dueAt))}</td>
+            <td>${escapeHtml(String(work.assignedTeamCode ?? "-"))}</td>
+            <td>${escapeHtml(String(description))}</td>
+          </tr>`;
+        })
+        .join("")
+    : '<tr><td colspan="11">No preventive work orders found for this date.</td></tr>';
+
+  printWindow.document.write(`<!doctype html>
+<html>
+<head>
+  <title>PPM Today Work Orders - ${escapeHtml(selectedDate)}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; color: #0f172a; }
+    .top { display: flex; justify-content: space-between; gap: 16px; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; }
+    h1 { margin: 0; font-size: 24px; }
+    .muted { color: #64748b; font-size: 12px; font-weight: 700; }
+    .count { border: 1px solid #cbd5e1; padding: 10px 14px; border-radius: 8px; font-weight: 800; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th { background: #334155; color: white; text-align: left; }
+    th, td { border: 1px solid #cbd5e1; padding: 7px; vertical-align: top; }
+    tr:nth-child(even) td { background: #f8fafc; }
+    button { float: right; margin-bottom: 12px; padding: 8px 14px; border: 1px solid #0f172a; background: white; border-radius: 6px; font-weight: 800; }
+    @media print { body { margin: 10mm; } button { display: none; } }
+  </style>
+</head>
+<body>
+  <button onclick="window.print()">Print</button>
+  <div class="top">
+    <div>
+      <h1>Preventive PPM Work Orders</h1>
+      <div class="muted">Selected date: ${escapeHtml(selectedDate)} | Printed: ${escapeHtml(printedAt)}</div>
+    </div>
+    <div class="count">Total: ${rows.length.toLocaleString()}</div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th><th>WO No</th><th>PPM Code</th><th>Title</th><th>Status</th><th>DPT</th><th>Asset</th><th>Location</th><th>Due Date</th><th>Team</th><th>Task</th>
+      </tr>
+    </thead>
+    <tbody>${rowHtml}</tbody>
+  </table>
+  <script>window.onload = () => window.print();</script>
+</body>
+</html>`);
+  printWindow.document.close();
+}
+
+function PpmTodayWorkOrders({ role }: { role: string }) {
+  const [selectedDate, setSelectedDate] = useState(() => localDateInputValue());
+  const [rows, setRows] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  const visibleRows = useMemo(() => {
+    const text = search.trim().toLowerCase();
+    const source = liveWorkOrderSort(rows, role);
+    if (!text) return source;
+    return source.filter((work) =>
+      [
+        work.woNo,
+        work.title,
+        work.status,
+        work.departmentCode,
+        work.assignedTeamCode,
+        work.asset?.tag,
+        work.assetTag,
+        work.asset?.name,
+        work.asset?.buildingCode,
+        work.location,
+        workOrderPpmCode(work),
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(text),
+    );
+  }, [rows, role, search]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function loadTodayPpmWorkOrders() {
+      setLoading(true);
+      setError("");
+      try {
+        const params = new URLSearchParams({
+          page: "1",
+          pageSize: "all",
+          status: "All",
+          priority: "All",
+          category: "All",
+          department: "All",
+          type: "All",
+          assigned: "All",
+          preventiveOnly: "true",
+          dueDate: selectedDate,
+        });
+        const response = await fetch(`/api/work-orders?${params.toString()}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(result.message || "Unable to load PPM work orders.");
+        }
+        setRows(Array.isArray(result.workOrders) ? result.workOrders : []);
+        setTotal(Number(result.total ?? result.workOrders?.length ?? 0));
+      } catch (error: any) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setError(error?.message || "Unable to load PPM work orders.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
+    void loadTodayPpmWorkOrders();
+    return () => controller.abort();
+  }, [selectedDate]);
+
+  return (
+    <section className="space-y-5">
+      <Panel title="PPM Today" icon={CalendarCheck}>
+        <div className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-emerald-100 bg-emerald-50 p-3">
+          <div className="mr-auto min-w-[260px]">
+            <p className="text-xs font-black uppercase text-slate-500">
+              Preventive Work Orders By Date
+            </p>
+            <p className="text-lg font-black text-ink">
+              {total.toLocaleString()} preventive WOs due on {selectedDate}
+            </p>
+            <p className="text-xs font-bold text-slate-500">
+              Pick a date, preview the service-team print sheet, then confirm print.
+            </p>
+          </div>
+          <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+            Date
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(event) => setSelectedDate(event.target.value)}
+              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-ink outline-none focus:border-lagoon"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => setSelectedDate(localDateInputValue())}
+            className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon"
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            disabled={!visibleRows.length}
+            onClick={() => setPreviewOpen(true)}
+            className="h-10 rounded-lg bg-ink px-4 text-sm font-black text-white disabled:bg-slate-300"
+          >
+            Print Preview
+          </button>
+        </div>
+        <div className="mb-4 flex min-w-[280px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 lg:max-w-xl">
+          <Search size={16} className="text-slate-400" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search by WO, PPM code, asset, department, team, or location"
+            className="h-11 w-full text-sm outline-none"
+          />
+        </div>
+        {error && (
+          <div className="mb-4 rounded-lg bg-coral/10 p-3 text-sm font-black text-coral">
+            {error}
+          </div>
+        )}
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm font-black text-slate-600">
+          <span>
+            Showing {visibleRows.length.toLocaleString()} of {total.toLocaleString()} preventive work orders
+          </span>
+          {loading && <span className="text-lagoon">Loading PPM work orders...</span>}
+        </div>
+        <div className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
+          <table className="cafm-data-table min-w-[1500px] border-collapse bg-white text-sm">
+            <thead className="sticky top-0 z-20 bg-slate-50 text-left text-xs uppercase text-slate-500 shadow-sm">
+              <tr>
+                <th className="px-3 py-3 font-black">#</th>
+                <th className="px-3 py-3 font-black">WO No</th>
+                <th className="px-3 py-3 font-black">PPM Code</th>
+                <th className="px-3 py-3 font-black">Title</th>
+                <th className="px-3 py-3 font-black">Status</th>
+                <th className="px-3 py-3 font-black">DPT</th>
+                <th className="px-3 py-3 font-black">Asset</th>
+                <th className="px-3 py-3 font-black">Location</th>
+                <th className="px-3 py-3 font-black">Due Date</th>
+                <th className="px-3 py-3 font-black">Team</th>
+                <th className="px-3 py-3 font-black">Task</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((work, index) => (
+                <tr key={work.id} className="border-t border-slate-100 align-top hover:bg-sky-50">
+                  <td className="whitespace-nowrap px-3 py-3 font-black text-slate-500">{index + 1}</td>
+                  <td className="whitespace-nowrap px-3 py-3 font-black text-lagoon">{work.woNo}</td>
+                  <td className="whitespace-nowrap px-3 py-3 font-black">{workOrderPpmCode(work) || "-"}</td>
+                  <td className="max-w-[320px] px-3 py-3 font-black">{work.title}</td>
+                  <td className="whitespace-nowrap px-3 py-3"><WorkOrderStatusBadge status={work.status} /></td>
+                  <td className="whitespace-nowrap px-3 py-3">{work.departmentCode || "-"}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-lagoon">{work.asset?.tag ?? work.assetTag ?? "-"}</td>
+                  <td className="max-w-[260px] px-3 py-3 text-slate-600">{work.asset?.buildingCode || work.asset?.floor || work.location || "-"}</td>
+                  <td className="whitespace-nowrap px-3 py-3">{formatDateCell(work.dueAt)}</td>
+                  <td className="whitespace-nowrap px-3 py-3">{work.assignedTeamCode || "-"}</td>
+                  <td className="max-w-[360px] px-3 py-3 text-slate-600"><div className="line-clamp-2">{work.jobPlan || work.workNotes || work.title}</div></td>
+                </tr>
+              ))}
+              {!visibleRows.length && !loading && (
+                <tr>
+                  <td colSpan={11} className="px-3 py-8 text-center font-black text-slate-500">
+                    No preventive work orders found for this date.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+      {previewOpen && (
+        <RequestModalShell
+          title={`Print Preview | PPM ${selectedDate}`}
+          onClose={() => setPreviewOpen(false)}
+        >
+          <div className="grid gap-4">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-black uppercase text-slate-500">Print Sheet Preview</p>
+              <h3 className="mt-1 text-2xl font-black text-ink">
+                {visibleRows.length.toLocaleString()} preventive work orders due on {selectedDate}
+              </h3>
+              <p className="mt-1 text-sm font-bold text-slate-500">
+                This is the sheet that will be printed for service teams.
+              </p>
+            </div>
+            <div className="max-h-[52vh] overflow-auto rounded-lg border border-slate-200">
+              <table className="min-w-[1200px] border-collapse bg-white text-xs">
+                <thead className="sticky top-0 bg-slate-800 text-left uppercase text-white">
+                  <tr>
+                    <th className="px-3 py-2">#</th><th className="px-3 py-2">WO No</th><th className="px-3 py-2">PPM Code</th><th className="px-3 py-2">Title</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Asset</th><th className="px-3 py-2">Location</th><th className="px-3 py-2">Due</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleRows.map((work, index) => (
+                    <tr key={work.id} className="border-t border-slate-100">
+                      <td className="px-3 py-2 font-black">{index + 1}</td>
+                      <td className="px-3 py-2 font-black text-lagoon">{work.woNo}</td>
+                      <td className="px-3 py-2">{workOrderPpmCode(work) || "-"}</td>
+                      <td className="px-3 py-2">{work.title}</td>
+                      <td className="px-3 py-2">{work.status}</td>
+                      <td className="px-3 py-2">{work.asset?.tag ?? work.assetTag ?? "-"}</td>
+                      <td className="px-3 py-2">{work.asset?.buildingCode || work.asset?.floor || work.location || "-"}</td>
+                      <td className="px-3 py-2">{formatDateCell(work.dueAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setPreviewOpen(false)}
+                className="h-11 rounded-lg border border-slate-200 bg-white px-5 font-black text-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => printPpmTodayWorkOrders(visibleRows, selectedDate)}
+                className="h-11 rounded-lg bg-ink px-5 font-black text-white"
+              >
+                Confirm & Print
+              </button>
+            </div>
+          </div>
+        </RequestModalShell>
+      )}
+    </section>
+  );
+}
 function AssetPreviewModal({
   asset,
   canManageAssets,
@@ -13102,7 +13434,19 @@ function Ppm({
     "preview_month" | "generate_month" | null
   >(null);
   const [bulkPpmMessage, setBulkPpmMessage] = useState("");
+  const [todayPpmPreview, setTodayPpmPreview] = useState<any | null>(null);
+  const [todayPpmBusy, setTodayPpmBusy] = useState<
+    "preview_today" | "generate_today" | null
+  >(null);
+  const [todayPpmMessage, setTodayPpmMessage] = useState("");
   const ppmScrollRef = useRef<HTMLDivElement | null>(null);
+  const presentPpmDate = useMemo(() => {
+    const now = new Date();
+    return new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 10);
+  }, []);
+  const presentPpmMonth = presentPpmDate.slice(0, 7);
   const bulkPpmPeriodStart = bulkPpmMonth
     ? `${bulkPpmMonth}-01`
     : ppmPeriodStartInputValue(new Date().toISOString());
@@ -13406,6 +13750,86 @@ function Ppm({
     }
   }
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPresentDayPpmPreview() {
+      try {
+        const response = await fetch("/api/ppm/workflow", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "preview_today",
+            dueMonth: presentPpmMonth,
+            periodStart: presentPpmDate,
+            periodEnd: presentPpmDate,
+            effectiveDate: PPM_WORK_ORDER_EFFECTIVE_DATE,
+          }),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(
+            result.message || "Unable to load present-day PPM count.",
+          );
+        }
+        if (!cancelled && result.preview) setTodayPpmPreview(result.preview);
+      } catch (error: any) {
+        if (!cancelled) {
+          setTodayPpmMessage(
+            error?.message || "Unable to load present-day PPM count.",
+          );
+        }
+      }
+    }
+    void loadPresentDayPpmPreview();
+    return () => {
+      cancelled = true;
+    };
+  }, [presentPpmDate, presentPpmMonth]);
+
+  async function runTodayPpm(action: "preview_today" | "generate_today") {
+    if (todayPpmBusy) return;
+    setTodayPpmBusy(action);
+    setTodayPpmMessage("");
+    try {
+      const response = await fetch("/api/ppm/workflow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          dueMonth: presentPpmMonth,
+          periodStart: presentPpmDate,
+          periodEnd: presentPpmDate,
+          effectiveDate: PPM_WORK_ORDER_EFFECTIVE_DATE,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          result.message || "Unable to process present-day PPM work orders.",
+        );
+      }
+      if (result.preview) setTodayPpmPreview(result.preview);
+      if (action === "generate_today") {
+        applyBulkPpmMonthUpdates(result);
+        setTodayPpmMessage(
+          result.message ||
+            `Created ${Number(result.generatedCount || 0).toLocaleString()} new present-day PPM work orders for ${presentPpmDate}.`,
+        );
+      } else {
+        const preview = result.preview || {};
+        setTodayPpmMessage(
+          `Present-day preview ready: ${Number(preview.total || 0).toLocaleString()} due today, ${Number(preview.createCount || 0).toLocaleString()} new and ${Number(preview.reuseCount || 0).toLocaleString()} already linked.`,
+        );
+      }
+    } catch (error: any) {
+      setTodayPpmMessage(
+        error?.message || "Unable to process present-day PPM work orders.",
+      );
+    } finally {
+      setTodayPpmBusy(null);
+    }
+  }
+
   async function bulkDeleteSelectedPpms() {
     const ids = Array.from(selectedPpmIds);
     if (!ids.length) return;
@@ -13463,6 +13887,80 @@ function Ppm({
         </div>
         <ReportButtons type="ppm" label="PPM report" />
         <div className="mb-4 rounded-lg border border-lagoon/20 bg-lagoon/5 p-4">
+          <div className="mb-4 rounded-lg border border-sky-200 bg-white p-3">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase text-slate-500">
+                  Present Day PPM Work Orders
+                </p>
+                <h3 className="mt-1 text-lg font-black text-ink">
+                  Generate today's due PPMs into WOs
+                </h3>
+                <p className="mt-1 text-xs font-bold text-slate-500">
+                  Uses today's due date only, prevents duplicates, and refreshes
+                  next due dates after creation.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-end gap-2">
+                <button
+                  type="button"
+                  disabled={Boolean(todayPpmBusy)}
+                  onClick={() => runTodayPpm("preview_today")}
+                  className="h-10 rounded-lg border border-lagoon/30 bg-white px-3 text-xs font-black text-lagoon hover:bg-lagoon hover:text-white disabled:bg-slate-100 disabled:text-slate-400"
+                >
+                  {todayPpmBusy === "preview_today"
+                    ? "Previewing..."
+                    : "Preview Today WOs"}
+                </button>
+                <button
+                  type="button"
+                  disabled={Boolean(todayPpmBusy)}
+                  onClick={() => runTodayPpm("generate_today")}
+                  className="h-10 rounded-lg bg-ink px-3 text-xs font-black text-white disabled:bg-slate-300"
+                >
+                  {todayPpmBusy === "generate_today"
+                    ? "Creating..."
+                    : todayPpmPreview
+                      ? `Create ${Number(todayPpmPreview.createCount || 0).toLocaleString()} Today WOs`
+                      : "Create Today WOs"}
+                </button>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-4">
+              {[
+                ["Today", presentPpmDate],
+                [
+                  "Present Day Count",
+                  Number(todayPpmPreview?.total || 0).toLocaleString(),
+                ],
+                [
+                  "New WOs",
+                  Number(todayPpmPreview?.createCount || 0).toLocaleString(),
+                ],
+                [
+                  "Already Linked",
+                  Number(todayPpmPreview?.reuseCount || 0).toLocaleString(),
+                ],
+              ].map(([label, value]) => (
+                <div
+                  key={String(label)}
+                  className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2"
+                >
+                  <p className="text-xs font-black uppercase text-slate-500">
+                    {label}
+                  </p>
+                  <p className="mt-1 text-sm font-black text-ink">{value}</p>
+                </div>
+              ))}
+            </div>
+            {todayPpmMessage && (
+              <p
+                className={`mt-3 rounded-lg p-3 text-sm font-black ${/created|preview ready|refreshed|linked/i.test(todayPpmMessage) ? "bg-emerald-50 text-emerald-700" : "bg-coral/10 text-coral"}`}
+              >
+                {todayPpmMessage}
+              </p>
+            )}
+          </div>
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-xs font-black uppercase text-slate-500">

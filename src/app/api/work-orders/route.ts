@@ -87,6 +87,8 @@ export async function GET(request: Request) {
   const assigned = url.searchParams.get("assigned")?.trim() || "";
   const overdueOnly = url.searchParams.get("overdueOnly") === "true";
   const delayedOnly = url.searchParams.get("delayedOnly") === "true";
+  const preventiveOnly = url.searchParams.get("preventiveOnly") === "true";
+  const dueDate = url.searchParams.get("dueDate")?.trim() || "";
   const pageInput = Number(url.searchParams.get("page") || 1);
   const pageSizeParam = url.searchParams.get("pageSize") || "100";
   const pageSizeInput = pageSizeParam === "all" ? Number.MAX_SAFE_INTEGER : Number(pageSizeParam);
@@ -188,6 +190,23 @@ export async function GET(request: Request) {
         { status: { not: "CLOSED" } },
       ],
     });
+  }
+  if (preventiveOnly) {
+    andFilters.push({
+      OR: [
+        { ppmId: { not: null } },
+        { type: { contains: "Preventive", mode: "insensitive" } },
+        { title: { startsWith: "PPM |", mode: "insensitive" } },
+      ],
+    });
+  }
+  if (dueDate) {
+    const start = new Date(`${dueDate}T00:00:00.000Z`);
+    if (!Number.isNaN(start.getTime())) {
+      const end = new Date(start);
+      end.setUTCDate(end.getUTCDate() + 1);
+      andFilters.push({ dueAt: { gte: start, lt: end } });
+    }
   }
   if (query) {
     andFilters.push({

@@ -23,6 +23,8 @@ const actions = [
   "defect",
   "preview_month",
   "generate_month",
+  "preview_today",
+  "generate_today",
 ] as const;
 const workflowStatuses = [
   "DRAFT",
@@ -936,6 +938,20 @@ async function buildPpmMonthWorkOrderPreview(input: z.infer<typeof schema>) {
   };
 }
 
+function presentDayWorkOrderInput(input: z.infer<typeof schema>) {
+  const fallbackToday = new Date().toISOString().slice(0, 10);
+  const presentDay = utcDateFromInput(input.periodStart || fallbackToday, fallbackToday)
+    .toISOString()
+    .slice(0, 10);
+
+  return {
+    ...input,
+    dueMonth: input.dueMonth || presentDay.slice(0, 7),
+    periodStart: presentDay,
+    periodEnd: presentDay,
+  };
+}
+
 async function createPpmWorkOrdersForMonth(
   input: z.infer<typeof schema>,
   user: any,
@@ -1049,7 +1065,7 @@ async function createPpmWorkOrdersForMonth(
 export async function POST(request: Request) {
   try {
     const input = schema.parse(await request.json());
-    const isMonthAction = ["preview_month", "generate_month"].includes(
+    const isMonthAction = ["preview_month", "generate_month", "preview_today", "generate_today"].includes(
       input.action,
     );
     const requiredPermission = isMonthAction
@@ -1065,6 +1081,105 @@ export async function POST(request: Request) {
     ]);
     if (error) return error;
 
+    if (input.action === "preview_today") {
+      const todayInput = presentDayWorkOrderInput(input);
+      const preview = await buildPpmMonthWorkOrderPreview(todayInput);
+      return NextResponse.json({
+        preview,
+        groupCode: preview.groupCode,
+        dueMonth: preview.dueMonth,
+        totalWorkOrders: preview.total,
+        generatedCount: preview.createCount,
+        reusedCount: preview.reuseCount,
+        periodStart: preview.periodStart,
+        periodEnd: preview.periodEnd,
+        presentDay: preview.periodStart,
+      });
+    }
+
+    if (input.action === "generate_today") {
+      const todayInput = presentDayWorkOrderInput(input);
+      const generation = await createPpmWorkOrdersForMonth(todayInput, user);
+      const preview = {
+        groupCode: generation.groupCode,
+        effectiveDate: generation.effectiveDate,
+        dueMonth: generation.dueMonth,
+        periodStart: generation.periodStart,
+        periodEnd: generation.periodEnd,
+        total: generation.total,
+        createCount: generation.createdCount,
+        reuseCount: generation.reusedCount,
+        rows: generation.results.slice(0, 300).map((item: any) => ({
+          ppmId: item.ppmId,
+          ppmCode: item.ppmCode,
+          code: item.code,
+          title: item.title,
+          assetTag: item.assetTag,
+          locationCode: item.locationCode,
+          departmentCode: item.departmentCode,
+          equipmentDescription: item.equipmentDescription,
+          previousDue: item.previousDue,
+          nextDue: item.nextDue,
+          scheduledDate: item.scheduledDate?.toISOString?.().slice(0, 10) || "",
+          frequency: item.frequency,
+          periodUom: item.periodUom,
+          workOrderNo: item.workOrder.woNo,
+          willCreate: item.created,
+          dueDateAdvanced: item.dueDateAdvanced,
+        })),
+        limited: generation.results.length > 300,
+      };
+      await auditAction({
+        user,
+        action: "PPM_WORKFLOW_GENERATE_TODAY",
+        entity: "preventive_maintenance",
+        entityId: generation.periodStart,
+        details: {
+          input: todayInput,
+          groupCode: generation.groupCode,
+          dueMonth: generation.dueMonth,
+          periodStart: generation.periodStart,
+          periodEnd: generation.periodEnd,
+          effectiveDate: generation.effectiveDate,
+          total: generation.total,
+          createdCount: generation.createdCount,
+          reusedCount: generation.reusedCount,
+          advancedCount: generation.advancedCount,
+        },
+      });
+      return NextResponse.json({
+        ppm: generation.updatedPpms[0] || null,
+        updatedPpms: generation.updatedPpms,
+        workOrders: generation.results.map((item) => item.workOrder),
+        generatedRows: generation.results.map((item: any) => ({
+          ppmId: item.ppmId,
+          code: item.code,
+          workOrderId: item.workOrder.id,
+          woNo: item.workOrder.woNo,
+          created: item.created,
+          previousDue: item.previousDue,
+          nextDue: item.nextDue,
+          scheduledDate: item.scheduledDate?.toISOString?.().slice(0, 10) || "",
+          frequency: item.frequency,
+          periodUom: item.periodUom,
+          generatedAt: item.workOrder.createdAt,
+          workflowStatus: item.dueDateAdvanced ? "SCHEDULED" : undefined,
+          dueDateAdvanced: item.dueDateAdvanced,
+        })),
+        preview,
+        groupCode: generation.groupCode,
+        effectiveDate: generation.effectiveDate,
+        dueMonth: generation.dueMonth,
+        totalWorkOrders: generation.total,
+        generatedCount: generation.createdCount,
+        reusedCount: generation.reusedCount,
+        advancedCount: generation.advancedCount,
+        periodStart: generation.periodStart,
+        periodEnd: generation.periodEnd,
+        presentDay: generation.periodStart,
+        message: `Created ${generation.createdCount.toLocaleString()} new present-day PPM work orders and linked ${generation.total.toLocaleString()} work orders for ${generation.periodStart}. Next due dates were refreshed in the PPM planner.`,
+      });
+    }
     if (input.action === "preview_month") {
       const preview = await buildPpmMonthWorkOrderPreview(input);
       return NextResponse.json({
