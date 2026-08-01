@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import {
   Fragment,
@@ -2741,7 +2741,7 @@ export function CafmConsole({
                 postRecord("/api/housing", formData, "Housing record")
               }
               updateHousing={async (type, id, body) => {
-                await patchRecord(
+                return patchRecord(
                   `/api/housing/${type}/${id}`,
                   body,
                   "Housing record updated.",
@@ -24107,7 +24107,7 @@ function HousingOperations({
     type: string,
     id: string,
     body: Record<string, unknown>,
-  ) => Promise<void> | void;
+  ) => Promise<{ ok: boolean; result: unknown } | void> | { ok: boolean; result: unknown } | void;
   deleteHousing: (type: string, id: string) => Promise<void> | void;
   refreshData: () => Promise<void>;
 }) {
@@ -25915,7 +25915,8 @@ function HousingOperations({
             resident={editingResident}
             saving={saving}
             onSubmit={async (body) => {
-              await updateHousing("resident", editingResident.id, body);
+              const response = await updateHousing("resident", editingResident.id, body);
+              if (response && "ok" in response && !response.ok) return;
               setEditingResident(null);
               setHousingNotice("Guest details updated.");
             }}

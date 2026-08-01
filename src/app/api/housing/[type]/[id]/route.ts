@@ -15,6 +15,10 @@ const approvalSteps = [
   { step: 4, level: "Reception Allocation", next: "" },
 ];
 
+class HousingInputError extends Error {
+  status = 400;
+}
+
 export async function PATCH(request: Request, { params }: { params: Promise<{ type: string; id: string }> }) {
   try {
     const { type, id } = await params;
@@ -28,7 +32,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ty
     await auditAction({ user, action: `HOUSING_${type.toUpperCase()}_UPDATE`, entity: `housing_${type}`, entityId: id, details: { before: current, input, after: record } });
     return NextResponse.json(record);
   } catch (error) {
-    return apiError(error, "Unable to update housing record");
+    return apiError(
+      error,
+      "Unable to update housing record",
+      error instanceof HousingInputError ? error.status : 500,
+    );
   }
 }
 
@@ -189,6 +197,50 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
   }
 
 
+  if (type === "resident") {
+    const current = await prisma.housingResident.findUnique({ where: { id } });
+    if (!current) throw new HousingInputError("Guest not found.");
+    const residentNo = text(input.residentNo);
+    const name = text(input.name) || text(input.residentName);
+    if (!residentNo) throw new HousingInputError("Guest ID / badge number is required.");
+    if (!name) throw new HousingInputError("Guest name is required.");
+    if (residentNo !== current.residentNo) {
+      const duplicate = await prisma.housingResident.findUnique({
+        where: { residentNo },
+        select: { id: true, name: true },
+      });
+      if (duplicate && duplicate.id !== id) {
+        throw new HousingInputError(
+          `Guest ID / badge number ${residentNo} already belongs to ${duplicate.name || "another guest"}.`,
+        );
+      }
+    }
+    const resident = await prisma.housingResident.update({
+      where: { id },
+      data: {
+        residentNo,
+        name,
+        email: text(input.email),
+        phone: text(input.phone) || text(input.contactNumber),
+        companyId: text(input.companyId) || text(input.companyName),
+        companyName: text(input.companyName) || text(input.companyId),
+        gender: text(input.gender),
+        nationality: text(input.nationality),
+        departmentCode: text(input.departmentCode),
+        status: text(input.status) || current.status,
+      },
+    });
+    await prisma.housingHistory.create({
+      data: {
+        entity: "resident",
+        entityId: id,
+        actor,
+        action: "Guest updated",
+        details: `${current.residentNo} / ${resident.name}`,
+      },
+    });
+    return resident;
+  }
   if (type === "hold") {
     const current = await prisma.housingRoomHold.findUnique({ where: { id }, include: { room: true } });
     if (!current) throw new Error("Room hold not found.");
@@ -453,6 +505,7 @@ async function deleteHousingRecord(type: string, id: string) {
     await deleteHousingRoomWithLinks(id);
     return;
   }
+  if (type === "resident") return void await prisma.housingResident.delete({ where: { id } });
   if (type === "inspection") return void await prisma.housingInspection.delete({ where: { id } });
   if (type === "asset") return void await prisma.housingAsset.delete({ where: { id } });
   if (type === "inventory") return void await prisma.housingInventory.delete({ where: { id } });
