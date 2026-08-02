@@ -7687,6 +7687,15 @@ function compactPpmPrintText(value: unknown, limit = 220) {
   return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
 }
 
+function ppmTodayChecklistItems(work: any) {
+  const source =
+    work.jobPlan || work.workNotes || work.request?.description || work.title;
+  const items = checklistItems(source, Number.POSITIVE_INFINITY).filter(
+    (item) => item !== "No match",
+  );
+  return items.length ? items : ["No checklist description provided."];
+}
+
 function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
   const printWindow = window.open("", "_blank", "width=1200,height=900");
   if (!printWindow) {
@@ -7700,7 +7709,14 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
           const ppmCode = workOrderPpmCode(work) || "-";
           const asset = compactPpmPrintText(work.asset?.tag ?? work.assetTag ?? "-", 46);
           const location = compactPpmPrintText(work.asset?.buildingCode || work.asset?.floor || work.location || "-", 58);
-          const checklist = compactPpmPrintText(work.jobPlan || work.workNotes || work.title || "-", 240);
+          const checklistHtml = ppmTodayChecklistItems(work)
+            .map(
+              (item) =>
+                `<li><span class="task-box"></span><span>${escapeHtml(
+                  compactPpmPrintText(item, 180),
+                )}</span></li>`,
+            )
+            .join("");
           return `<tr>
             <td class="num">${index + 1}</td>
             <td>${escapeHtml(String(work.woNo ?? "-"))}</td>
@@ -7710,7 +7726,7 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
             <td>${escapeHtml(String(work.departmentCode ?? "-"))}</td>
             <td>${escapeHtml(formatDateCell(work.dueAt))}</td>
             <td>${escapeHtml(String(work.assignedTeamCode ?? "-"))}</td>
-            <td class="checklist">${escapeHtml(checklist)}</td>
+            <td class="checklist"><ul class="tasks">${checklistHtml}</ul></td>
             <td>${escapeHtml(String(work.status ?? "-"))}</td>
           </tr>`;
         })
@@ -7735,6 +7751,9 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
     tr:nth-child(even) td { background: #f8fafc; }
     .num { width: 20px; text-align: center; font-weight: 800; }
     .checklist { width: 28%; }
+    .tasks { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+    .tasks li { display: grid; grid-template-columns: 9px 1fr; gap: 4px; align-items: start; break-inside: avoid; }
+    .task-box { width: 8px; height: 8px; border: 1px solid #0f172a; margin-top: 1px; display: inline-block; background: white; }
     .print-btn { float: right; margin-bottom: 6px; padding: 5px 10px; border: 1px solid #0f172a; background: white; border-radius: 4px; font-weight: 800; }
     @media print { .print-btn { display: none; } thead { display: table-header-group; } tr { break-inside: avoid; } }
   </style>
@@ -8081,6 +8100,7 @@ function PpmTodayWorkOrders({
                 const isSelected = selectedIds.has(work.id);
                 const isClosed = String(work.status || "").toUpperCase() === "CLOSED";
                 const isClosing = closingIds.has(work.id);
+                const checklistPreviewItems = ppmTodayChecklistItems(work);
                 return (
                   <tr key={work.id} className={`border-t border-slate-100 align-top hover:bg-sky-50 ${isSelected ? "bg-sky-100" : ""}`}>
                     <td className="whitespace-nowrap px-3 py-3">
@@ -8101,7 +8121,21 @@ function PpmTodayWorkOrders({
                     <td className="max-w-[260px] px-3 py-3 text-slate-600">{work.asset?.buildingCode || work.asset?.floor || work.location || "-"}</td>
                     <td className="whitespace-nowrap px-3 py-3">{formatDateCell(work.dueAt)}</td>
                     <td className="whitespace-nowrap px-3 py-3">{work.assignedTeamCode || "-"}</td>
-                    <td className="max-w-[360px] px-3 py-3 text-slate-600"><div className="line-clamp-2">{work.jobPlan || work.workNotes || work.title}</div></td>
+                    <td className="max-w-[360px] px-3 py-3 text-slate-600">
+                      <ul className="grid gap-1">
+                        {checklistPreviewItems.slice(0, 3).map((item, itemIndex) => (
+                          <li key={`${work.id}-today-checklist-${itemIndex}`} className="flex gap-2 text-xs font-bold leading-snug">
+                            <span className="mt-0.5 inline-block size-3 shrink-0 rounded-sm border border-slate-500 bg-white" />
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                        {checklistPreviewItems.length > 3 && (
+                          <li className="text-xs font-black text-slate-400">
+                            +{checklistPreviewItems.length - 3} more checklist item{checklistPreviewItems.length - 3 === 1 ? "" : "s"}
+                          </li>
+                        )}
+                      </ul>
+                    </td>
                     <td className="whitespace-nowrap px-3 py-3">
                       <button
                         type="button"
@@ -8157,7 +8191,16 @@ function PpmTodayWorkOrders({
                       <td className="px-3 py-2">{work.asset?.tag ?? work.assetTag ?? "-"}</td>
                       <td className="px-3 py-2">{work.asset?.buildingCode || work.asset?.floor || work.location || "-"}</td>
                       <td className="px-3 py-2">{formatDateCell(work.dueAt)}</td>
-                      <td className="px-3 py-2">{work.jobPlan || work.workNotes || work.title}</td>
+                      <td className="px-3 py-2">
+                        <ul className="grid gap-1">
+                          {ppmTodayChecklistItems(work).map((item, itemIndex) => (
+                            <li key={`${work.id}-print-preview-checklist-${itemIndex}`} className="flex gap-2 font-bold leading-snug">
+                              <span className="mt-0.5 inline-block size-3 shrink-0 rounded-sm border border-slate-500 bg-white" />
+                              <span>{item}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </td>
                       <td className="px-3 py-2">{work.status}</td>
                     </tr>
                   ))}
@@ -12803,7 +12846,7 @@ function isInvalidChecklistValue(value: unknown) {
 function cleanChecklistItem(value: unknown) {
   return String(value || "")
     .replace(/^[-*]\s*/, "")
-    .replace(/^\s*\d+[.)]\s+/, "")
+    .replace(/^\s*(?:\d+[.)]\s*)+/, "")
     .replace(/^\s*[A-Z]{2,}[A-Z0-9]*\d[A-Z0-9-]*\s*[-:\u2013]\s*/i, "")
     .replace(/\s*\(\s*Activity\s*:\s*.*$/i, "")
     .replace(/\s+Activity\s*:\s*.*$/i, "")
@@ -12819,11 +12862,15 @@ function checklistItems(value: unknown, limit = 12) {
   if (isInvalidChecklistValue(value)) return ["No match"];
   const items = String(value || "")
     .split(
-      /\r?\n|(?=\s*\d+[.)]\s+[A-Z]{2,}[A-Z0-9]*\d[A-Z0-9-]*\s*[-:\u2013]\s*)/,
+      /\r?\n|(?=\s*(?:\d+[.)]\s*)+[A-Z]{2,}[A-Z0-9]*\d[A-Z0-9-]*\s*[-:\u2013]\s*)/,
     )
     .map(cleanChecklistItem)
     .filter((item) => item.length > 3 && !isInvalidChecklistValue(item));
-  return items.length ? items.slice(0, limit) : ["No match"];
+  return items.length
+    ? Number.isFinite(limit)
+      ? items.slice(0, limit)
+      : items
+    : ["No match"];
 }
 
 function RequestStatusBadge({ status }: { status: string }) {
