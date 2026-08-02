@@ -10499,6 +10499,7 @@ function ServiceRequestForm({
       ? ""
       : "rounded-lg border border-white/80 bg-white p-5 shadow-lift";
   const [priority, setPriority] = useState(request?.priority ?? "LOW");
+  const [titleValue, setTitleValue] = useState(request?.title ?? "");
   const [departmentCode, setDepartmentCode] = useState(
     request?.departmentCode ?? "",
   );
@@ -10932,6 +10933,8 @@ function ServiceRequestForm({
     setServiceCode(value);
     const service = services.find((item) => item.code === value);
     if (!service) return;
+    const serviceName = serviceDisplayName(service) || serviceDisplayCode(service);
+    if (serviceName) setTitleValue(serviceName);
     const department = serviceDepartmentCode(service);
     if (department) setDepartmentCode(department);
     if (service.team?.code || service.teamCode) {
@@ -11015,7 +11018,8 @@ function ServiceRequestForm({
         </label>
         <input
           name="title"
-          defaultValue={request?.title ?? ""}
+          value={titleValue}
+          onChange={(event) => setTitleValue(event.target.value)}
           placeholder="Title"
           className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon"
         />
