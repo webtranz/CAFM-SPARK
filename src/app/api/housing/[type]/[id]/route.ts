@@ -62,6 +62,7 @@ async function findHousingRecord(type: string, id: string) {
   if (type === "bed") return prisma.housingBed.findUnique({ where: { id } });
   if (type === "resident") return prisma.housingResident.findUnique({ where: { id } });
   if (type === "booking") return prisma.housingBooking.findUnique({ where: { id } });
+  if (type === "approval") return prisma.housingApproval.findUnique({ where: { id }, include: { booking: true } });
   if (type === "inspection") return prisma.housingInspection.findUnique({ where: { id } });
   if (type === "asset") return prisma.housingAsset.findUnique({ where: { id } });
   if (type === "inventory") return prisma.housingInventory.findUnique({ where: { id } });
@@ -718,5 +719,4 @@ async function assertNoOverlappingBooking(roomId: string, _start: Date, _end: Da
   });
   if (overlap) throw new Error(`Room already has active booking/reservation ${overlap.bookingNo}. Check out or cancel the booking before allocating this room again.`);
 }
-
 
