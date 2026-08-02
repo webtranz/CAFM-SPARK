@@ -486,8 +486,11 @@ function canActApproval(role: string, level: string) {
   const lowerRole = role.toLowerCase();
   const lowerLevel = level.toLowerCase();
   if (lowerRole === "admin" || lowerRole.includes("super admin")) return true;
+  const isHelpdesk = lowerRole.includes("helpdesk") || lowerRole.includes("help desk");
+  if (isHelpdesk && lowerLevel.includes("housing")) return true;
+  if (isHelpdesk && lowerLevel.includes("reception")) return true;
   if (lowerLevel.includes("coordinator")) return lowerRole.includes("coordinator") || lowerRole.includes("housing");
-  if (lowerLevel.includes("supervisor")) return lowerRole.includes("supervisor");
+  if (lowerLevel.includes("supervisor")) return lowerRole.includes("supervisor") || lowerRole.includes("housing manager");
   if (lowerLevel.includes("camp manager")) return lowerRole.includes("camp") || lowerRole.includes("manager");
   if (lowerLevel.includes("reception")) return lowerRole.includes("reception");
   return false;
