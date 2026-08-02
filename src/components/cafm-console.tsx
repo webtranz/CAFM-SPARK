@@ -24767,10 +24767,19 @@ function HousingOperations({
       normalizedHousingRole.includes("helpdesk") ||
       normalizedHousingRole.includes("help desk") ||
       userRole === "Admin");
-  const currentApprovalFor = (booking: any) =>
-    (booking.approvals || []).find(
-      (approval: any) => approval.status === "PENDING",
+  const approvalLevelKey = (value: unknown) =>
+    String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const currentApprovalFor = (booking: any) => {
+    const pendingApprovals = [...(booking.approvals || [])]
+      .filter((approval: any) => approval.status === "PENDING")
+      .sort((first: any, second: any) => Number(first.step || 0) - Number(second.step || 0));
+    const currentLevel = approvalLevelKey(booking.approvalLevel);
+    return (
+      pendingApprovals.find(
+        (approval: any) => currentLevel && approvalLevelKey(approval.level) === currentLevel,
+      ) || pendingApprovals[0]
     );
+  };
   const approvalAction = (
     approval: any,
     action: "APPROVED" | "REJECTED" | "RETURNED",
@@ -31062,11 +31071,4 @@ function actionFieldLabel(field: string) {
   };
   return labels[field] || field.replace(/([A-Z])/g, " $1");
 }
-
-
-
-
-
-
-
 

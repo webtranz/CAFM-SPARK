@@ -53,10 +53,15 @@ function defaultRoleAllows(role: string, code: string) {
     : DEFAULT_ROLE_NAMES.find((defaultRole) => {
         const normalizedRole = role.toLowerCase();
         const normalizedDefault = defaultRole.toLowerCase();
+        const compactRole = normalizedRole.replace(/[^a-z0-9]+/g, "");
+        const compactDefault = normalizedDefault.replace(/[^a-z0-9]+/g, "");
         return (
           normalizedRole === normalizedDefault ||
           normalizedRole.includes(normalizedDefault) ||
-          normalizedDefault.includes(normalizedRole)
+          normalizedDefault.includes(normalizedRole) ||
+          compactRole === compactDefault ||
+          compactRole.includes(compactDefault) ||
+          compactDefault.includes(compactRole)
         );
       });
   const fallbackRole =

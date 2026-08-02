@@ -19,6 +19,10 @@ class HousingInputError extends Error {
   status = 400;
 }
 
+class HousingAccessError extends Error {
+  status = 403;
+}
+
 export async function PATCH(request: Request, { params }: { params: Promise<{ type: string; id: string }> }) {
   try {
     const { type, id } = await params;
@@ -32,11 +36,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ty
     await auditAction({ user, action: `HOUSING_${type.toUpperCase()}_UPDATE`, entity: `housing_${type}`, entityId: id, details: { before: current, input, after: record } });
     return NextResponse.json(record);
   } catch (error) {
-    return apiError(
-      error,
-      "Unable to update housing record",
-      error instanceof HousingInputError ? error.status : 500,
-    );
+    const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500;
+    return apiError(error, "Unable to update housing record", status);
   }
 }
 
@@ -450,11 +451,11 @@ async function updateHousingApproval(id: string, input: Record<string, unknown>,
   const actor = user?.name || user?.email || "System";
   const action = (text(input.action) || text(input.status) || "APPROVED").toUpperCase();
   const remarks = text(input.remarks) || text(input.notes) || text(input.comment);
-  if (!["APPROVED", "REJECTED", "RETURNED"].includes(action)) throw new Error("Approval action must be approve, reject, or return for correction.");
+  if (!["APPROVED", "REJECTED", "RETURNED"].includes(action)) throw new HousingInputError("Approval action must be approve, reject, or return for correction.");
   const approval = await prisma.housingApproval.findUnique({ where: { id }, include: { booking: true } });
-  if (!approval || !approval.bookingId || !approval.booking) throw new Error("Approval record not found.");
-  if (approval.status !== "PENDING") throw new Error("Only the current pending approval can be actioned.");
-  if (!canActApproval(user?.role || "", approval.level)) throw new Error(`Only ${approval.level} approvers can action this step.`);
+  if (!approval || !approval.bookingId || !approval.booking) throw new HousingInputError("Approval record not found.");
+  if (approval.status !== "PENDING") throw new HousingInputError("Only the current pending approval can be actioned. Refresh the booking list and try the visible pending step.");
+  if (!canActApproval(user?.role || "", approval.level)) throw new HousingAccessError(`Only ${approval.level} approvers can action this step.`);
 
   const nextStep = approvalSteps.find((step) => step.step === approval.step + 1);
   const nextStatus = action === "APPROVED" ? "APPROVED" : action === "REJECTED" ? "REJECTED" : "RETURNED";
@@ -470,7 +471,12 @@ async function updateHousingApproval(id: string, input: Record<string, unknown>,
       await tx.housingBooking.update({ where: { id: approval.bookingId! }, data: { status: "REQUESTED", approvalLevel: "Requester Correction", notes: remarks || approval.booking?.notes || "" } });
       await tx.housingNotification.create({ data: { title: "Housing booking returned for correction", message: `${approval.booking?.bookingNo} requires correction: ${remarks || "No remarks provided"}.`, recipient: approval.booking?.requestedBy || "Requester", severity: "MEDIUM", bookingId: approval.bookingId } });
     } else if (nextStep) {
-      await tx.housingApproval.updateMany({ where: { bookingId: approval.bookingId, step: nextStep.step, status: "WAITING" as any }, data: { status: "PENDING" as any } });
+      const existingNext = await tx.housingApproval.findFirst({ where: { bookingId: approval.bookingId, step: nextStep.step } });
+      if (existingNext) {
+        await tx.housingApproval.update({ where: { id: existingNext.id }, data: { status: "PENDING" as any, action: null, remarks: "", approverName: null, actedAt: null, approver: nextStep.next || nextStep.level } });
+      } else {
+        await tx.housingApproval.create({ data: { entity: "booking", entityId: approval.bookingId!, bookingId: approval.bookingId, level: nextStep.level, step: nextStep.step, approver: nextStep.next || nextStep.level, status: "PENDING" as any, remarks: "" } });
+      }
       await tx.housingBooking.update({ where: { id: approval.bookingId! }, data: { status: "PENDING_APPROVAL", approvalLevel: nextStep.level, approvedBy: actor } });
       await tx.housingNotification.create({ data: { title: "Housing booking pending approval", message: `${approval.booking?.bookingNo} is waiting for ${nextStep.level}.`, recipient: nextStep.next || nextStep.level, severity: approval.booking?.priority || "MEDIUM", bookingId: approval.bookingId } });
     } else {
@@ -486,7 +492,7 @@ async function updateHousingApproval(id: string, input: Record<string, unknown>,
 function canActApproval(role: string, level: string) {
   const lowerRole = role.toLowerCase();
   const lowerLevel = level.toLowerCase();
-  if (lowerRole === "admin" || lowerRole.includes("super admin")) return true;
+  if (lowerRole === "admin" || lowerRole === "admin / general" || lowerRole === "administrator" || lowerRole.includes("super admin")) return true;
   const isHelpdesk = lowerRole.includes("helpdesk") || lowerRole.includes("help desk");
   if (isHelpdesk && lowerLevel.includes("housing")) return true;
   if (isHelpdesk && lowerLevel.includes("reception")) return true;
@@ -712,6 +718,5 @@ async function assertNoOverlappingBooking(roomId: string, _start: Date, _end: Da
   });
   if (overlap) throw new Error(`Room already has active booking/reservation ${overlap.bookingNo}. Check out or cancel the booking before allocating this room again.`);
 }
-
 
 
