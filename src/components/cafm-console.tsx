@@ -27406,28 +27406,16 @@ function housingDateRangesOverlap(startA: Date, endA: Date, startB: Date, endB: 
   return startA.getTime() <= endB.getTime() && endA.getTime() >= startB.getTime();
 }
 
-function housingBookingOverlapsWindow(booking: any, windowStart: Date, windowEnd: Date) {
+function housingBookingBlocksAvailability(booking: any) {
   const status = String(booking?.status || "").toUpperCase();
-  if (!ACTIVE_HOUSING_BOOKING_STATUSES.has(status)) return false;
-  const bookingStart = parseHousingDateTime(booking.checkIn || booking.createdAt, new Date(0));
-  const bookingEnd = parseHousingDateTime(
-    booking.checkOut,
-    new Date("2999-12-31T23:59:59"),
-  );
-  if (!bookingStart || !bookingEnd) return false;
-  return housingDateRangesOverlap(bookingStart, bookingEnd, windowStart, windowEnd);
+  return ACTIVE_HOUSING_BOOKING_STATUSES.has(status);
 }
 
-function housingRoomHasBlockingBooking(
-  room: any,
-  bookings: any[],
-  windowStart: Date,
-  windowEnd: Date,
-) {
+function housingRoomHasBlockingBooking(room: any, bookings: any[]) {
   return bookings.some((booking) => {
     const bookingRoomId = booking.roomId || booking.room?.id;
     if (!bookingRoomId || bookingRoomId !== room.id) return false;
-    return housingBookingOverlapsWindow(booking, windowStart, windowEnd);
+    return housingBookingBlocksAvailability(booking);
   });
 }
 
@@ -27462,7 +27450,7 @@ function housingRoomIsBookable(
   if (["BLOCKED", "MAINTENANCE", "OCCUPIED", "RESERVED"].includes(roomStatus)) return false;
   if (occupancy > 0) return false;
   if (housingRoomHasBlockingHold(room, holds, windowStart, windowEnd)) return false;
-  if (housingRoomHasBlockingBooking(room, bookings, windowStart, windowEnd)) return false;
+  if (housingRoomHasBlockingBooking(room, bookings)) return false;
   return true;
 }
 
@@ -28464,7 +28452,7 @@ function HousingBookingForm({
           placeholder="Search only vacant available room by ID or room number"
         />
         <p className="text-xs font-black text-lagoon">
-          Showing only rooms with no active booking, reservation, occupancy, or hold for the selected dates.
+          Showing only rooms with no active booking/reservation until checkout, no occupancy, and no hold for the selected dates.
         </p>
         {!bookableRooms.length ? (
           <p className="text-xs font-black text-coral">

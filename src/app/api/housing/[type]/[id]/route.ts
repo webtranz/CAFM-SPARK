@@ -702,17 +702,15 @@ async function assertNoOverlappingHold(roomId: string, start: Date, end: Date, e
   if (overlap) throw new Error(`Room ${overlap.room.roomNumber} is already on hold from ${overlap.startDate.toISOString().slice(0, 10)} to ${overlap.endDate.toISOString().slice(0, 10)}.`);
 }
 
-async function assertNoOverlappingBooking(roomId: string, start: Date, end: Date, excludeId?: string) {
+async function assertNoOverlappingBooking(roomId: string, _start: Date, _end: Date, excludeId?: string) {
   const overlap = await prisma.housingBooking.findFirst({
     where: {
       roomId,
       id: excludeId ? { not: excludeId } : undefined,
       status: { in: ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHECKED_IN"] as any },
-      checkIn: { lte: end },
-      OR: [{ checkOut: null }, { checkOut: { gte: start } }],
     },
   });
-  if (overlap) throw new Error(`Room already has booking/reservation ${overlap.bookingNo} overlapping the selected dates.`);
+  if (overlap) throw new Error(`Room already has active booking/reservation ${overlap.bookingNo}. Check out or cancel the booking before allocating this room again.`);
 }
 
 

@@ -607,8 +607,6 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
     where: {
       status: { in: activeBookingStatuses as any },
       OR: [{ roomId: room.id, bedId: null }, ...(bed ? [{ bedId: bed.id }] : [])],
-      checkIn: { lte: bookingEnd },
-      AND: [{ OR: [{ checkOut: null }, { checkOut: { gte: bookingStart } }] }],
     },
   });
   if (duplicate && (room.capacity <= 1 || duplicate.bedId === bed?.id)) {
@@ -893,15 +891,13 @@ async function assertNoOverlappingHold(roomId: string, start: Date, end: Date, e
   if (overlap) throw new Error(`Room ${overlap.room.roomNumber} is already on hold from ${overlap.startDate.toISOString().slice(0, 10)} to ${overlap.endDate.toISOString().slice(0, 10)}.`);
 }
 
-async function assertNoOverlappingBooking(roomId: string, start: Date, end: Date) {
+async function assertNoOverlappingBooking(roomId: string, _start: Date, _end: Date) {
   const overlap = await prisma.housingBooking.findFirst({
     where: {
       roomId,
       status: { in: activeBookingStatuses as any },
-      checkIn: { lte: end },
-      OR: [{ checkOut: null }, { checkOut: { gte: start } }],
     },
   });
-  if (overlap) throw new Error(`Room already has booking/reservation ${overlap.bookingNo} overlapping the selected dates.`);
+  if (overlap) throw new Error(`Room already has active booking/reservation ${overlap.bookingNo}. Check out or cancel the booking before allocating this room again.`);
 }
 
