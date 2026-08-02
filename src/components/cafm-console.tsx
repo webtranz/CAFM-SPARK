@@ -6753,7 +6753,7 @@ function WorkOrders({
     window.setTimeout(() => setBulkProgress(null), 2200);
   }
   if (moduleView === "ppm-today") {
-    return <PpmTodayWorkOrders role={role} />;
+    return <PpmTodayWorkOrders role={role} updateWorkStatus={updateWorkStatus} />;
   }
 
   async function bulkDeleteSelectedWorks() {
@@ -7681,6 +7681,12 @@ function localDateInputValue(value: Date | string = new Date()) {
     .slice(0, 10);
 }
 
+function compactPpmPrintText(value: unknown, limit = 220) {
+  const text = String(value ?? "-").replace(/\s+/g, " ").trim();
+  if (!text) return "-";
+  return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
+}
+
 function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
   const printWindow = window.open("", "_blank", "width=1200,height=900");
   if (!printWindow) {
@@ -7692,57 +7698,60 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
     ? rows
         .map((work, index) => {
           const ppmCode = workOrderPpmCode(work) || "-";
-          const asset = work.asset?.tag ?? work.assetTag ?? "-";
-          const location = work.asset?.buildingCode || work.asset?.floor || work.location || "-";
-          const description = work.jobPlan || work.workNotes || work.title || "-";
+          const asset = compactPpmPrintText(work.asset?.tag ?? work.assetTag ?? "-", 46);
+          const location = compactPpmPrintText(work.asset?.buildingCode || work.asset?.floor || work.location || "-", 58);
+          const checklist = compactPpmPrintText(work.jobPlan || work.workNotes || work.title || "-", 240);
           return `<tr>
-            <td>${index + 1}</td>
+            <td class="num">${index + 1}</td>
             <td>${escapeHtml(String(work.woNo ?? "-"))}</td>
             <td>${escapeHtml(ppmCode)}</td>
-            <td>${escapeHtml(String(work.title ?? "-"))}</td>
-            <td>${escapeHtml(String(work.status ?? "-"))}</td>
+            <td>${escapeHtml(asset)}</td>
+            <td>${escapeHtml(location)}</td>
             <td>${escapeHtml(String(work.departmentCode ?? "-"))}</td>
-            <td>${escapeHtml(String(asset))}</td>
-            <td>${escapeHtml(String(location))}</td>
             <td>${escapeHtml(formatDateCell(work.dueAt))}</td>
             <td>${escapeHtml(String(work.assignedTeamCode ?? "-"))}</td>
-            <td>${escapeHtml(String(description))}</td>
+            <td class="checklist">${escapeHtml(checklist)}</td>
+            <td>${escapeHtml(String(work.status ?? "-"))}</td>
           </tr>`;
         })
         .join("")
-    : '<tr><td colspan="11">No preventive work orders found for this date.</td></tr>';
+    : '<tr><td colspan="10">No preventive work orders found for this date.</td></tr>';
 
   printWindow.document.write(`<!doctype html>
 <html>
 <head>
-  <title>PPM Today Work Orders - ${escapeHtml(selectedDate)}</title>
+  <title>PPM Today Checklist - ${escapeHtml(selectedDate)}</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 24px; color: #0f172a; }
-    .top { display: flex; justify-content: space-between; gap: 16px; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; }
-    h1 { margin: 0; font-size: 24px; }
-    .muted { color: #64748b; font-size: 12px; font-weight: 700; }
-    .count { border: 1px solid #cbd5e1; padding: 10px 14px; border-radius: 8px; font-weight: 800; }
-    table { width: 100%; border-collapse: collapse; font-size: 11px; }
-    th { background: #334155; color: white; text-align: left; }
-    th, td { border: 1px solid #cbd5e1; padding: 7px; vertical-align: top; }
+    @page { size: A4 landscape; margin: 6mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; margin: 0; color: #0f172a; font-size: 8px; line-height: 1.15; }
+    .top { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px solid #0f172a; padding-bottom: 4px; margin-bottom: 5px; }
+    h1 { margin: 0; font-size: 15px; line-height: 1.1; }
+    .muted { color: #475569; font-size: 8px; font-weight: 700; }
+    .count { border: 1px solid #94a3b8; padding: 3px 6px; border-radius: 4px; font-weight: 800; white-space: nowrap; }
+    table { width: 100%; border-collapse: collapse; font-size: 7.5px; table-layout: fixed; }
+    th { background: #334155; color: white; text-align: left; font-size: 7px; }
+    th, td { border: 1px solid #cbd5e1; padding: 2px 3px; vertical-align: top; word-break: break-word; }
     tr:nth-child(even) td { background: #f8fafc; }
-    button { float: right; margin-bottom: 12px; padding: 8px 14px; border: 1px solid #0f172a; background: white; border-radius: 6px; font-weight: 800; }
-    @media print { body { margin: 10mm; } button { display: none; } }
+    .num { width: 20px; text-align: center; font-weight: 800; }
+    .checklist { width: 28%; }
+    .print-btn { float: right; margin-bottom: 6px; padding: 5px 10px; border: 1px solid #0f172a; background: white; border-radius: 4px; font-weight: 800; }
+    @media print { .print-btn { display: none; } thead { display: table-header-group; } tr { break-inside: avoid; } }
   </style>
 </head>
 <body>
-  <button onclick="window.print()">Print</button>
+  <button class="print-btn" onclick="window.print()">Print</button>
   <div class="top">
     <div>
-      <h1>Preventive PPM Work Orders</h1>
-      <div class="muted">Selected date: ${escapeHtml(selectedDate)} | Printed: ${escapeHtml(printedAt)}</div>
+      <h1>PPM Today Checklist</h1>
+      <div class="muted">Date: ${escapeHtml(selectedDate)} | Printed: ${escapeHtml(printedAt)}</div>
     </div>
     <div class="count">Total: ${rows.length.toLocaleString()}</div>
   </div>
   <table>
     <thead>
       <tr>
-        <th>#</th><th>WO No</th><th>PPM Code</th><th>Title</th><th>Status</th><th>DPT</th><th>Asset</th><th>Location</th><th>Due Date</th><th>Team</th><th>Task</th>
+        <th style="width:3%">#</th><th style="width:10%">WO No</th><th style="width:8%">PPM</th><th style="width:12%">Asset</th><th style="width:13%">Location</th><th style="width:6%">DPT</th><th style="width:8%">Due</th><th style="width:7%">Team</th><th style="width:25%">Checklist</th><th style="width:8%">Status</th>
       </tr>
     </thead>
     <tbody>${rowHtml}</tbody>
@@ -7753,7 +7762,13 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
   printWindow.document.close();
 }
 
-function PpmTodayWorkOrders({ role }: { role: string }) {
+function PpmTodayWorkOrders({
+  role,
+  updateWorkStatus,
+}: {
+  role: string;
+  updateWorkStatus: (id: string, status: string, body?: Record<string, string>) => Promise<any> | any;
+}) {
   const [selectedDate, setSelectedDate] = useState(() => localDateInputValue());
   const [rows, setRows] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
@@ -7761,6 +7776,20 @@ function PpmTodayWorkOrders({ role }: { role: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
+  const [actionMessage, setActionMessage] = useState("");
+  const [closingIds, setClosingIds] = useState<Set<string>>(new Set());
+
+  const mergeUpdatedRow = (updated: any) => {
+    if (!updated?.id) return;
+    setRows((current) =>
+      liveWorkOrderSort(
+        current.map((work) => (work.id === updated.id ? { ...work, ...updated } : work)),
+        role,
+      ),
+    );
+  };
 
   const visibleRows = useMemo(() => {
     const text = search.trim().toLowerCase();
@@ -7778,6 +7807,8 @@ function PpmTodayWorkOrders({ role }: { role: string }) {
         work.asset?.name,
         work.asset?.buildingCode,
         work.location,
+        work.jobPlan,
+        work.workNotes,
         workOrderPpmCode(work),
       ]
         .join(" ")
@@ -7786,11 +7817,99 @@ function PpmTodayWorkOrders({ role }: { role: string }) {
     );
   }, [rows, role, search]);
 
+  const selectedRows = useMemo(
+    () => visibleRows.filter((work) => selectedIds.has(work.id)),
+    [selectedIds, visibleRows],
+  );
+  const closeableSelectedRows = selectedRows.filter(
+    (work) => String(work.status || "").toUpperCase() !== "CLOSED",
+  );
+  const rowsForPrint = selectedRows.length ? selectedRows : visibleRows;
+  const allVisibleSelected = Boolean(visibleRows.length) && visibleRows.every((work) => selectedIds.has(work.id));
+
+  const toggleRowSelection = (id: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleVisibleSelection = () => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) visibleRows.forEach((work) => next.delete(work.id));
+      else visibleRows.forEach((work) => next.add(work.id));
+      return next;
+    });
+  };
+
+  const closePpmTodayRows = async (targetRows: any[]) => {
+    const eligible = targetRows.filter(
+      (work) => work?.id && String(work.status || "").toUpperCase() !== "CLOSED",
+    );
+    if (!eligible.length) {
+      window.alert("No open PPM work orders selected to close.");
+      return;
+    }
+    const remarks = window.prompt(
+      `Enter close remarks for ${eligible.length.toLocaleString()} PPM work order${eligible.length === 1 ? "" : "s"}:`,
+      "Closed from PPM Today checklist.",
+    );
+    if (remarks === null) return;
+    if (!window.confirm(`Close ${eligible.length.toLocaleString()} selected PPM work order${eligible.length === 1 ? "" : "s"}?`)) return;
+
+    const remarkText = remarks.trim() || "Closed from PPM Today checklist.";
+    setActionMessage("");
+    setBulkProgress({ total: eligible.length, done: 0, label: "Closing PPM work orders" });
+    setClosingIds(new Set(eligible.map((work) => work.id)));
+    let success = 0;
+    const failedIds: string[] = [];
+
+    for (const work of eligible) {
+      try {
+        const updated = await updateWorkStatus(work.id, "CLOSED", {
+          supervisorDecision: remarkText,
+          workNotes: compactPpmPrintText(work.workNotes || work.jobPlan || work.title, 500),
+        });
+        if (updated?.id) {
+          mergeUpdatedRow(updated);
+          success += 1;
+        } else {
+          failedIds.push(work.id);
+        }
+      } catch (error) {
+        console.error(error);
+        failedIds.push(work.id);
+      }
+      setBulkProgress({ total: eligible.length, done: success + failedIds.length, label: "Closing PPM work orders" });
+    }
+
+    setClosingIds(new Set());
+    setSelectedIds(new Set(failedIds));
+    setBulkProgress({
+      total: eligible.length,
+      done: success,
+      label: failedIds.length
+        ? `${success.toLocaleString()} closed, ${failedIds.length.toLocaleString()} failed`
+        : "PPM work orders closed",
+    });
+    setActionMessage(
+      failedIds.length
+        ? `${success.toLocaleString()} PPM work orders closed. ${failedIds.length.toLocaleString()} need review.`
+        : `${success.toLocaleString()} PPM work orders closed successfully.`,
+    );
+    window.setTimeout(() => setBulkProgress(null), 2200);
+  };
+
   useEffect(() => {
     const controller = new AbortController();
     async function loadTodayPpmWorkOrders() {
       setLoading(true);
       setError("");
+      setSelectedIds(new Set());
+      setActionMessage("");
       try {
         const params = new URLSearchParams({
           page: "1",
@@ -7838,7 +7957,7 @@ function PpmTodayWorkOrders({ role }: { role: string }) {
               {total.toLocaleString()} preventive WOs due on {selectedDate}
             </p>
             <p className="text-xs font-bold text-slate-500">
-              Pick a date, preview the service-team print sheet, then confirm print.
+              Select one or many work orders, close completed items, then print the compact checklist sheet.
             </p>
           </div>
           <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
@@ -7859,22 +7978,67 @@ function PpmTodayWorkOrders({ role }: { role: string }) {
           </button>
           <button
             type="button"
-            disabled={!visibleRows.length}
+            disabled={!rowsForPrint.length}
             onClick={() => setPreviewOpen(true)}
             className="h-10 rounded-lg bg-ink px-4 text-sm font-black text-white disabled:bg-slate-300"
           >
             Print Preview
           </button>
         </div>
-        <div className="mb-4 flex min-w-[280px] items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 lg:max-w-xl">
-          <Search size={16} className="text-slate-400" />
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by WO, PPM code, asset, department, team, or location"
-            className="h-11 w-full text-sm outline-none"
-          />
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <div className="flex min-w-[280px] flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 lg:max-w-xl">
+            <Search size={16} className="text-slate-400" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search by WO, PPM code, asset, department, team, location, or checklist"
+              className="h-11 w-full text-sm outline-none"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={toggleVisibleSelection}
+            disabled={!visibleRows.length}
+            className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon disabled:text-slate-300"
+          >
+            {allVisibleSelected ? "Clear Visible" : "Select Visible"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            disabled={!selectedIds.size}
+            className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-600 disabled:text-slate-300"
+          >
+            Clear Selection
+          </button>
+          <button
+            type="button"
+            onClick={() => closePpmTodayRows(selectedRows)}
+            disabled={!closeableSelectedRows.length || Boolean(bulkProgress)}
+            className="h-10 rounded-lg bg-lagoon px-4 text-sm font-black text-white disabled:bg-slate-300"
+          >
+            Close Selected
+          </button>
         </div>
+        {bulkProgress && (
+          <div className="mb-4 rounded-lg border border-emerald-100 bg-white p-3 text-sm font-black text-slate-700">
+            <div className="mb-2 flex justify-between gap-3">
+              <span>{bulkProgress.label}</span>
+              <span>{bulkProgress.done.toLocaleString()} / {bulkProgress.total.toLocaleString()}</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-lagoon transition-all"
+                style={{ width: `${bulkProgress.total ? Math.round((bulkProgress.done / bulkProgress.total) * 100) : 0}%` }}
+              />
+            </div>
+          </div>
+        )}
+        {actionMessage && (
+          <div className="mb-4 rounded-lg bg-emerald-50 p-3 text-sm font-black text-emerald-700">
+            {actionMessage}
+          </div>
+        )}
         {error && (
           <div className="mb-4 rounded-lg bg-coral/10 p-3 text-sm font-black text-coral">
             {error}
@@ -7882,14 +8046,22 @@ function PpmTodayWorkOrders({ role }: { role: string }) {
         )}
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm font-black text-slate-600">
           <span>
-            Showing {visibleRows.length.toLocaleString()} of {total.toLocaleString()} preventive work orders
+            Showing {visibleRows.length.toLocaleString()} of {total.toLocaleString()} preventive work orders / Selected {selectedRows.length.toLocaleString()}
           </span>
           {loading && <span className="text-lagoon">Loading PPM work orders...</span>}
         </div>
         <div className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
-          <table className="cafm-data-table min-w-[1500px] border-collapse bg-white text-sm">
+          <table className="cafm-data-table min-w-[1680px] border-collapse bg-white text-sm">
             <thead className="sticky top-0 z-20 bg-slate-50 text-left text-xs uppercase text-slate-500 shadow-sm">
               <tr>
+                <th className="px-3 py-3 font-black">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleVisibleSelection}
+                    aria-label="Select visible PPM work orders"
+                  />
+                </th>
                 <th className="px-3 py-3 font-black">#</th>
                 <th className="px-3 py-3 font-black">WO No</th>
                 <th className="px-3 py-3 font-black">PPM Code</th>
@@ -7900,28 +8072,52 @@ function PpmTodayWorkOrders({ role }: { role: string }) {
                 <th className="px-3 py-3 font-black">Location</th>
                 <th className="px-3 py-3 font-black">Due Date</th>
                 <th className="px-3 py-3 font-black">Team</th>
-                <th className="px-3 py-3 font-black">Task</th>
+                <th className="px-3 py-3 font-black">Checklist</th>
+                <th className="px-3 py-3 font-black">Action</th>
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map((work, index) => (
-                <tr key={work.id} className="border-t border-slate-100 align-top hover:bg-sky-50">
-                  <td className="whitespace-nowrap px-3 py-3 font-black text-slate-500">{index + 1}</td>
-                  <td className="whitespace-nowrap px-3 py-3 font-black text-lagoon">{work.woNo}</td>
-                  <td className="whitespace-nowrap px-3 py-3 font-black">{workOrderPpmCode(work) || "-"}</td>
-                  <td className="max-w-[320px] px-3 py-3 font-black">{work.title}</td>
-                  <td className="whitespace-nowrap px-3 py-3"><WorkOrderStatusBadge status={work.status} /></td>
-                  <td className="whitespace-nowrap px-3 py-3">{work.departmentCode || "-"}</td>
-                  <td className="whitespace-nowrap px-3 py-3 text-lagoon">{work.asset?.tag ?? work.assetTag ?? "-"}</td>
-                  <td className="max-w-[260px] px-3 py-3 text-slate-600">{work.asset?.buildingCode || work.asset?.floor || work.location || "-"}</td>
-                  <td className="whitespace-nowrap px-3 py-3">{formatDateCell(work.dueAt)}</td>
-                  <td className="whitespace-nowrap px-3 py-3">{work.assignedTeamCode || "-"}</td>
-                  <td className="max-w-[360px] px-3 py-3 text-slate-600"><div className="line-clamp-2">{work.jobPlan || work.workNotes || work.title}</div></td>
-                </tr>
-              ))}
+              {visibleRows.map((work, index) => {
+                const isSelected = selectedIds.has(work.id);
+                const isClosed = String(work.status || "").toUpperCase() === "CLOSED";
+                const isClosing = closingIds.has(work.id);
+                return (
+                  <tr key={work.id} className={`border-t border-slate-100 align-top hover:bg-sky-50 ${isSelected ? "bg-sky-100" : ""}`}>
+                    <td className="whitespace-nowrap px-3 py-3">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleRowSelection(work.id)}
+                        aria-label={`Select ${work.woNo || "PPM work order"}`}
+                      />
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 font-black text-slate-500">{index + 1}</td>
+                    <td className="whitespace-nowrap px-3 py-3 font-black text-lagoon">{work.woNo}</td>
+                    <td className="whitespace-nowrap px-3 py-3 font-black">{workOrderPpmCode(work) || "-"}</td>
+                    <td className="max-w-[320px] px-3 py-3 font-black">{work.title}</td>
+                    <td className="whitespace-nowrap px-3 py-3"><WorkOrderStatusBadge status={work.status} /></td>
+                    <td className="whitespace-nowrap px-3 py-3">{work.departmentCode || "-"}</td>
+                    <td className="whitespace-nowrap px-3 py-3 text-lagoon">{work.asset?.tag ?? work.assetTag ?? "-"}</td>
+                    <td className="max-w-[260px] px-3 py-3 text-slate-600">{work.asset?.buildingCode || work.asset?.floor || work.location || "-"}</td>
+                    <td className="whitespace-nowrap px-3 py-3">{formatDateCell(work.dueAt)}</td>
+                    <td className="whitespace-nowrap px-3 py-3">{work.assignedTeamCode || "-"}</td>
+                    <td className="max-w-[360px] px-3 py-3 text-slate-600"><div className="line-clamp-2">{work.jobPlan || work.workNotes || work.title}</div></td>
+                    <td className="whitespace-nowrap px-3 py-3">
+                      <button
+                        type="button"
+                        onClick={() => closePpmTodayRows([work])}
+                        disabled={isClosed || isClosing || Boolean(bulkProgress)}
+                        className="rounded-lg bg-lagoon px-3 py-1.5 text-xs font-black text-white disabled:bg-slate-300"
+                      >
+                        {isClosing ? "Closing" : isClosed ? "Closed" : "Close"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
               {!visibleRows.length && !loading && (
                 <tr>
-                  <td colSpan={11} className="px-3 py-8 text-center font-black text-slate-500">
+                  <td colSpan={13} className="px-3 py-8 text-center font-black text-slate-500">
                     No preventive work orders found for this date.
                   </td>
                 </tr>
@@ -7937,32 +8133,32 @@ function PpmTodayWorkOrders({ role }: { role: string }) {
         >
           <div className="grid gap-4">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-              <p className="text-xs font-black uppercase text-slate-500">Print Sheet Preview</p>
+              <p className="text-xs font-black uppercase text-slate-500">Compact Checklist Print Preview</p>
               <h3 className="mt-1 text-2xl font-black text-ink">
-                {visibleRows.length.toLocaleString()} preventive work orders due on {selectedDate}
+                {rowsForPrint.length.toLocaleString()} preventive work orders due on {selectedDate}
               </h3>
               <p className="mt-1 text-sm font-bold text-slate-500">
-                This is the sheet that will be printed for service teams.
+                {selectedRows.length ? "Printing selected work orders." : "No rows selected, printing all visible work orders."}
               </p>
             </div>
             <div className="max-h-[52vh] overflow-auto rounded-lg border border-slate-200">
               <table className="min-w-[1200px] border-collapse bg-white text-xs">
                 <thead className="sticky top-0 bg-slate-800 text-left uppercase text-white">
                   <tr>
-                    <th className="px-3 py-2">#</th><th className="px-3 py-2">WO No</th><th className="px-3 py-2">PPM Code</th><th className="px-3 py-2">Title</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Asset</th><th className="px-3 py-2">Location</th><th className="px-3 py-2">Due</th>
+                    <th className="px-3 py-2">#</th><th className="px-3 py-2">WO No</th><th className="px-3 py-2">PPM Code</th><th className="px-3 py-2">Asset</th><th className="px-3 py-2">Location</th><th className="px-3 py-2">Due</th><th className="px-3 py-2">Checklist</th><th className="px-3 py-2">Status</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleRows.map((work, index) => (
+                  {rowsForPrint.map((work, index) => (
                     <tr key={work.id} className="border-t border-slate-100">
                       <td className="px-3 py-2 font-black">{index + 1}</td>
                       <td className="px-3 py-2 font-black text-lagoon">{work.woNo}</td>
                       <td className="px-3 py-2">{workOrderPpmCode(work) || "-"}</td>
-                      <td className="px-3 py-2">{work.title}</td>
-                      <td className="px-3 py-2">{work.status}</td>
                       <td className="px-3 py-2">{work.asset?.tag ?? work.assetTag ?? "-"}</td>
                       <td className="px-3 py-2">{work.asset?.buildingCode || work.asset?.floor || work.location || "-"}</td>
                       <td className="px-3 py-2">{formatDateCell(work.dueAt)}</td>
+                      <td className="px-3 py-2">{work.jobPlan || work.workNotes || work.title}</td>
+                      <td className="px-3 py-2">{work.status}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -7978,7 +8174,7 @@ function PpmTodayWorkOrders({ role }: { role: string }) {
               </button>
               <button
                 type="button"
-                onClick={() => printPpmTodayWorkOrders(visibleRows, selectedDate)}
+                onClick={() => printPpmTodayWorkOrders(rowsForPrint, selectedDate)}
                 className="h-11 rounded-lg bg-ink px-5 font-black text-white"
               >
                 Confirm & Print
