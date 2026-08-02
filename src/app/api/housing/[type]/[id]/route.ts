@@ -79,8 +79,17 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     const status = text(input.status);
     const current = await prisma.housingBooking.findUnique({ where: { id }, include: { bed: true, room: true } });
     if (!current) throw new Error("Booking not found.");
+    const role = String(user?.role || "").toLowerCase();
+    const extensionStatusInput = text(input.extensionStatus).toUpperCase();
+    const isBookingEndDateEdit =
+      Boolean(input.editEndDateOnly) ||
+      (Object.prototype.hasOwnProperty.call(input, "checkOut") && !status && !extensionStatusInput);
+    const canEditBookingEndDate =
+      role === "admin" || role.includes("helpdesk") || role.includes("help desk");
+    if (isBookingEndDateEdit && !canEditBookingEndDate) {
+      throw new HousingAccessError("Only Admin or Helpdesk can edit booking end date.");
+    }
     if (status === "CHECKED_IN") {
-      const role = String(user?.role || "").toLowerCase();
       const requestedRoomId = text(input.roomId);
       const isRoomSwap = Boolean(requestedRoomId && requestedRoomId !== current.roomId);
       const isSameDayRecheckIn = current.status === "CHECKED_OUT" && current.checkOut && current.checkOut.toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10);
@@ -102,7 +111,12 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     if (!nextRoom) throw new Error("Selected room does not exist.");
     const nextCheckIn = status === "CHECKED_IN" && !input.checkIn ? new Date() : input.checkIn ? new Date(String(input.checkIn)) : current.checkIn;
     const nextCheckOut = status === "CHECKED_OUT" ? input.checkOut ? new Date(String(input.checkOut)) : new Date() : input.checkOut ? new Date(String(input.checkOut)) : current.checkOut || nextCheckIn;
-    const extensionStatusInput = text(input.extensionStatus).toUpperCase();
+    if (isBookingEndDateEdit && (!nextCheckOut || Number.isNaN(nextCheckOut.getTime()))) {
+      throw new HousingInputError("A valid booking end date/time is required.");
+    }
+    if (isBookingEndDateEdit && nextCheckIn && nextCheckOut < nextCheckIn) {
+      throw new HousingInputError("Booking end date/time cannot be before the start date/time.");
+    }
     const isExtensionPending = extensionStatusInput === "EXTEND_PENDING";
     const isExtensionApproved = extensionStatusInput === "EXTENDED";
     const requestedExtensionEnd = input.extensionEndDate ? new Date(String(input.extensionEndDate)) : null;
@@ -189,12 +203,16 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
       ? "Booking extension approved"
       : isExtensionPending
         ? "Booking extension requested"
-        : roomChanged
-          ? "Room swapped"
-          : `Booking ${status || "updated"}`;
+        : isBookingEndDateEdit
+          ? "Booking end date updated"
+          : roomChanged
+            ? "Room swapped"
+            : `Booking ${status || "updated"}`;
     const bookingDetails = isExtensionApproved || isExtensionPending
       ? `Extend till ${requestedExtensionEnd?.toISOString() || ""}. ${text(input.extensionRemarks) || text(input.remarks) || ""}`.trim()
-      : text(input.transferReason) || text(input.notes) || text(input.remarks) || "";
+      : isBookingEndDateEdit
+        ? `End date ${nextCheckOut?.toISOString() || ""}. ${text(input.remarks) || ""}`.trim()
+        : text(input.transferReason) || text(input.notes) || text(input.remarks) || "";
     await prisma.housingHistory.create({ data: { entity: "booking", entityId: id, bookingId: id, roomId: booking.roomId, actor, action: bookingAction, details: bookingDetails } });
     return booking;
   }

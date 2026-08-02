@@ -24329,6 +24329,7 @@ function HousingOperations({
   const [swapBooking, setSwapBooking] = useState<any | null>(null);
   const [checkoutBooking, setCheckoutBooking] = useState<any | null>(null);
   const [extensionBooking, setExtensionBooking] = useState<any | null>(null);
+  const [endDateEditBooking, setEndDateEditBooking] = useState<any | null>(null);
   const [bulkCheckoutBookings, setBulkCheckoutBookings] = useState<any[]>([]);
   const [editingResident, setEditingResident] = useState<any | null>(null);
   const [housingNotice, setHousingNotice] = useState("");
@@ -24771,6 +24772,10 @@ function HousingOperations({
       normalizedHousingRole.includes("helpdesk") ||
       normalizedHousingRole.includes("help desk") ||
       userRole === "Admin");
+  const canEditBookingEndDate =
+    isAdmin ||
+    normalizedHousingRole.includes("helpdesk") ||
+    normalizedHousingRole.includes("help desk");
   const approvalLevelKey = (value: unknown) =>
     String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
   const currentApprovalFor = (booking: any) => {
@@ -25422,7 +25427,7 @@ function HousingOperations({
                   : undefined
               }
               actions={(record) =>
-                (canOperateBookings || canApprove) && (
+                (canOperateBookings || canApprove || canEditBookingEndDate) && (
                   <div className="flex flex-wrap gap-2">
                     {canApprove && currentApprovalFor(record) && (
                       <button
@@ -25494,6 +25499,18 @@ function HousingOperations({
                         className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white"
                       >
                         Extend till
+                      </button>
+                    )}
+                    {canEditBookingEndDate && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setEndDateEditBooking(record);
+                        }}
+                        className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-black text-white"
+                      >
+                        Edit End Date
                       </button>
                     )}
                     {record.status !== "CHECKED_OUT" && (
@@ -26109,6 +26126,23 @@ function HousingOperations({
                   ? "Booking end date extended and marked EXTENDED."
                   : "Booking extension request saved as EXTEND_PENDING.",
               );
+            }}
+          />
+        </RequestModalShell>
+      )}
+      {endDateEditBooking && (
+        <RequestModalShell
+          title={`Edit End Date - ${endDateEditBooking.bookingNo || endDateEditBooking.residentName}`}
+          onClose={() => setEndDateEditBooking(null)}
+        >
+          <HousingBookingEndDateEditForm
+            booking={endDateEditBooking}
+            saving={saving}
+            onSubmit={async (body) => {
+              const response = await updateHousing("booking", endDateEditBooking.id, body);
+              if (response && "ok" in response && !response.ok) return;
+              setEndDateEditBooking(null);
+              setHousingNotice("Booking end date updated.");
             }}
           />
         </RequestModalShell>
@@ -27900,6 +27934,83 @@ function HousingResidentEditForm({
     </form>
   );
 }
+function HousingBookingEndDateEditForm({
+  booking,
+  saving,
+  onSubmit,
+}: {
+  booking: any;
+  saving: boolean;
+  onSubmit: (body: Record<string, unknown>) => Promise<void> | void;
+}) {
+  const now = new Date();
+  const checkInDate = booking.checkIn ? new Date(booking.checkIn) : null;
+  const existingEnd = booking.checkOut
+    ? new Date(booking.checkOut)
+    : checkInDate && !Number.isNaN(checkInDate.getTime())
+      ? addHours(checkInDate, 24)
+      : addHours(now, 24);
+  const [endDate, setEndDate] = useState(formatLocalDateTimeInput(existingEnd));
+  const [remarks, setRemarks] = useState("End date updated by Admin/Helpdesk");
+  const [error, setError] = useState("");
+
+  async function submitEndDate() {
+    const requestedDate = new Date(endDate);
+    if (Number.isNaN(requestedDate.getTime())) {
+      setError("Select a valid end date and time.");
+      return;
+    }
+    if (checkInDate && !Number.isNaN(checkInDate.getTime()) && requestedDate < checkInDate) {
+      setError("End date/time cannot be before the booking start date/time.");
+      return;
+    }
+    setError("");
+    await onSubmit({
+      editEndDateOnly: true,
+      checkOut: requestedDate.toISOString(),
+      remarks,
+    });
+  }
+
+  return (
+    <div className="grid gap-4 rounded-lg border border-white/80 bg-white p-5 shadow-lift">
+      <div className="grid gap-3 md:grid-cols-2">
+        <PreviewField label="Booking" value={booking.bookingNo} />
+        <PreviewField label="Employee" value={`${booking.employeeId || "-"} / ${booking.residentName || "-"}`} />
+        <PreviewField label="Current end date" value={formatDateCell(booking.checkOut)} />
+        <PreviewField label="Status" value={booking.status} />
+      </div>
+      <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+        End date
+        <input
+          type="datetime-local"
+          value={endDate}
+          onChange={(event) => setEndDate(event.target.value)}
+          className={HOUSING_FIELD_CLASS}
+        />
+      </label>
+      <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+        Remarks
+        <textarea
+          value={remarks}
+          onChange={(event) => setRemarks(event.target.value)}
+          placeholder="Reason for end date update"
+          className="min-h-24 rounded-lg border border-slate-200 bg-white p-3 text-sm outline-none focus:border-lagoon"
+        />
+      </label>
+      {error && <p className="rounded-lg bg-coral/10 px-3 py-2 text-sm font-black text-coral">{error}</p>}
+      <button
+        type="button"
+        disabled={saving}
+        onClick={submitEndDate}
+        className="h-11 rounded-lg bg-lagoon px-4 font-black text-white disabled:bg-slate-300"
+      >
+        Save End Date
+      </button>
+    </div>
+  );
+}
+
 function HousingBookingExtensionForm({
   booking,
   saving,
