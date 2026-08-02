@@ -120,6 +120,7 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     }
     if (["CHECKED_IN", "APPROVED", "PENDING_APPROVAL", "REQUESTED"].includes(effectiveStatus)) {
       await assertNoOverlappingHold(nextRoom.id, nextCheckIn, nextCheckOut);
+      await assertNoOverlappingBooking(nextRoom.id, nextCheckIn, nextCheckOut, id);
     }
     const requestedBedId = text(input.bedId);
     const autoBed = !requestedBedId && roomChanged ? await prisma.housingBed.findFirst({ where: { roomId: nextRoom.id, status: "AVAILABLE" } }) : null;
@@ -711,7 +712,7 @@ async function assertNoOverlappingBooking(roomId: string, start: Date, end: Date
       OR: [{ checkOut: null }, { checkOut: { gte: start } }],
     },
   });
-  if (overlap) throw new Error(`Room already has booking ${overlap.bookingNo} overlapping this hold period.`);
+  if (overlap) throw new Error(`Room already has booking/reservation ${overlap.bookingNo} overlapping the selected dates.`);
 }
 
 

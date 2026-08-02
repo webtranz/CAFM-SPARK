@@ -597,6 +597,7 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
   }
   await expireRoomHolds();
   await assertNoOverlappingHold(room.id, bookingStart, bookingEnd);
+  await assertNoOverlappingBooking(room.id, bookingStart, bookingEnd);
   const bed = input.bedId ? await prisma.housingBed.findUnique({ where: { id: input.bedId } }) : await prisma.housingBed.findFirst({ where: { roomId: room.id, status: "AVAILABLE" } });
   if (!bed && room.capacity > 1) throw new Error("No available bed found for this room.");
   if (bed && bed.roomId !== room.id) throw new Error("Selected bed does not belong to the selected room.");
@@ -606,6 +607,8 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
     where: {
       status: { in: activeBookingStatuses as any },
       OR: [{ roomId: room.id, bedId: null }, ...(bed ? [{ bedId: bed.id }] : [])],
+      checkIn: { lte: bookingEnd },
+      AND: [{ OR: [{ checkOut: null }, { checkOut: { gte: bookingStart } }] }],
     },
   });
   if (duplicate && (room.capacity <= 1 || duplicate.bedId === bed?.id)) {
@@ -899,6 +902,6 @@ async function assertNoOverlappingBooking(roomId: string, start: Date, end: Date
       OR: [{ checkOut: null }, { checkOut: { gte: start } }],
     },
   });
-  if (overlap) throw new Error(`Room already has booking ${overlap.bookingNo} overlapping this hold period.`);
+  if (overlap) throw new Error(`Room already has booking/reservation ${overlap.bookingNo} overlapping the selected dates.`);
 }
 

@@ -27388,16 +27388,98 @@ function housingRoomSearchLabel(room: any) {
     .join(" - ");
 }
 
+const ACTIVE_HOUSING_BOOKING_STATUSES = new Set([
+  "REQUESTED",
+  "PENDING_APPROVAL",
+  "APPROVED",
+  "CHECKED_IN",
+]);
+
+function parseHousingDateTime(value: unknown, fallback?: Date) {
+  if (!value) return fallback ?? null;
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) return fallback ?? null;
+  return parsed;
+}
+
+function housingDateRangesOverlap(startA: Date, endA: Date, startB: Date, endB: Date) {
+  return startA.getTime() <= endB.getTime() && endA.getTime() >= startB.getTime();
+}
+
+function housingBookingOverlapsWindow(booking: any, windowStart: Date, windowEnd: Date) {
+  const status = String(booking?.status || "").toUpperCase();
+  if (!ACTIVE_HOUSING_BOOKING_STATUSES.has(status)) return false;
+  const bookingStart = parseHousingDateTime(booking.checkIn || booking.createdAt, new Date(0));
+  const bookingEnd = parseHousingDateTime(
+    booking.checkOut,
+    new Date("2999-12-31T23:59:59"),
+  );
+  if (!bookingStart || !bookingEnd) return false;
+  return housingDateRangesOverlap(bookingStart, bookingEnd, windowStart, windowEnd);
+}
+
+function housingRoomHasBlockingBooking(
+  room: any,
+  bookings: any[],
+  windowStart: Date,
+  windowEnd: Date,
+) {
+  return bookings.some((booking) => {
+    const bookingRoomId = booking.roomId || booking.room?.id;
+    if (!bookingRoomId || bookingRoomId !== room.id) return false;
+    return housingBookingOverlapsWindow(booking, windowStart, windowEnd);
+  });
+}
+
+function housingRoomHasBlockingHold(
+  room: any,
+  holds: any[],
+  windowStart: Date,
+  windowEnd: Date,
+) {
+  return holds.some((hold) => {
+    const holdRoomId = hold.roomId || hold.room?.id;
+    if (!holdRoomId || holdRoomId !== room.id) return false;
+    if (String(hold.status || "").toUpperCase() !== "ACTIVE") return false;
+    const holdStart = parseHousingDateTime(hold.startDate, new Date(0));
+    const holdEnd = parseHousingDateTime(hold.endDate, new Date("2999-12-31T23:59:59"));
+    if (!holdStart || !holdEnd) return false;
+    return housingDateRangesOverlap(holdStart, holdEnd, windowStart, windowEnd);
+  });
+}
+
+function housingRoomIsBookable(
+  room: any,
+  bookings: any[],
+  holds: any[],
+  windowStart: Date,
+  windowEnd: Date,
+) {
+  const roomStatus = String(room.status || "").toUpperCase();
+  const occupancy = Number(room.occupancy || 0);
+  const capacity = Number(room.capacity || 0);
+  if (capacity <= 0) return false;
+  if (["BLOCKED", "MAINTENANCE", "OCCUPIED", "RESERVED"].includes(roomStatus)) return false;
+  if (occupancy > 0) return false;
+  if (housingRoomHasBlockingHold(room, holds, windowStart, windowEnd)) return false;
+  if (housingRoomHasBlockingBooking(room, bookings, windowStart, windowEnd)) return false;
+  return true;
+}
+
 function HousingRoomSelect({
   rooms,
   name = "roomId",
   placeholder = "Search and select room",
   filter,
+  value,
+  onChange,
 }: {
   rooms: any[];
   name?: string;
   placeholder?: string;
   filter?: (room: any) => boolean;
+  value?: string;
+  onChange?: (roomId: string, room?: any) => void;
 }) {
   const roomRows = useMemo(
     () => (filter ? rooms.filter(filter) : rooms).filter((room) => room.id),
@@ -27411,11 +27493,20 @@ function HousingRoomSelect({
       })),
     [roomRows],
   );
-  const [roomId, setRoomId] = useState("");
+  const [internalRoomId, setInternalRoomId] = useState("");
   const [searchValue, setSearchValue] = useState("");
+  const selectedRoomId = value ?? internalRoomId;
+  const setSelectedRoom = (nextRoomId: string) => {
+    const nextRoom = roomRows.find((room) => room.id === nextRoomId);
+    if (value === undefined) setInternalRoomId(nextRoomId);
+    onChange?.(nextRoomId, nextRoom);
+  };
+  useEffect(() => {
+    if (value === "") setSearchValue("");
+  }, [value]);
   return (
     <div className="grid gap-1">
-      <input type="hidden" name={name} value={roomId} />
+      <input type="hidden" name={name} value={selectedRoomId} />
       <SearchableDropdownField
         value={searchValue}
         placeholder={`${placeholder} (${roomRows.length.toLocaleString()} rooms)`}
@@ -27425,10 +27516,10 @@ function HousingRoomSelect({
           const exact = options.find(
             (option) => option.label === value || option.value === value,
           );
-          setRoomId(exact?.value || "");
+          setSelectedRoom(exact?.value || "");
         }}
         onSelect={(option) => {
-          setRoomId(option.value);
+          setSelectedRoom(option.value);
           setSearchValue(option.label);
         }}
       />
@@ -28088,23 +28179,7 @@ function HousingBookingForm({
   saving: boolean;
   onSubmit: (formData: FormData) => void;
 }) {
-  const todayKey = new Date().toISOString().slice(0, 10);
-  const activeHeldRoomIds = new Set(
-    holds
-      .filter(
-        (hold) =>
-          hold.status === "ACTIVE" &&
-          String(hold.startDate || "").slice(0, 10) <= todayKey &&
-          String(hold.endDate || "").slice(0, 10) >= todayKey,
-      )
-      .map((hold) => hold.roomId),
-  );
-  const allocatableRooms = rooms.filter(
-    (room) =>
-      !["BLOCKED", "MAINTENANCE"].includes(room.status) &&
-      !activeHeldRoomIds.has(room.id),
-  );
-  const allocatableBeds = beds.filter((bed) => bed.status === "AVAILABLE");
+  const [selectedRoomId, setSelectedRoomId] = useState("");
   const residentOptions = useMemo(
     () =>
       residents.map((resident) => ({
@@ -28143,6 +28218,42 @@ function HousingBookingForm({
   const [checkOutValue, setCheckOutValue] = useState(() =>
     formatLocalDateTimeInput(addHours(new Date(), 24)),
   );
+  const bookingWindowStart = useMemo(
+    () => parseHousingDateTime(checkInValue, new Date()) ?? new Date(),
+    [checkInValue],
+  );
+  const bookingWindowEnd = useMemo(
+    () => parseHousingDateTime(checkOutValue, bookingWindowStart) ?? bookingWindowStart,
+    [bookingWindowStart, checkOutValue],
+  );
+  const bookableRooms = useMemo(
+    () =>
+      rooms.filter((room) =>
+        housingRoomIsBookable(room, bookings, holds, bookingWindowStart, bookingWindowEnd),
+      ),
+    [bookings, bookingWindowEnd, bookingWindowStart, holds, rooms],
+  );
+  const bookableRoomIds = useMemo(
+    () => new Set(bookableRooms.map((room) => room.id)),
+    [bookableRooms],
+  );
+  const selectedRoomStillBookable = selectedRoomId ? bookableRoomIds.has(selectedRoomId) : false;
+  const allocatableBeds = useMemo(
+    () =>
+      selectedRoomId && selectedRoomStillBookable
+        ? beds.filter(
+            (bed) =>
+              bed.roomId === selectedRoomId &&
+              String(bed.status || "").toUpperCase() === "AVAILABLE",
+          )
+        : [],
+    [beds, selectedRoomId, selectedRoomStillBookable],
+  );
+  useEffect(() => {
+    if (selectedRoomId && !bookableRoomIds.has(selectedRoomId)) {
+      setSelectedRoomId("");
+    }
+  }, [bookableRoomIds, selectedRoomId]);
   const [showCompanyAdd, setShowCompanyAdd] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
   const [customCompanyOptions, setCustomCompanyOptions] = useState<SearchableOption[]>([]);
@@ -28345,23 +28456,32 @@ function HousingBookingForm({
           <option value="CHECKED_IN">Check-in now</option>
         </select>
       </div>
-      <HousingRoomSelect
-        rooms={rooms}
-        placeholder="Search available room by ID or room number"
-        filter={(room) => {
-          const roomStatus = String(room.status || "").toUpperCase();
-          const occupancy = Number(room.occupancy || 0);
-          const capacity = Number(room.capacity || 0);
-          return (
-            roomStatus === "AVAILABLE" &&
-            occupancy === 0 &&
-            capacity > 0 &&
-            !activeHeldRoomIds.has(room.id)
-          );
-        }}
-      />
-      <select name="bedId" className={HOUSING_FIELD_CLASS}>
-        <option value="">Auto-assign available bed</option>
+      <div className="grid gap-2">
+        <HousingRoomSelect
+          rooms={bookableRooms}
+          value={selectedRoomId}
+          onChange={(roomId) => setSelectedRoomId(roomId)}
+          placeholder="Search only vacant available room by ID or room number"
+        />
+        <p className="text-xs font-black text-lagoon">
+          Showing only rooms with no active booking, reservation, occupancy, or hold for the selected dates.
+        </p>
+        {!bookableRooms.length ? (
+          <p className="text-xs font-black text-coral">
+            No rooms are available for the selected start/end date.
+          </p>
+        ) : null}
+      </div>
+      <select
+        name="bedId"
+        disabled={!selectedRoomId || !selectedRoomStillBookable}
+        className={HOUSING_FIELD_CLASS}
+      >
+        <option value="">
+          {selectedRoomId
+            ? `Auto-assign available bed (${allocatableBeds.length.toLocaleString()} available)`
+            : "Select an available room first"}
+        </option>
         {allocatableBeds.map((bed) => (
           <option key={bed.id} value={bed.id}>
             {bed.room?.roomNumber || "Room"} / {bed.label} / available
