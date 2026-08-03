@@ -656,6 +656,88 @@ async function processBulkDeleteBatches<T>(
 }
 const HOUSING_FIELD_CLASS =
   "h-11 rounded-lg border border-slate-200 bg-white px-3 outline-none focus:border-lagoon";
+const HOUSING_INVALID_FIELD_CLASSES = [
+  "border",
+  "border-coral",
+  "bg-red-50",
+  "ring-2",
+  "ring-coral/20",
+  "focus:border-coral",
+];
+
+function housingInvalidFieldsFromMessage(message: string) {
+  const lower = cleanMessage(message).toLowerCase();
+  const fields = new Set<string>();
+  if (lower.includes("employee id") || lower.includes("badge")) {
+    fields.add("employeeId");
+  }
+  if (lower.includes("employee name") || lower.includes("guest name")) {
+    fields.add("residentName");
+  }
+  if (lower.includes("start date") || lower.includes("start and end")) {
+    fields.add("checkIn");
+  }
+  if (
+    lower.includes("end date") ||
+    lower.includes("checkout") ||
+    lower.includes("check-out") ||
+    lower.includes("start and end")
+  ) {
+    fields.add("checkOut");
+  }
+  if (
+    lower.includes("room") ||
+    lower.includes("bed") ||
+    lower.includes("hold") ||
+    lower.includes("allocation")
+  ) {
+    fields.add("roomId");
+  }
+  if (lower.includes("cancellation reason") || lower.includes("cancel reason")) {
+    fields.add("cancellationReason");
+  }
+  return Array.from(fields);
+}
+
+function housingClearInvalidFields(form: HTMLFormElement) {
+  form
+    .querySelectorAll<HTMLElement>("[data-housing-field-invalid='true']")
+    .forEach(housingClearInvalidField);
+}
+
+function housingClearInvalidField(field: HTMLElement) {
+  field.classList.remove(...HOUSING_INVALID_FIELD_CLASSES);
+  field.removeAttribute("data-housing-field-invalid");
+  field.removeAttribute("aria-invalid");
+}
+
+function housingFieldTargets(form: HTMLFormElement, name: string) {
+  const direct = Array.from(
+    form.querySelectorAll<HTMLElement>(`[name="${CSS.escape(name)}"]`),
+  );
+  if (direct.some((field) => field.getAttribute("type") !== "hidden")) {
+    return direct.filter((field) => field.getAttribute("type") !== "hidden");
+  }
+  return Array.from(
+    form.querySelectorAll<HTMLElement>(`[data-housing-field="${CSS.escape(name)}"]`),
+  );
+}
+
+function housingMarkInvalidFields(form: HTMLFormElement, fieldNames: string[]) {
+  housingClearInvalidFields(form);
+  const names = Array.from(new Set(fieldNames.filter(Boolean)));
+  names.forEach((name) => {
+    housingFieldTargets(form, name).forEach((field) => {
+      field.classList.add(...HOUSING_INVALID_FIELD_CLASSES);
+      field.setAttribute("data-housing-field-invalid", "true");
+      field.setAttribute("aria-invalid", "true");
+    });
+  });
+  const firstInvalid = names
+    .flatMap((name) => housingFieldTargets(form, name))
+    .find((field) => field instanceof HTMLElement);
+  firstInvalid?.focus();
+}
 
 function formatLocalDateTimeInput(date = new Date()) {
   const pad = (value: number) => String(value).padStart(2, "0");
@@ -1504,6 +1586,7 @@ export function CafmConsole({
     formData: FormData,
     successLabel: string,
     refresh = true,
+    throwOnError = false,
   ) {
     setSaving(true);
     try {
@@ -1524,9 +1607,18 @@ export function CafmConsole({
             : `${successLabel} saved.`
           : cleanMessage(result.message ?? "Action failed."),
       );
+      if (!response.ok && throwOnError) {
+        throw new Error(cleanMessage(result.message ?? "Action failed."));
+      }
       if (response.ok && refresh) await refreshData();
+      return result;
     } catch (error) {
-      setToast(cleanMessage(error instanceof Error ? error.message : "Action failed."));
+      const message = cleanMessage(
+        error instanceof Error ? error.message : "Action failed.",
+      );
+      setToast(message);
+      if (throwOnError) throw new Error(message);
+      return null;
     } finally {
       setSaving(false);
     }
@@ -2738,7 +2830,7 @@ export function CafmConsole({
               isAdmin={isAdmin}
               userRole={user.role}
               submitHousing={(formData) =>
-                postRecord("/api/housing", formData, "Housing record")
+                postRecord("/api/housing", formData, "Housing record", true, true)
               }
               updateHousing={async (type, id, body) => {
                 return patchRecord(
@@ -24397,7 +24489,7 @@ function HousingOperations({
   canApprove: boolean;
   isAdmin: boolean;
   userRole: string;
-  submitHousing: (formData: FormData) => void;
+  submitHousing: (formData: FormData) => Promise<unknown> | unknown;
   updateHousing: (
     type: string,
     id: string,
@@ -24423,6 +24515,7 @@ function HousingOperations({
   >(null);
   const [swapBooking, setSwapBooking] = useState<any | null>(null);
   const [checkoutBooking, setCheckoutBooking] = useState<any | null>(null);
+  const [cancelBooking, setCancelBooking] = useState<any | null>(null);
   const [extensionBooking, setExtensionBooking] = useState<any | null>(null);
   const [endDateEditBooking, setEndDateEditBooking] = useState<any | null>(null);
   const [bulkCheckoutBookings, setBulkCheckoutBookings] = useState<any[]>([]);
@@ -25602,7 +25695,7 @@ function HousingOperations({
                         Edit End Date
                       </button>
                     )}
-                    {record.status !== "CHECKED_OUT" && (
+                    {!["CHECKED_OUT", "CANCELLED", "REJECTED", "NO_SHOW"].includes(record.status) && (
                       <button
                         type="button"
                         onClick={(event) => {
@@ -25625,22 +25718,21 @@ function HousingOperations({
                           }}
                           className="rounded-lg bg-leaf px-3 py-2 text-xs font-black text-white"
                         >
-                          Check-in Today
-                        </button>
-                      )}
-                    <button
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        updateHousing("booking", record.id, {
-                          status: "CANCELLED",
-                          cancellationReason: "Cancelled by housing admin",
-                        });
-                      }}
-                      className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white"
-                    >
-                      Cancel
-                    </button>
+                        Check-in Today
+                      </button>
+                    )}
+                    {!["CHECKED_OUT", "CANCELLED", "REJECTED", "NO_SHOW"].includes(record.status) && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setCancelBooking(record);
+                        }}
+                        className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white"
+                      >
+                        Cancel
+                      </button>
+                    )}
                   </div>
                 )
               }
@@ -26233,6 +26325,30 @@ function HousingOperations({
               if (response && "ok" in response && !response.ok) return;
               setEndDateEditBooking(null);
               setHousingNotice("Booking end date updated.");
+            }}
+          />
+        </RequestModalShell>
+      )}
+      {cancelBooking && (
+        <RequestModalShell
+          title={`Cancel Reservation - ${cancelBooking.bookingNo || cancelBooking.residentName}`}
+          onClose={() => setCancelBooking(null)}
+        >
+          <HousingCancelBookingForm
+            booking={cancelBooking}
+            saving={saving}
+            onSubmit={async (body) => {
+              const response = await updateHousing("booking", cancelBooking.id, body);
+              if (response && "ok" in response && !response.ok) {
+                throw new Error(
+                  cleanMessage(
+                    (response.result as { message?: string })?.message ??
+                      "Unable to cancel reservation.",
+                  ),
+                );
+              }
+              setCancelBooking(null);
+              setHousingNotice("Reservation cancelled and room/bed released.");
             }}
           />
         </RequestModalShell>
@@ -27701,7 +27817,7 @@ function HousingRoomSelect({
     if (value === "") setSearchValue("");
   }, [value]);
   return (
-    <div className="grid gap-1">
+    <div className="grid gap-1 rounded-lg" data-housing-field={name}>
       <input type="hidden" name={name} value={selectedRoomId} />
       <SearchableDropdownField
         value={searchValue}
@@ -28172,6 +28288,104 @@ function HousingBookingEndDateEditForm({
   );
 }
 
+function HousingCancelBookingForm({
+  booking,
+  saving,
+  onSubmit,
+}: {
+  booking: any;
+  saving: boolean;
+  onSubmit: (body: Record<string, unknown>) => Promise<unknown> | unknown;
+}) {
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState("");
+
+  async function submitCancellation() {
+    const trimmedReason = reason.trim();
+    if (!trimmedReason) {
+      setError("Cancellation reason is required.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Cancel reservation ${booking.bookingNo || booking.residentName || ""}? This will release the reserved room/bed.`,
+    );
+    if (!confirmed) return;
+    try {
+      setError("");
+      await onSubmit({
+        status: "CANCELLED",
+        cancellationReason: trimmedReason,
+        notes: `Reservation cancelled: ${trimmedReason}`,
+      });
+    } catch (submitError) {
+      setError(
+        cleanMessage(
+          submitError instanceof Error
+            ? submitError.message
+            : "Unable to cancel reservation.",
+        ),
+      );
+    }
+  }
+
+  return (
+    <div className="grid gap-4 rounded-lg border border-white/80 bg-white p-5 shadow-lift">
+      <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-black text-amber-800">
+        Confirm before cancelling. The room and bed will be released only after
+        the cancellation is saved.
+      </p>
+      <div className="grid gap-3 md:grid-cols-2">
+        <PreviewField label="Booking" value={booking.bookingNo} />
+        <PreviewField
+          label="Guest"
+          value={`${booking.employeeId || "-"} / ${booking.residentName || "-"}`}
+        />
+        <PreviewField label="Current status" value={booking.status} />
+        <PreviewField
+          label="Room"
+          value={
+            [
+              booking.buildingNumber,
+              booking.floorNumber,
+              booking.roomNumber,
+              booking.bedNumber,
+            ]
+              .filter(Boolean)
+              .join(" / ") || "Unassigned"
+          }
+        />
+      </div>
+      <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+        Cancellation reason
+        <textarea
+          value={reason}
+          onChange={(event) => {
+            setReason(event.target.value);
+            if (error) setError("");
+          }}
+          placeholder="Enter why this reservation is being cancelled"
+          className={`min-h-28 rounded-lg border bg-white p-3 text-sm outline-none focus:border-lagoon ${
+            error ? "border-coral bg-red-50 ring-2 ring-coral/20" : "border-slate-200"
+          }`}
+        />
+      </label>
+      {error ? (
+        <p className="rounded-lg bg-coral/10 px-3 py-2 text-sm font-black text-coral">
+          {error}
+        </p>
+      ) : null}
+      <button
+        type="button"
+        disabled={saving}
+        onClick={submitCancellation}
+        className="h-11 rounded-lg bg-coral px-4 font-black text-white disabled:bg-slate-300"
+      >
+        Confirm Cancellation
+      </button>
+    </div>
+  );
+}
+
 function HousingBookingExtensionForm({
   booking,
   saving,
@@ -28452,7 +28666,7 @@ function HousingBookingForm({
   bookings: any[];
   holds: any[];
   saving: boolean;
-  onSubmit: (formData: FormData) => void;
+  onSubmit: (formData: FormData) => Promise<unknown> | unknown;
 }) {
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const residentOptions = useMemo(
@@ -29464,18 +29678,62 @@ function HousingForm({
   title: string;
   type: string;
   saving: boolean;
-  onSubmit: (formData: FormData) => void;
+  onSubmit: (formData: FormData) => Promise<unknown> | unknown;
   children: any;
 }) {
+  const [formError, setFormError] = useState("");
+
+  function clearChangedField(event: FormEvent<HTMLFormElement>) {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    const name = target.getAttribute("name");
+    if (name) {
+      housingFieldTargets(event.currentTarget, name).forEach(housingClearInvalidField);
+    }
+    const groupedField = target.closest<HTMLElement>("[data-housing-field]");
+    if (groupedField) housingClearInvalidField(groupedField);
+    if (formError) setFormError("");
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
-    await onSubmit(new FormData(form));
-    form.reset();
+    const formData = new FormData(form);
+    const invalidFieldNames = Array.from(form.elements).flatMap((element) => {
+      const field = element as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+      if (!field.name || field.disabled || typeof field.checkValidity !== "function") {
+        return [];
+      }
+      return field.checkValidity() ? [] : [field.name];
+    });
+    if (type === "booking" && !String(formData.get("roomId") || "").trim()) {
+      invalidFieldNames.push("roomId");
+    }
+    if (invalidFieldNames.length) {
+      housingMarkInvalidFields(form, invalidFieldNames);
+      setFormError("Please complete the highlighted required field(s) before saving.");
+      return;
+    }
+    try {
+      await onSubmit(formData);
+      housingClearInvalidFields(form);
+      setFormError("");
+      form.reset();
+    } catch (error) {
+      const message = cleanMessage(
+        error instanceof Error ? error.message : "Unable to save housing record.",
+      );
+      const mappedFields = housingInvalidFieldsFromMessage(message);
+      if (mappedFields.length) housingMarkInvalidFields(form, mappedFields);
+      setFormError(message);
+    }
   }
   return (
     <form
+      noValidate
       onSubmit={handleSubmit}
+      onChange={clearChangedField}
+      onInput={clearChangedField}
       className="rounded-lg border border-white/80 bg-white p-5 shadow-lift"
     >
       <input type="hidden" name="type" value={type} />
@@ -29485,6 +29743,11 @@ function HousingForm({
         IDs/status.
       </p>
       <div className="mt-4 grid gap-3">
+        {formError ? (
+          <div className="rounded-lg border border-coral/40 bg-red-50 px-3 py-2 text-sm font-black text-coral">
+            {formError}
+          </div>
+        ) : null}
         {children}
         <button
           disabled={saving}

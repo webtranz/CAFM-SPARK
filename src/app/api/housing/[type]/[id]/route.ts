@@ -77,6 +77,10 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
   if (type === "booking") {
     await expireRoomHolds();
     const status = text(input.status);
+    const isCancellation = status === "CANCELLED";
+    if (isCancellation && !text(input.cancellationReason)) {
+      throw new HousingInputError("Cancellation reason is required.");
+    }
     const current = await prisma.housingBooking.findUnique({ where: { id }, include: { bed: true, room: true } });
     if (!current) throw new Error("Booking not found.");
     const role = String(user?.role || "").toLowerCase();
@@ -205,14 +209,18 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
         ? "Booking extension requested"
         : isBookingEndDateEdit
           ? "Booking end date updated"
-          : roomChanged
-            ? "Room swapped"
-            : `Booking ${status || "updated"}`;
+          : isCancellation
+            ? "Booking cancelled"
+            : roomChanged
+              ? "Room swapped"
+              : `Booking ${status || "updated"}`;
     const bookingDetails = isExtensionApproved || isExtensionPending
       ? `Extend till ${requestedExtensionEnd?.toISOString() || ""}. ${text(input.extensionRemarks) || text(input.remarks) || ""}`.trim()
       : isBookingEndDateEdit
         ? `End date ${nextCheckOut?.toISOString() || ""}. ${text(input.remarks) || ""}`.trim()
-        : text(input.transferReason) || text(input.notes) || text(input.remarks) || "";
+        : isCancellation
+          ? text(input.cancellationReason)
+          : text(input.transferReason) || text(input.notes) || text(input.remarks) || "";
     await prisma.housingHistory.create({ data: { entity: "booking", entityId: id, bookingId: id, roomId: booking.roomId, actor, action: bookingAction, details: bookingDetails } });
     return booking;
   }

@@ -16,6 +16,10 @@ const bookingApprovalSteps = [
   { step: 4, level: "Reception Allocation", approver: "Reception Team" },
 ];
 
+class HousingInputError extends Error {
+  status = 400;
+}
+
 const housingSchema = z.object({
   type: z.string(),
   code: z.string().optional(),
@@ -225,7 +229,11 @@ export async function POST(request: Request) {
     await auditAction({ user, action: `HOUSING_${input.type.toUpperCase()}_CREATE`, entity: `housing_${input.type}`, entityId: result.id, details: { input, createdRecord: result } });
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
-    return apiError(error, "Unable to save housing record");
+    const status =
+      typeof (error as { status?: unknown }).status === "number"
+        ? (error as { status: number }).status
+        : 500;
+    return apiError(error, "Unable to save housing record", status);
   }
 }
 
@@ -566,42 +574,45 @@ async function createRoomHold(input: z.infer<typeof housingSchema>, actor: strin
   return hold;
 }
 async function createBooking(input: z.infer<typeof housingSchema>, actor: string) {
+  if (!input.roomId?.trim()) {
+    throw new HousingInputError("Select an available room before saving the booking.");
+  }
   const room = await firstRoom(input.roomId);
   if (["BLOCKED", "MAINTENANCE"].includes(room.status)) {
-    throw new Error("Blocked or under-maintenance rooms cannot be allocated.");
+    throw new HousingInputError("Blocked or under-maintenance rooms cannot be allocated.");
   }
   const resident = await resolveResident(input);
   const employeeId = input.employeeId || input.residentNo || resident?.residentNo || "";
   const employeeName = input.residentName || input.name || resident?.name || "";
-  if (!employeeId.trim()) throw new Error("Employee ID is required for accommodation bookings.");
-  if (!employeeName.trim()) throw new Error("Employee name is required for accommodation bookings.");
+  if (!employeeId.trim()) throw new HousingInputError("Employee ID is required for accommodation bookings.");
+  if (!employeeName.trim()) throw new HousingInputError("Employee name is required for accommodation bookings.");
   if (resident?.status === "BLACKLISTED") {
-    throw new Error("Blacklisted occupants cannot receive a new accommodation allocation.");
+    throw new HousingInputError("Blacklisted occupants cannot receive a new accommodation allocation.");
   }
   const occupantGender = (input.gender || resident?.gender || "").toUpperCase();
   if (room.genderRestriction && room.genderRestriction !== "MIXED" && occupantGender && occupantGender !== room.genderRestriction.toUpperCase()) {
-    throw new Error("Male and female occupants cannot be assigned to this gender-restricted room.");
+    throw new HousingInputError("Male and female occupants cannot be assigned to this gender-restricted room.");
   }
   const bookingStart = input.checkIn ? new Date(input.checkIn) : new Date();
   const bookingEnd = input.checkOut ? new Date(input.checkOut) : bookingStart;
   if (Number.isNaN(bookingStart.getTime()) || Number.isNaN(bookingEnd.getTime())) {
-    throw new Error("Valid start and end date/time are required for accommodation bookings.");
+    throw new HousingInputError("Valid start and end date/time are required for accommodation bookings.");
   }
   const currentMinute = new Date();
   currentMinute.setSeconds(0, 0);
   if (bookingStart < currentMinute) {
-    throw new Error("Accommodation booking start date/time cannot be in the past.");
+    throw new HousingInputError("Accommodation booking start date/time cannot be in the past.");
   }
   if (bookingEnd < bookingStart) {
-    throw new Error("Accommodation booking end date/time cannot be before the start date/time.");
+    throw new HousingInputError("Accommodation booking end date/time cannot be before the start date/time.");
   }
   await expireRoomHolds();
   await assertNoOverlappingHold(room.id, bookingStart, bookingEnd);
   await assertNoOverlappingBooking(room.id, bookingStart, bookingEnd);
   const bed = input.bedId ? await prisma.housingBed.findUnique({ where: { id: input.bedId } }) : await prisma.housingBed.findFirst({ where: { roomId: room.id, status: "AVAILABLE" } });
-  if (!bed && room.capacity > 1) throw new Error("No available bed found for this room.");
-  if (bed && bed.roomId !== room.id) throw new Error("Selected bed does not belong to the selected room.");
-  if (bed && ["RESERVED", "OCCUPIED"].includes(bed.status)) throw new Error("Occupied beds cannot be assigned twice.");
+  if (!bed && room.capacity > 1) throw new HousingInputError("No available bed found for this room.");
+  if (bed && bed.roomId !== room.id) throw new HousingInputError("Selected bed does not belong to the selected room.");
+  if (bed && ["RESERVED", "OCCUPIED"].includes(bed.status)) throw new HousingInputError("Occupied beds cannot be assigned twice.");
 
   const duplicate = await prisma.housingBooking.findFirst({
     where: {
@@ -610,7 +621,7 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
     },
   });
   if (duplicate && (room.capacity <= 1 || duplicate.bedId === bed?.id)) {
-    throw new Error("Duplicate room or bed allocation is not allowed.");
+    throw new HousingInputError("Duplicate room or bed allocation is not allowed.");
   }
 
   const count = await prisma.housingBooking.count();
@@ -914,7 +925,7 @@ async function firstRoom(roomId?: string) {
   const room = roomId
     ? await prisma.housingRoom.findUnique({ where: { id: roomId }, include: { property: true, block: true } })
     : await prisma.housingRoom.findFirst({ include: { property: true, block: true } });
-  if (!room) throw new Error("Create a housing room before using this function.");
+  if (!room) throw new HousingInputError("Create a housing room before using this function.");
   return room;
 }
 
@@ -960,7 +971,7 @@ async function assertNoOverlappingHold(roomId: string, start: Date, end: Date, e
     },
     include: { room: true },
   });
-  if (overlap) throw new Error(`Room ${overlap.room.roomNumber} is already on hold from ${overlap.startDate.toISOString().slice(0, 10)} to ${overlap.endDate.toISOString().slice(0, 10)}.`);
+  if (overlap) throw new HousingInputError(`Room ${overlap.room.roomNumber} is already on hold from ${overlap.startDate.toISOString().slice(0, 10)} to ${overlap.endDate.toISOString().slice(0, 10)}.`);
 }
 
 async function assertNoOverlappingBooking(roomId: string, _start: Date, _end: Date, excludeId?: string) {
@@ -968,7 +979,7 @@ async function assertNoOverlappingBooking(roomId: string, _start: Date, _end: Da
     where: { id: roomId },
     include: { property: true, block: true },
   });
-  if (!room) throw new Error("Selected room does not exist.");
+  if (!room) throw new HousingInputError("Selected room does not exist.");
   const activeBookings = await prisma.housingBooking.findMany({
     where: {
       id: excludeId ? { not: excludeId } : undefined,
@@ -979,6 +990,6 @@ async function assertNoOverlappingBooking(roomId: string, _start: Date, _end: Da
   const overlap = activeBookings.find((booking) =>
     housingRoomMatchesBooking(room, booking),
   );
-  if (overlap) throw new Error(`Room already has active booking/reservation ${overlap.bookingNo}. Check out or cancel the booking before allocating this room again.`);
+  if (overlap) throw new HousingInputError(`Room already has active booking/reservation ${overlap.bookingNo}. Check out or cancel the booking before allocating this room again.`);
 }
 
