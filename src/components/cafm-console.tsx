@@ -7687,6 +7687,28 @@ function compactPpmPrintText(value: unknown, limit = 220) {
   return text.length > limit ? `${text.slice(0, limit - 3)}...` : text;
 }
 
+function ppmTodayAssetDetails(work: any, codeLimit = 72, descriptionLimit = 140) {
+  const code = compactPpmPrintText(
+    work.asset?.tag ?? work.assetTag ?? work.assetCode ?? "-",
+    codeLimit,
+  );
+  const rawDescription = [
+    work.asset?.assetDescription,
+    work.assetDescription,
+    work.assetName,
+    work.asset?.name,
+  ].find((value) => {
+    const text = String(value ?? "").trim();
+    return text && text !== "-";
+  });
+  return {
+    code,
+    description: rawDescription
+      ? compactPpmPrintText(rawDescription, descriptionLimit)
+      : "",
+  };
+}
+
 function ppmTodayChecklistItems(work: any) {
   const source =
     work.jobPlan || work.workNotes || work.request?.description || work.title;
@@ -7707,7 +7729,7 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
     ? rows
         .map((work, index) => {
           const ppmCode = workOrderPpmCode(work) || "-";
-          const asset = compactPpmPrintText(work.asset?.tag ?? work.assetTag ?? "-", 46);
+          const asset = ppmTodayAssetDetails(work, 58, 96);
           const location = compactPpmPrintText(work.asset?.buildingCode || work.asset?.floor || work.location || "-", 58);
           const title = compactPpmPrintText(work.title || "-", 96);
           const checklistHtml = ppmTodayChecklistItems(work)
@@ -7723,7 +7745,7 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
             <td>${escapeHtml(String(work.woNo ?? "-"))}</td>
             <td>${escapeHtml(ppmCode)}</td>
             <td>${escapeHtml(title)}</td>
-            <td>${escapeHtml(asset)}</td>
+            <td class="asset-cell"><span class="asset-code">${escapeHtml(asset.code)}</span>${asset.description ? `<br/><small>${escapeHtml(asset.description)}</small>` : ""}</td>
             <td>${escapeHtml(location)}</td>
             <td>${escapeHtml(String(work.departmentCode ?? "-"))}</td>
             <td>${escapeHtml(formatDateCell(work.dueAt))}</td>
@@ -7752,6 +7774,8 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
     th, td { border: 1px solid #cbd5e1; padding: 2px 3px; vertical-align: top; word-break: break-word; }
     tr:nth-child(even) td { background: #f8fafc; }
     .num { width: 20px; text-align: center; font-weight: 800; }
+    .asset-cell { font-weight: 800; }
+    .asset-cell small { display: block; color: #475569; font-size: 7px; font-weight: 700; line-height: 1.15; margin-top: 1px; }
     .checklist { width: 28%; }
     .tasks { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
     .tasks li { display: grid; grid-template-columns: 9px 1fr; gap: 4px; align-items: start; break-inside: avoid; }
@@ -7772,7 +7796,7 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
   <table>
     <thead>
       <tr>
-        <th style="width:3%">#</th><th style="width:9%">WO No</th><th style="width:7%">PPM</th><th style="width:15%">Title</th><th style="width:10%">Asset</th><th style="width:10%">Location</th><th style="width:5%">DPT</th><th style="width:7%">Due</th><th style="width:6%">Team</th><th style="width:21%">Checklist</th><th style="width:7%">Status</th>
+        <th style="width:3%">#</th><th style="width:9%">WO No</th><th style="width:7%">PPM</th><th style="width:13%">Title</th><th style="width:13%">Asset</th><th style="width:10%">Location</th><th style="width:5%">DPT</th><th style="width:7%">Due</th><th style="width:6%">Team</th><th style="width:20%">Checklist</th><th style="width:7%">Status</th>
       </tr>
     </thead>
     <tbody>${rowHtml}</tbody>
@@ -7825,6 +7849,9 @@ function PpmTodayWorkOrders({
         work.assignedTeamCode,
         work.asset?.tag,
         work.assetTag,
+        work.asset?.assetDescription,
+        work.assetDescription,
+        work.assetName,
         work.asset?.name,
         work.asset?.buildingCode,
         work.location,
@@ -8103,6 +8130,7 @@ function PpmTodayWorkOrders({
                 const isClosed = String(work.status || "").toUpperCase() === "CLOSED";
                 const isClosing = closingIds.has(work.id);
                 const checklistPreviewItems = ppmTodayChecklistItems(work);
+                const assetDetails = ppmTodayAssetDetails(work);
                 return (
                   <tr key={work.id} className={`border-t border-slate-100 align-top hover:bg-sky-50 ${isSelected ? "bg-sky-100" : ""}`}>
                     <td className="whitespace-nowrap px-3 py-3">
@@ -8119,7 +8147,14 @@ function PpmTodayWorkOrders({
                     <td className="max-w-[320px] px-3 py-3 font-black">{work.title}</td>
                     <td className="whitespace-nowrap px-3 py-3"><WorkOrderStatusBadge status={work.status} /></td>
                     <td className="whitespace-nowrap px-3 py-3">{work.departmentCode || "-"}</td>
-                    <td className="whitespace-nowrap px-3 py-3 text-lagoon">{work.asset?.tag ?? work.assetTag ?? "-"}</td>
+                    <td className="max-w-[260px] px-3 py-3">
+                      <span className="block font-black text-lagoon">{assetDetails.code}</span>
+                      {assetDetails.description && (
+                        <span className="mt-1 block whitespace-normal text-xs font-bold leading-snug text-slate-500">
+                          {assetDetails.description}
+                        </span>
+                      )}
+                    </td>
                     <td className="max-w-[260px] px-3 py-3 text-slate-600">{work.asset?.buildingCode || work.asset?.floor || work.location || "-"}</td>
                     <td className="whitespace-nowrap px-3 py-3">{formatDateCell(work.dueAt)}</td>
                     <td className="whitespace-nowrap px-3 py-3">{work.assignedTeamCode || "-"}</td>
@@ -8185,28 +8220,38 @@ function PpmTodayWorkOrders({
                   </tr>
                 </thead>
                 <tbody>
-                  {rowsForPrint.map((work, index) => (
-                    <tr key={work.id} className="border-t border-slate-100">
-                      <td className="px-3 py-2 font-black">{index + 1}</td>
-                      <td className="px-3 py-2 font-black text-lagoon">{work.woNo}</td>
-                      <td className="px-3 py-2">{workOrderPpmCode(work) || "-"}</td>
-                      <td className="max-w-[280px] px-3 py-2 font-black">{work.title || "-"}</td>
-                      <td className="px-3 py-2">{work.asset?.tag ?? work.assetTag ?? "-"}</td>
-                      <td className="px-3 py-2">{work.asset?.buildingCode || work.asset?.floor || work.location || "-"}</td>
-                      <td className="px-3 py-2">{formatDateCell(work.dueAt)}</td>
-                      <td className="px-3 py-2">
-                        <ul className="grid gap-1">
-                          {ppmTodayChecklistItems(work).map((item, itemIndex) => (
-                            <li key={`${work.id}-print-preview-checklist-${itemIndex}`} className="flex gap-2 font-bold leading-snug">
-                              <span className="mt-0.5 inline-block size-3 shrink-0 rounded-sm border border-slate-500 bg-white" />
-                              <span>{item}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </td>
-                      <td className="px-3 py-2">{work.status}</td>
-                    </tr>
-                  ))}
+                  {rowsForPrint.map((work, index) => {
+                    const assetDetails = ppmTodayAssetDetails(work);
+                    return (
+                      <tr key={work.id} className="border-t border-slate-100">
+                        <td className="px-3 py-2 font-black">{index + 1}</td>
+                        <td className="px-3 py-2 font-black text-lagoon">{work.woNo}</td>
+                        <td className="px-3 py-2">{workOrderPpmCode(work) || "-"}</td>
+                        <td className="max-w-[280px] px-3 py-2 font-black">{work.title || "-"}</td>
+                        <td className="max-w-[240px] px-3 py-2">
+                          <span className="block font-black text-lagoon">{assetDetails.code}</span>
+                          {assetDetails.description && (
+                            <span className="mt-1 block text-[11px] font-bold leading-snug text-slate-500">
+                              {assetDetails.description}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">{work.asset?.buildingCode || work.asset?.floor || work.location || "-"}</td>
+                        <td className="px-3 py-2">{formatDateCell(work.dueAt)}</td>
+                        <td className="px-3 py-2">
+                          <ul className="grid gap-1">
+                            {ppmTodayChecklistItems(work).map((item, itemIndex) => (
+                              <li key={`${work.id}-print-preview-checklist-${itemIndex}`} className="flex gap-2 font-bold leading-snug">
+                                <span className="mt-0.5 inline-block size-3 shrink-0 rounded-sm border border-slate-500 bg-white" />
+                                <span>{item}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </td>
+                        <td className="px-3 py-2">{work.status}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
