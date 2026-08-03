@@ -25453,18 +25453,12 @@ function HousingOperations({
                 ["residentName", "Employee"],
                 ["companyName", "Company"],
                 ["departmentCode", "Department"],
-                ["gender", "Gender"],
-                ["buildingNumber", "Building"],
-                ["floorNumber", "Floor"],
                 ["roomNumber", "Room"],
-                ["bedNumber", "Bed"],
                 ["checkIn", "Start Date"],
                 ["checkOut", "End Date"],
                 ["extensionStatus", "Extension"],
                 ["bookingType", "Type"],
-                ["allocationType", "Allocation"],
                 ["status", "Checked-In Status"],
-                ["priority", "Priority"],
               ]}
               onSelect={(record) => setSelected({ type: "booking", record })}
               reportType="housing-bookings"
