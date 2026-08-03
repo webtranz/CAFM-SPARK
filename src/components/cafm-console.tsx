@@ -7709,6 +7709,7 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
           const ppmCode = workOrderPpmCode(work) || "-";
           const asset = compactPpmPrintText(work.asset?.tag ?? work.assetTag ?? "-", 46);
           const location = compactPpmPrintText(work.asset?.buildingCode || work.asset?.floor || work.location || "-", 58);
+          const title = compactPpmPrintText(work.title || "-", 96);
           const checklistHtml = ppmTodayChecklistItems(work)
             .map(
               (item) =>
@@ -7721,6 +7722,7 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
             <td class="num">${index + 1}</td>
             <td>${escapeHtml(String(work.woNo ?? "-"))}</td>
             <td>${escapeHtml(ppmCode)}</td>
+            <td>${escapeHtml(title)}</td>
             <td>${escapeHtml(asset)}</td>
             <td>${escapeHtml(location)}</td>
             <td>${escapeHtml(String(work.departmentCode ?? "-"))}</td>
@@ -7731,7 +7733,7 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
           </tr>`;
         })
         .join("")
-    : '<tr><td colspan="10">No preventive work orders found for this date.</td></tr>';
+    : '<tr><td colspan="11">No preventive work orders found for this date.</td></tr>';
 
   printWindow.document.write(`<!doctype html>
 <html>
@@ -7770,7 +7772,7 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
   <table>
     <thead>
       <tr>
-        <th style="width:3%">#</th><th style="width:10%">WO No</th><th style="width:8%">PPM</th><th style="width:12%">Asset</th><th style="width:13%">Location</th><th style="width:6%">DPT</th><th style="width:8%">Due</th><th style="width:7%">Team</th><th style="width:25%">Checklist</th><th style="width:8%">Status</th>
+        <th style="width:3%">#</th><th style="width:9%">WO No</th><th style="width:7%">PPM</th><th style="width:15%">Title</th><th style="width:10%">Asset</th><th style="width:10%">Location</th><th style="width:5%">DPT</th><th style="width:7%">Due</th><th style="width:6%">Team</th><th style="width:21%">Checklist</th><th style="width:7%">Status</th>
       </tr>
     </thead>
     <tbody>${rowHtml}</tbody>
@@ -8176,10 +8178,10 @@ function PpmTodayWorkOrders({
               </p>
             </div>
             <div className="max-h-[52vh] overflow-auto rounded-lg border border-slate-200">
-              <table className="min-w-[1200px] border-collapse bg-white text-xs">
+              <table className="min-w-[1400px] border-collapse bg-white text-xs">
                 <thead className="sticky top-0 bg-slate-800 text-left uppercase text-white">
                   <tr>
-                    <th className="px-3 py-2">#</th><th className="px-3 py-2">WO No</th><th className="px-3 py-2">PPM Code</th><th className="px-3 py-2">Asset</th><th className="px-3 py-2">Location</th><th className="px-3 py-2">Due</th><th className="px-3 py-2">Checklist</th><th className="px-3 py-2">Status</th>
+                    <th className="px-3 py-2">#</th><th className="px-3 py-2">WO No</th><th className="px-3 py-2">PPM Code</th><th className="px-3 py-2">Title</th><th className="px-3 py-2">Asset</th><th className="px-3 py-2">Location</th><th className="px-3 py-2">Due</th><th className="px-3 py-2">Checklist</th><th className="px-3 py-2">Status</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -8188,6 +8190,7 @@ function PpmTodayWorkOrders({
                       <td className="px-3 py-2 font-black">{index + 1}</td>
                       <td className="px-3 py-2 font-black text-lagoon">{work.woNo}</td>
                       <td className="px-3 py-2">{workOrderPpmCode(work) || "-"}</td>
+                      <td className="max-w-[280px] px-3 py-2 font-black">{work.title || "-"}</td>
                       <td className="px-3 py-2">{work.asset?.tag ?? work.assetTag ?? "-"}</td>
                       <td className="px-3 py-2">{work.asset?.buildingCode || work.asset?.floor || work.location || "-"}</td>
                       <td className="px-3 py-2">{formatDateCell(work.dueAt)}</td>
