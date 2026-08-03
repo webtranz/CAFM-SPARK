@@ -28605,25 +28605,15 @@ function HousingRoomSwapForm({
       <div className="grid gap-3 rounded-lg bg-slate-50 p-3">
         <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
           Destination room
-          <select
-            required
+          <HousingRoomSelect
+            rooms={destinationRooms}
+            placeholder="Search vacant destination room by room number, building, floor, or type"
             value={roomId}
-            onChange={(event) => {
-              setRoomId(event.target.value);
+            onChange={(nextRoomId) => {
+              setRoomId(nextRoomId);
               setBedId("");
             }}
-            className={HOUSING_FIELD_CLASS}
-          >
-            <option value="">
-              Select vacant destination room (
-              {destinationRooms.length.toLocaleString()} rooms)
-            </option>
-            {destinationRooms.map((room) => (
-              <option key={room.id} value={room.id}>
-                {housingRoomLabel(room)}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
           Destination bed
