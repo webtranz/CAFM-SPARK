@@ -744,6 +744,12 @@ function formatLocalDateTimeInput(date = new Date()) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function localDateTimeInputValue(value: unknown) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(date.getTime()) ? "" : formatLocalDateTimeInput(date);
+}
+
 function addHours(date: Date, hours: number) {
   const next = new Date(date);
   next.setHours(next.getHours() + hours);
@@ -6845,7 +6851,15 @@ function WorkOrders({
     window.setTimeout(() => setBulkProgress(null), 2200);
   }
   if (moduleView === "ppm-today") {
-    return <PpmTodayWorkOrders role={role} updateWorkStatus={updateWorkStatus} />;
+    return (
+      <PpmTodayWorkOrders
+        role={role}
+        updateWorkStatus={updateWorkStatus}
+        canMoveToProgress={canBulkMoveToProgress}
+        canSubmitReview={canBulkSubmitReview}
+        canCloseReview={canBulkCloseReview}
+      />
+    );
   }
 
   async function bulkDeleteSelectedWorks() {
@@ -7902,9 +7916,15 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
 function PpmTodayWorkOrders({
   role,
   updateWorkStatus,
+  canMoveToProgress,
+  canSubmitReview,
+  canCloseReview,
 }: {
   role: string;
   updateWorkStatus: (id: string, status: string, body?: Record<string, string>) => Promise<any> | any;
+  canMoveToProgress: boolean;
+  canSubmitReview: boolean;
+  canCloseReview: boolean;
 }) {
   const [selectedDate, setSelectedDate] = useState(() => localDateInputValue());
   const [rows, setRows] = useState<any[]>([]);
@@ -7961,9 +7981,10 @@ function PpmTodayWorkOrders({
     () => visibleRows.filter((work) => selectedIds.has(work.id)),
     [selectedIds, visibleRows],
   );
-  const closeableSelectedRows = selectedRows.filter(
-    (work) => String(work.status || "").toUpperCase() !== "CLOSED",
-  );
+  const selectedPendingRows = selectedRows.filter(isPendingAssignmentWorkOrder);
+  const selectedInProgressRows = selectedRows.filter(isInProgressWorkOrder);
+  const selectedReviewRows = selectedRows.filter(isReviewReadyWorkOrder);
+  const closeableSelectedRows = selectedReviewRows;
   const rowsForPrint = selectedRows.length ? selectedRows : visibleRows;
   const allVisibleSelected = Boolean(visibleRows.length) && visibleRows.every((work) => selectedIds.has(work.id));
 
@@ -7985,12 +8006,77 @@ function PpmTodayWorkOrders({
     });
   };
 
+  const updatePpmTodaySelectedRows = async (targetStatus: "IN_PROGRESS" | "COMPLETED") => {
+    const eligible = targetStatus === "IN_PROGRESS" ? selectedPendingRows : selectedInProgressRows;
+    const actionLabel =
+      targetStatus === "IN_PROGRESS"
+        ? "Moving selected PPM work orders to In Progress"
+        : "Submitting selected PPM work orders to In Review";
+    if (!eligible.length) {
+      window.alert(
+        targetStatus === "IN_PROGRESS"
+          ? "Select assigned or pending PPM work orders before moving them to In Progress."
+          : "Select in-progress PPM work orders before submitting them to In Review.",
+      );
+      return;
+    }
+    if (
+      !window.confirm(
+        `${actionLabel} for ${eligible.length.toLocaleString()} work order${eligible.length === 1 ? "" : "s"}?`,
+      )
+    ) {
+      return;
+    }
+
+    setActionMessage("");
+    setBulkProgress({ total: eligible.length, done: 0, label: actionLabel });
+    setClosingIds(new Set(eligible.map((work) => work.id)));
+    let success = 0;
+    const failedIds: string[] = [];
+
+    for (const work of eligible) {
+      try {
+        const updated = await updateWorkStatus(work.id, targetStatus);
+        if (updated?.id) {
+          mergeUpdatedRow(updated);
+          success += 1;
+        } else {
+          failedIds.push(work.id);
+        }
+      } catch (error) {
+        console.error(error);
+        failedIds.push(work.id);
+      }
+      setBulkProgress({
+        total: eligible.length,
+        done: success + failedIds.length,
+        label: actionLabel,
+      });
+    }
+
+    setClosingIds(new Set());
+    setSelectedIds(new Set(failedIds));
+    setBulkProgress({
+      total: eligible.length,
+      done: success,
+      label: failedIds.length
+        ? `${success.toLocaleString()} updated, ${failedIds.length.toLocaleString()} failed`
+        : `${actionLabel} complete`,
+    });
+    setActionMessage(
+      failedIds.length
+        ? `${success.toLocaleString()} PPM work orders updated. ${failedIds.length.toLocaleString()} need review.`
+        : `${success.toLocaleString()} PPM work orders updated successfully.`,
+    );
+    window.setTimeout(() => setBulkProgress(null), 2200);
+  };
+
   const closePpmTodayRows = async (targetRows: any[]) => {
     const eligible = targetRows.filter(
-      (work) => work?.id && String(work.status || "").toUpperCase() !== "CLOSED",
+      (work) => work?.id && isReviewReadyWorkOrder(work),
     );
     if (!eligible.length) {
-      window.alert("No open PPM work orders selected to close.");
+      window.alert("Select PPM work orders that are pending supervisor review before closing.");
       return;
     }
     const remarks = window.prompt(
@@ -8151,13 +8237,33 @@ function PpmTodayWorkOrders({
           >
             Clear Selection
           </button>
+          {canMoveToProgress && (
+            <button
+              type="button"
+              onClick={() => updatePpmTodaySelectedRows("IN_PROGRESS")}
+              disabled={!selectedPendingRows.length || Boolean(bulkProgress)}
+              className="h-10 rounded-lg bg-lagoon px-4 text-sm font-black text-white disabled:bg-slate-300"
+            >
+              In Progress ({selectedPendingRows.length.toLocaleString()})
+            </button>
+          )}
+          {canSubmitReview && (
+            <button
+              type="button"
+              onClick={() => updatePpmTodaySelectedRows("COMPLETED")}
+              disabled={!selectedInProgressRows.length || Boolean(bulkProgress)}
+              className="h-10 rounded-lg bg-leaf px-4 text-sm font-black text-white disabled:bg-slate-300"
+            >
+              In Review ({selectedInProgressRows.length.toLocaleString()})
+            </button>
+          )}
           <button
             type="button"
             onClick={() => closePpmTodayRows(selectedRows)}
-            disabled={!closeableSelectedRows.length || Boolean(bulkProgress)}
-            className="h-10 rounded-lg bg-lagoon px-4 text-sm font-black text-white disabled:bg-slate-300"
+            disabled={!canCloseReview || !closeableSelectedRows.length || Boolean(bulkProgress)}
+            className="h-10 rounded-lg bg-ink px-4 text-sm font-black text-white disabled:bg-slate-300"
           >
-            Close Selected
+            Close Review ({closeableSelectedRows.length.toLocaleString()})
           </button>
         </div>
         {bulkProgress && (
@@ -8220,6 +8326,7 @@ function PpmTodayWorkOrders({
               {visibleRows.map((work, index) => {
                 const isSelected = selectedIds.has(work.id);
                 const isClosed = String(work.status || "").toUpperCase() === "CLOSED";
+                const isReviewReady = isReviewReadyWorkOrder(work);
                 const isClosing = closingIds.has(work.id);
                 const checklistPreviewItems = ppmTodayChecklistItems(work);
                 const assetDetails = ppmTodayAssetDetails(work);
@@ -8269,10 +8376,10 @@ function PpmTodayWorkOrders({
                       <button
                         type="button"
                         onClick={() => closePpmTodayRows([work])}
-                        disabled={isClosed || isClosing || Boolean(bulkProgress)}
+                        disabled={!canCloseReview || isClosed || !isReviewReady || isClosing || Boolean(bulkProgress)}
                         className="rounded-lg bg-lagoon px-3 py-1.5 text-xs font-black text-white disabled:bg-slate-300"
                       >
-                        {isClosing ? "Closing" : isClosed ? "Closed" : "Close"}
+                        {isClosing ? "Updating" : isClosed ? "Closed" : isReviewReady ? "Close Review" : "Review Needed"}
                       </button>
                     </td>
                   </tr>
@@ -12398,6 +12505,14 @@ function WorkOrderPreviewModal({
           />
           <PreviewField label="Due Date" value={formatDateCell(work.dueAt)} />
           <PreviewField
+            label="First Response"
+            value={formatDateCell(work.responseAt)}
+          />
+          <PreviewField
+            label="Completed by Team"
+            value={formatDateCell(work.resolutionAt)}
+          />
+          <PreviewField
             label="Asset"
             value={work.asset?.tag || work.assetTag}
           />
@@ -13487,21 +13602,33 @@ function WorkOrderForm({
             <p className="text-sm font-black text-slate-700">
               Team Member Update
             </p>
-            <input
-              name="responseAt"
-              type="datetime-local"
-              className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon"
-            />
-            <input
-              name="resolutionAt"
-              type="datetime-local"
-              className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon"
-            />
-            <input
-              name="finishedAt"
-              type="datetime-local"
-              className="h-11 rounded-lg border border-slate-200 px-3 outline-none focus:border-lagoon"
-            />
+            <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+              First Response
+              <input
+                name="responseAt"
+                type="datetime-local"
+                defaultValue={localDateTimeInputValue(work.responseAt)}
+                className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold normal-case text-ink outline-none focus:border-lagoon"
+              />
+            </label>
+            <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+              Completed by Team
+              <input
+                name="resolutionAt"
+                type="datetime-local"
+                defaultValue={localDateTimeInputValue(work.resolutionAt)}
+                className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold normal-case text-ink outline-none focus:border-lagoon"
+              />
+            </label>
+            <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+              Closed
+              <input
+                name="finishedAt"
+                type="datetime-local"
+                defaultValue={localDateTimeInputValue(work.finishedAt)}
+                className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold normal-case text-ink outline-none focus:border-lagoon"
+              />
+            </label>
             <textarea
               name="assetsUsed"
               defaultValue={work.assetsUsed ?? ""}
