@@ -593,6 +593,78 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function normalizeHousingToken(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, " ");
+}
+
+function compactHousingToken(value: unknown) {
+  return normalizeHousingToken(value).replace(/[^A-Z0-9]/g, "");
+}
+
+function housingTokensOverlap(left: unknown, right: unknown) {
+  const leftToken = compactHousingToken(left);
+  const rightToken = compactHousingToken(right);
+  if (!leftToken || !rightToken) return false;
+  if (leftToken === rightToken) return true;
+  const minimumSafeLength = 5;
+  return (
+    leftToken.length >= minimumSafeLength &&
+    rightToken.length >= minimumSafeLength &&
+    (leftToken.includes(rightToken) || rightToken.includes(leftToken))
+  );
+}
+
+function housingRoomMatchesBooking(room: any, booking: any) {
+  const bookingRoomId = booking?.roomId || booking?.room?.id;
+  if (room?.id && bookingRoomId === room.id) return true;
+
+  const roomCode = compactHousingToken(room?.code);
+  const bookingRoomCodeFields = [
+    booking?.room?.code,
+    booking?.roomCode,
+    booking?.roomNumber,
+  ];
+  if (
+    roomCode &&
+    bookingRoomCodeFields.some((field) => housingTokensOverlap(roomCode, field))
+  ) {
+    return true;
+  }
+
+  const roomNumber = compactHousingToken(room?.roomNumber);
+  const bookingRoomNumber = compactHousingToken(
+    booking?.roomNumber || booking?.room?.roomNumber,
+  );
+  if (!roomNumber || !bookingRoomNumber || roomNumber !== bookingRoomNumber) {
+    return false;
+  }
+
+  const roomFloor = compactHousingToken(room?.floor);
+  const bookingFloor = compactHousingToken(
+    booking?.floorNumber || booking?.room?.floor,
+  );
+  const roomBuilding = compactHousingToken(
+    room?.block?.code ||
+      room?.block?.name ||
+      room?.buildingNumber ||
+      room?.property?.code ||
+      room?.property?.name,
+  );
+  const bookingBuilding = compactHousingToken(
+    booking?.buildingNumber ||
+      booking?.room?.block?.code ||
+      booking?.room?.block?.name ||
+      booking?.room?.property?.code ||
+      booking?.room?.property?.name,
+  );
+  const floorMatches = Boolean(roomFloor && bookingFloor && roomFloor === bookingFloor);
+  const buildingMatches = housingTokensOverlap(roomBuilding, bookingBuilding);
+  return roomNumber.length >= 5 || floorMatches || buildingMatches;
+}
+
 function inventoryStock(input: Record<string, unknown>, currentOnHand: number) {
   const movementType = (text(input.movementType) || "ADJUSTMENT").toUpperCase();
   const movementQty = numberValue(input.movementQty) ?? 0;
@@ -728,13 +800,21 @@ async function assertNoOverlappingHold(roomId: string, start: Date, end: Date, e
 }
 
 async function assertNoOverlappingBooking(roomId: string, _start: Date, _end: Date, excludeId?: string) {
-  const overlap = await prisma.housingBooking.findFirst({
+  const room = await prisma.housingRoom.findUnique({
+    where: { id: roomId },
+    include: { property: true, block: true },
+  });
+  if (!room) throw new Error("Selected room does not exist.");
+  const activeBookings = await prisma.housingBooking.findMany({
     where: {
-      roomId,
       id: excludeId ? { not: excludeId } : undefined,
       status: { in: ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHECKED_IN"] as any },
     },
+    include: { room: { include: { property: true, block: true } } },
   });
+  const overlap = activeBookings.find((booking) =>
+    housingRoomMatchesBooking(room, booking),
+  );
   if (overlap) throw new Error(`Room already has active booking/reservation ${overlap.bookingNo}. Check out or cancel the booking before allocating this room again.`);
 }
 

@@ -26147,6 +26147,7 @@ function HousingOperations({
             booking={swapBooking}
             rooms={rooms}
             beds={housing.beds ?? []}
+            bookings={bookings}
             holds={holds}
             saving={saving}
             onSubmit={async (body) => {
@@ -27508,11 +27509,82 @@ function housingBookingBlocksAvailability(booking: any) {
   return ACTIVE_HOUSING_BOOKING_STATUSES.has(status);
 }
 
+function housingNormalizeToken(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, " ");
+}
+
+function housingCompactToken(value: unknown) {
+  return housingNormalizeToken(value).replace(/[^A-Z0-9]/g, "");
+}
+
+function housingTokensOverlap(left: unknown, right: unknown) {
+  const leftToken = housingCompactToken(left);
+  const rightToken = housingCompactToken(right);
+  if (!leftToken || !rightToken) return false;
+  if (leftToken === rightToken) return true;
+  const minimumSafeLength = 5;
+  return (
+    leftToken.length >= minimumSafeLength &&
+    rightToken.length >= minimumSafeLength &&
+    (leftToken.includes(rightToken) || rightToken.includes(leftToken))
+  );
+}
+
+function housingRoomMatchesBooking(room: any, booking: any) {
+  const bookingRoomId = booking?.roomId || booking?.room?.id;
+  if (room?.id && bookingRoomId === room.id) return true;
+
+  const roomCode = housingCompactToken(room?.code);
+  const bookingRoomCodeFields = [
+    booking?.room?.code,
+    booking?.roomCode,
+    booking?.roomNumber,
+  ];
+  if (
+    roomCode &&
+    bookingRoomCodeFields.some((field) => housingTokensOverlap(roomCode, field))
+  ) {
+    return true;
+  }
+
+  const roomNumber = housingCompactToken(room?.roomNumber);
+  const bookingRoomNumber = housingCompactToken(
+    booking?.roomNumber || booking?.room?.roomNumber,
+  );
+  if (!roomNumber || !bookingRoomNumber || roomNumber !== bookingRoomNumber) {
+    return false;
+  }
+
+  const roomFloor = housingCompactToken(room?.floor);
+  const bookingFloor = housingCompactToken(
+    booking?.floorNumber || booking?.room?.floor,
+  );
+  const roomBuilding = housingCompactToken(
+    room?.block?.code ||
+      room?.block?.name ||
+      room?.buildingNumber ||
+      room?.property?.code ||
+      room?.property?.name,
+  );
+  const bookingBuilding = housingCompactToken(
+    booking?.buildingNumber ||
+      booking?.room?.block?.code ||
+      booking?.room?.block?.name ||
+      booking?.room?.property?.code ||
+      booking?.room?.property?.name,
+  );
+  const floorMatches = Boolean(roomFloor && bookingFloor && roomFloor === bookingFloor);
+  const buildingMatches = housingTokensOverlap(roomBuilding, bookingBuilding);
+  return roomNumber.length >= 5 || floorMatches || buildingMatches;
+}
+
 function housingRoomHasBlockingBooking(room: any, bookings: any[]) {
   return bookings.some((booking) => {
-    const bookingRoomId = booking.roomId || booking.room?.id;
-    if (!bookingRoomId || bookingRoomId !== room.id) return false;
-    return housingBookingBlocksAvailability(booking);
+    if (!housingBookingBlocksAvailability(booking)) return false;
+    return housingRoomMatchesBooking(room, booking);
   });
 }
 
@@ -28158,6 +28230,7 @@ function HousingRoomSwapForm({
   booking,
   rooms,
   beds,
+  bookings,
   holds,
   saving,
   onSubmit,
@@ -28165,39 +28238,40 @@ function HousingRoomSwapForm({
   booking: any;
   rooms: any[];
   beds: any[];
+  bookings: any[];
   holds: any[];
   saving: boolean;
   onSubmit: (body: Record<string, unknown>) => Promise<void> | void;
 }) {
-  const todayKey = new Date().toISOString().slice(0, 10);
-  const activeHeldRoomIds = new Set(
-    holds
-      .filter(
-        (hold) =>
-          hold.status === "ACTIVE" &&
-          String(hold.startDate || "").slice(0, 10) <= todayKey &&
-          String(hold.endDate || "").slice(0, 10) >= todayKey,
-      )
-      .map((hold) => hold.roomId),
+  const swapWindowStart = useMemo(
+    () => parseHousingDateTime(booking.checkIn, new Date()) || new Date(),
+    [booking.checkIn],
+  );
+  const swapWindowEnd = useMemo(
+    () =>
+      parseHousingDateTime(
+        booking.checkOut,
+        new Date("2999-12-31T23:59:59"),
+      ) || new Date("2999-12-31T23:59:59"),
+    [booking.checkOut],
   );
   const [roomId, setRoomId] = useState("");
   const [bedId, setBedId] = useState("");
   const destinationRooms = useMemo(
     () =>
-      rooms.filter((room) => {
-        const status = String(room.status || "").toUpperCase();
-        const occupancy = Number(room.occupancy || 0);
-        const capacity = Number(room.capacity || 0);
-        return (
+      rooms.filter(
+        (room) =>
           room.id &&
           room.id !== booking.roomId &&
-          status === "AVAILABLE" &&
-          occupancy === 0 &&
-          capacity > 0 &&
-          !activeHeldRoomIds.has(room.id)
-        );
-      }),
-    [rooms, booking.roomId, activeHeldRoomIds],
+          housingRoomIsBookable(
+            room,
+            bookings,
+            holds,
+            swapWindowStart,
+            swapWindowEnd,
+          ),
+      ),
+    [rooms, booking.roomId, bookings, holds, swapWindowStart, swapWindowEnd],
   );
   const selectedRoom = destinationRooms.find((room) => room.id === roomId);
   const destinationBeds = beds.filter(
