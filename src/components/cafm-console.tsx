@@ -28221,23 +28221,38 @@ function HousingBookingEndDateEditForm({
   onSubmit: (body: Record<string, unknown>) => Promise<void> | void;
 }) {
   const now = new Date();
+  const currentMinute = new Date(now);
+  currentMinute.setSeconds(0, 0);
   const checkInDate = booking.checkIn ? new Date(booking.checkIn) : null;
+  const validCheckInDate = checkInDate && !Number.isNaN(checkInDate.getTime()) ? checkInDate : null;
+  const minimumEndDate = validCheckInDate && validCheckInDate > currentMinute ? validCheckInDate : currentMinute;
   const existingEnd = booking.checkOut
     ? new Date(booking.checkOut)
-    : checkInDate && !Number.isNaN(checkInDate.getTime())
-      ? addHours(checkInDate, 24)
+    : validCheckInDate
+      ? addHours(validCheckInDate, 24)
       : addHours(now, 24);
-  const [endDate, setEndDate] = useState(formatLocalDateTimeInput(existingEnd));
+  const initialEndDate =
+    existingEnd && !Number.isNaN(existingEnd.getTime()) && existingEnd >= minimumEndDate
+      ? existingEnd
+      : minimumEndDate;
+  const minEndDateTime = formatLocalDateTimeInput(minimumEndDate);
+  const [endDate, setEndDate] = useState(formatLocalDateTimeInput(initialEndDate));
   const [remarks, setRemarks] = useState("End date updated by Admin/Helpdesk");
   const [error, setError] = useState("");
 
   async function submitEndDate() {
     const requestedDate = new Date(endDate);
+    const submitMinute = new Date();
+    submitMinute.setSeconds(0, 0);
     if (Number.isNaN(requestedDate.getTime())) {
       setError("Select a valid end date and time.");
       return;
     }
-    if (checkInDate && !Number.isNaN(checkInDate.getTime()) && requestedDate < checkInDate) {
+    if (requestedDate < submitMinute) {
+      setError("End date/time cannot be in the past.");
+      return;
+    }
+    if (validCheckInDate && requestedDate < validCheckInDate) {
       setError("End date/time cannot be before the booking start date/time.");
       return;
     }
@@ -28261,9 +28276,10 @@ function HousingBookingEndDateEditForm({
         End date
         <input
           type="datetime-local"
+          min={minEndDateTime}
           value={endDate}
           onChange={(event) => setEndDate(event.target.value)}
-          className={HOUSING_FIELD_CLASS}
+          className={`${HOUSING_FIELD_CLASS} ${error ? "border-coral focus:border-coral" : ""}`}
         />
       </label>
       <label className="grid gap-1 text-xs font-black uppercase text-slate-500">

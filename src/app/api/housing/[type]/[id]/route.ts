@@ -118,6 +118,13 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     if (isBookingEndDateEdit && (!nextCheckOut || Number.isNaN(nextCheckOut.getTime()))) {
       throw new HousingInputError("A valid booking end date/time is required.");
     }
+    if (isBookingEndDateEdit) {
+      const currentMinute = new Date();
+      currentMinute.setSeconds(0, 0);
+      if (nextCheckOut < currentMinute) {
+        throw new HousingInputError("Booking end date/time cannot be in the past.");
+      }
+    }
     if (isBookingEndDateEdit && nextCheckIn && nextCheckOut < nextCheckIn) {
       throw new HousingInputError("Booking end date/time cannot be before the start date/time.");
     }
