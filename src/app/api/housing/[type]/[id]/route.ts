@@ -7,6 +7,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const bodySchema = z.record(z.unknown());
+const activeBookingStatuses = ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHECKED_IN"];
 const closedBookingStatuses = ["CHECKED_OUT", "REJECTED", "CANCELLED", "NO_SHOW", "TRANSFERRED"];
 const approvalSteps = [
   { step: 1, level: "Housing Coordinator Review", next: "Housing Supervisor" },
@@ -111,7 +112,10 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     const effectiveStatus = status || current.status;
     const nextRoomId = text(input.roomId) || current.roomId;
     const roomChanged = nextRoomId !== current.roomId;
-    const nextRoom = roomChanged ? await prisma.housingRoom.findUnique({ where: { id: nextRoomId } }) : current.room;
+    let nextRoom = roomChanged ? await prisma.housingRoom.findUnique({ where: { id: nextRoomId } }) : current.room;
+    if (!nextRoom) throw new Error("Selected room does not exist.");
+    await reconcileRoomAvailability(nextRoom.id);
+    nextRoom = await prisma.housingRoom.findUnique({ where: { id: nextRoom.id } });
     if (!nextRoom) throw new Error("Selected room does not exist.");
     const nextCheckIn = status === "CHECKED_IN" && !input.checkIn ? new Date() : input.checkIn ? new Date(String(input.checkIn)) : current.checkIn;
     const nextCheckOut = status === "CHECKED_OUT" ? input.checkOut ? new Date(String(input.checkOut)) : new Date() : input.checkOut ? new Date(String(input.checkOut)) : current.checkOut || nextCheckIn;
@@ -599,6 +603,37 @@ async function refreshRoomOccupancy(roomId: string) {
   await prisma.housingRoom.update({ where: { id: roomId }, data: { occupancy, status } });
 }
 
+async function reconcileRoomAvailability(roomId: string) {
+  const room = await prisma.housingRoom.findUnique({
+    where: { id: roomId },
+    include: { beds: true },
+  });
+  if (!room || room.status === "MAINTENANCE" || room.status === "BLOCKED") return;
+
+  const activeBedBookings = await prisma.housingBooking.findMany({
+    where: { roomId, status: { in: activeBookingStatuses as any } },
+    select: { bedId: true },
+  });
+  const activeBedIds = new Set(
+    activeBedBookings.map((booking) => booking.bedId).filter(Boolean),
+  );
+  const staleBedIds = room.beds
+    .filter(
+      (bed) =>
+        ["RESERVED", "OCCUPIED"].includes(String(bed.status || "").toUpperCase()) &&
+        !activeBedIds.has(bed.id),
+    )
+    .map((bed) => bed.id);
+
+  if (staleBedIds.length) {
+    await prisma.housingBed.updateMany({
+      where: { id: { in: staleBedIds } },
+      data: { status: "AVAILABLE", occupant: "", occupantId: "" },
+    });
+  }
+  await refreshRoomOccupancy(roomId);
+}
+
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -823,7 +858,7 @@ async function assertNoOverlappingBooking(roomId: string, _start: Date, _end: Da
   const activeBookings = await prisma.housingBooking.findMany({
     where: {
       id: excludeId ? { not: excludeId } : undefined,
-      status: { in: ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHECKED_IN"] as any },
+      status: { in: activeBookingStatuses as any },
     },
     include: { room: { include: { property: true, block: true } } },
   });

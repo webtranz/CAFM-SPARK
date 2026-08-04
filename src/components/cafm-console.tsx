@@ -27791,6 +27791,14 @@ function housingBookingBlocksAvailability(booking: any) {
   return ACTIVE_HOUSING_BOOKING_STATUSES.has(status);
 }
 
+function housingBedHasActiveBooking(bed: any, bookings: any[]) {
+  return bookings.some((booking) => {
+    if (!housingBookingBlocksAvailability(booking)) return false;
+    const bookingBedId = booking?.bedId || booking?.bed?.id;
+    return Boolean(bed?.id && bookingBedId === bed.id);
+  });
+}
+
 function housingNormalizeToken(value: unknown) {
   return String(value ?? "")
     .trim()
@@ -27895,11 +27903,9 @@ function housingRoomIsBookable(
   windowEnd: Date,
 ) {
   const roomStatus = String(room.status || "").toUpperCase();
-  const occupancy = Number(room.occupancy || 0);
   const capacity = Number(room.capacity || 0);
   if (capacity <= 0) return false;
-  if (["BLOCKED", "MAINTENANCE", "OCCUPIED", "RESERVED"].includes(roomStatus)) return false;
-  if (occupancy > 0) return false;
+  if (["BLOCKED", "MAINTENANCE"].includes(roomStatus)) return false;
   if (housingRoomHasBlockingHold(room, holds, windowStart, windowEnd)) return false;
   if (housingRoomHasBlockingBooking(room, bookings)) return false;
   return true;
@@ -28864,12 +28870,16 @@ function HousingBookingForm({
     () =>
       selectedRoomId && selectedRoomStillBookable
         ? beds.filter(
-            (bed) =>
-              bed.roomId === selectedRoomId &&
-              String(bed.status || "").toUpperCase() === "AVAILABLE",
+            (bed) => {
+              if (bed.roomId !== selectedRoomId) return false;
+              const bedStatus = String(bed.status || "").toUpperCase();
+              if (bedStatus === "AVAILABLE") return true;
+              if (!["RESERVED", "OCCUPIED"].includes(bedStatus)) return false;
+              return !housingBedHasActiveBooking(bed, bookings);
+            },
           )
         : [],
-    [beds, selectedRoomId, selectedRoomStillBookable],
+    [beds, bookings, selectedRoomId, selectedRoomStillBookable],
   );
   useEffect(() => {
     if (selectedRoomId && !bookableRoomIds.has(selectedRoomId)) {
@@ -29086,7 +29096,7 @@ function HousingBookingForm({
           placeholder="Search only vacant available room by ID or room number"
         />
         <p className="text-xs font-black text-lagoon">
-          Showing only rooms with no active booking/reservation until checkout, no occupancy, and no hold for the selected dates.
+          Showing only rooms with no active booking/reservation until checkout and no hold for the selected dates.
         </p>
         {!bookableRooms.length ? (
           <p className="text-xs font-black text-coral">

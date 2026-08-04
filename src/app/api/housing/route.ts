@@ -577,7 +577,9 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
   if (!input.roomId?.trim()) {
     throw new HousingInputError("Select an available room before saving the booking.");
   }
-  const room = await firstRoom(input.roomId);
+  let room = await firstRoom(input.roomId);
+  await reconcileRoomAvailability(room.id);
+  room = await firstRoom(room.id);
   if (["BLOCKED", "MAINTENANCE"].includes(room.status)) {
     throw new HousingInputError("Blocked or under-maintenance rooms cannot be allocated.");
   }
@@ -946,6 +948,37 @@ async function refreshRoomOccupancy(roomId: string) {
   if (!room) return;
   const status = room.status === "MAINTENANCE" || room.status === "BLOCKED" ? room.status : occupancy >= room.capacity ? "OCCUPIED" : occupancy > 0 ? "RESERVED" : "AVAILABLE";
   await prisma.housingRoom.update({ where: { id: roomId }, data: { occupancy, status } });
+}
+
+async function reconcileRoomAvailability(roomId: string) {
+  const room = await prisma.housingRoom.findUnique({
+    where: { id: roomId },
+    include: { beds: true },
+  });
+  if (!room || room.status === "MAINTENANCE" || room.status === "BLOCKED") return;
+
+  const activeBedBookings = await prisma.housingBooking.findMany({
+    where: { roomId, status: { in: activeBookingStatuses as any } },
+    select: { bedId: true },
+  });
+  const activeBedIds = new Set(
+    activeBedBookings.map((booking) => booking.bedId).filter(Boolean),
+  );
+  const staleBedIds = room.beds
+    .filter(
+      (bed) =>
+        ["RESERVED", "OCCUPIED"].includes(String(bed.status || "").toUpperCase()) &&
+        !activeBedIds.has(bed.id),
+    )
+    .map((bed) => bed.id);
+
+  if (staleBedIds.length) {
+    await prisma.housingBed.updateMany({
+      where: { id: { in: staleBedIds } },
+      data: { status: "AVAILABLE", occupant: "", occupantId: "" },
+    });
+  }
+  await refreshRoomOccupancy(roomId);
 }
 
 async function housingHistory(entity: string, entityId: string, actor: string, action: string, details?: string | null, links: { roomId?: string; bookingId?: string; inspectionId?: string; assetId?: string; inventoryId?: string } = {}) {
