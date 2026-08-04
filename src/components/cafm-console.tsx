@@ -24650,7 +24650,18 @@ function HousingOperations({
   const [housingNotice, setHousingNotice] = useState("");
   const [runningAlerts, setRunningAlerts] = useState(false);
   const rooms = housing?.rooms ?? [];
-  const bookings = housing?.bookings ?? [];
+  const residents = housing?.residents ?? [];
+  const residentLookup = useMemo(
+    () => buildHousingResidentLookup(residents),
+    [residents],
+  );
+  const bookings = useMemo(
+    () =>
+      (housing?.bookings ?? []).map((booking: any) =>
+        hydrateHousingBookingWithResident(booking, residentLookup),
+      ),
+    [housing?.bookings, residentLookup],
+  );
   const inspections = housing?.inspections ?? [];
   const assets = housing?.assets ?? [];
   const inventory = housing?.inventory ?? [];
@@ -24944,7 +24955,7 @@ function HousingOperations({
       (status === "All" || room.status === status)
     );
   });
-  const visibleResidents = (housing?.residents ?? []).filter(
+  const visibleResidents = residents.filter(
     (resident: any) => {
       const haystack =
         `${resident.residentNo} ${resident.name} ${resident.companyName} ${resident.companyId} ${resident.phone} ${resident.status}`.toLowerCase();
@@ -27808,6 +27819,60 @@ function housingNormalizeToken(value: unknown) {
 
 function housingCompactToken(value: unknown) {
   return housingNormalizeToken(value).replace(/[^A-Z0-9]/g, "");
+}
+
+function buildHousingResidentLookup(residents: any[]) {
+  const lookup = new Map<string, any>();
+  residents.forEach((resident) => {
+    [
+      resident?.id,
+      resident?.residentNo,
+      resident?.employeeId,
+      resident?.guestId,
+    ].forEach((value) => {
+      const key = housingCompactToken(value);
+      if (key && !lookup.has(key)) lookup.set(key, resident);
+    });
+  });
+  return lookup;
+}
+
+function findHousingResidentForBooking(booking: any, lookup: Map<string, any>) {
+  const keys = [
+    booking?.residentId,
+    booking?.employeeId,
+    booking?.residentNo,
+    booking?.guestId,
+    booking?.resident?.id,
+    booking?.resident?.residentNo,
+    booking?.resident?.employeeId,
+    booking?.resident?.guestId,
+  ];
+  for (const value of keys) {
+    const resident = lookup.get(housingCompactToken(value));
+    if (resident) return resident;
+  }
+  return null;
+}
+
+function hydrateHousingBookingWithResident(booking: any, lookup: Map<string, any>) {
+  const resident = findHousingResidentForBooking(booking, lookup);
+  if (!resident) return booking;
+  const liveResident = { ...(booking?.resident || {}), ...resident };
+  return {
+    ...booking,
+    resident: liveResident,
+    residentId: booking?.residentId || resident?.id,
+    employeeId: resident?.residentNo ?? booking?.employeeId,
+    residentNo: resident?.residentNo ?? booking?.residentNo,
+    guestId: resident?.residentNo ?? booking?.guestId,
+    residentName: resident?.name ?? booking?.residentName,
+    companyName: resident?.companyName ?? resident?.companyId ?? booking?.companyName,
+    departmentCode: resident?.departmentCode ?? booking?.departmentCode,
+    nationality: resident?.nationality ?? booking?.nationality,
+    contactNumber: resident?.phone ?? booking?.contactNumber,
+    gender: resident?.gender ?? booking?.gender,
+  };
 }
 
 function housingTokensOverlap(left: unknown, right: unknown) {
