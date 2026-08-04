@@ -4,6 +4,7 @@ import { apiError } from "@/lib/api-response";
 import { requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth";
+import { syncHousingResidentToBookings } from "@/lib/housing-resident-sync";
 import { prisma } from "@/lib/prisma";
 
 const bodySchema = z.record(z.unknown());
@@ -255,31 +256,35 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
         );
       }
     }
-    const resident = await prisma.housingResident.update({
-      where: { id },
-      data: {
-        residentNo,
-        name,
-        email: text(input.email),
-        phone: text(input.phone) || text(input.contactNumber),
-        companyId: text(input.companyId) || text(input.companyName),
-        companyName: text(input.companyName) || text(input.companyId),
-        gender: text(input.gender),
-        nationality: text(input.nationality),
-        departmentCode: text(input.departmentCode),
-        status: text(input.status) || current.status,
-      },
+    const result = await prisma.$transaction(async (tx) => {
+      const resident = await tx.housingResident.update({
+        where: { id },
+        data: {
+          residentNo,
+          name,
+          email: text(input.email),
+          phone: text(input.phone) || text(input.contactNumber),
+          companyId: text(input.companyId) || text(input.companyName),
+          companyName: text(input.companyName) || text(input.companyId),
+          gender: text(input.gender),
+          nationality: text(input.nationality),
+          departmentCode: text(input.departmentCode),
+          status: text(input.status) || current.status,
+        },
+      });
+      const sync = await syncHousingResidentToBookings(tx, resident, current);
+      await tx.housingHistory.create({
+        data: {
+          entity: "resident",
+          entityId: id,
+          actor,
+          action: "Guest updated",
+          details: `${current.residentNo} / ${resident.name}. Synced ${sync.bookingsUpdated} booking(s).`,
+        },
+      });
+      return { ...resident, ...sync };
     });
-    await prisma.housingHistory.create({
-      data: {
-        entity: "resident",
-        entityId: id,
-        actor,
-        action: "Guest updated",
-        details: `${current.residentNo} / ${resident.name}`,
-      },
-    });
-    return resident;
+    return result;
   }
   if (type === "hold") {
     const current = await prisma.housingRoomHold.findUnique({ where: { id }, include: { room: true } });

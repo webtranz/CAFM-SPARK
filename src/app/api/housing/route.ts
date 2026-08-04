@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth";
 import { ensureHousingNotificationSettings } from "@/lib/housing-alerts";
+import { syncHousingResidentToBookings } from "@/lib/housing-resident-sync";
 import { prisma } from "@/lib/prisma";
 
 const activeBookingStatuses = ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHECKED_IN"];
@@ -312,11 +313,14 @@ async function createHousingRecord(input: z.infer<typeof housingSchema>, actor: 
   if (input.type === "resident") {
     const count = await prisma.housingResident.count();
     const residentNo = input.residentNo || `RES-${String(count + 1).padStart(5, "0")}`;
-    return prisma.housingResident.upsert({
+    const existing = await prisma.housingResident.findUnique({ where: { residentNo } });
+    const resident = await prisma.housingResident.upsert({
       where: { residentNo },
       update: residentData(input, residentNo),
       create: residentData(input, residentNo),
     });
+    await syncHousingResidentToBookings(prisma, resident, existing);
+    return resident;
   }
 
   if (input.type === "bed") {
