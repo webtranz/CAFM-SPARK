@@ -2827,6 +2827,7 @@ export function CafmConsole({
           {canViewActive && active === "housing" && (
             <HousingOperations
               housing={records.housing}
+              departments={records.departments}
               view={activeView}
               saving={saving}
               canManage={can("housing.manage")}
@@ -24594,6 +24595,7 @@ function ResourceShiftsTable({ rows }: { rows: any[] }) {
 
 function HousingOperations({
   housing,
+  departments,
   view,
   saving,
   canManage,
@@ -24608,6 +24610,7 @@ function HousingOperations({
   refreshData,
 }: {
   housing: ConsoleData["housing"];
+  departments: any[];
   view: string;
   saving: boolean;
   canManage: boolean;
@@ -24661,6 +24664,26 @@ function HousingOperations({
         hydrateHousingBookingWithResident(booking, residentLookup),
       ),
     [housing?.bookings, residentLookup],
+  );
+  const housingDepartmentOptions = useMemo(
+    () =>
+      mergeSearchableOptions(
+        (departments ?? []).map((department: any) => {
+          const value = String(
+            department?.code || department?.departmentCode || department?.name || "",
+          ).trim();
+          const name = String(
+            department?.name || department?.description || "",
+          ).trim();
+          return {
+            value,
+            label: name && name !== value ? `${value} - ${name}` : value,
+          };
+        }),
+        uniqueTextOptions(residents, (resident) => resident.departmentCode),
+        uniqueTextOptions(bookings, (booking) => booking.departmentCode),
+      ),
+    [bookings, departments, residents],
   );
   const inspections = housing?.inspections ?? [];
   const assets = housing?.assets ?? [];
@@ -26500,6 +26523,7 @@ function HousingOperations({
         >
           <HousingResidentEditForm
             resident={editingResident}
+            departmentOptions={housingDepartmentOptions}
             saving={saving}
             onSubmit={async (body) => {
               const response = await updateHousing("resident", editingResident.id, body);
@@ -28310,13 +28334,37 @@ function HousingSetupForms({
 
 function HousingResidentEditForm({
   resident,
+  departmentOptions,
   saving,
   onSubmit,
 }: {
   resident: any;
+  departmentOptions: SearchableOption[];
   saving: boolean;
   onSubmit: (body: Record<string, unknown>) => Promise<void> | void;
 }) {
+  const departmentLabelFor = (value: unknown) => {
+    const code = String(value || "").trim();
+    if (!code) return "";
+    return (
+      departmentOptions.find(
+        (option) => option.value.toLowerCase() === code.toLowerCase(),
+      )?.label || code
+    );
+  };
+  const [departmentCode, setDepartmentCode] = useState(
+    String(resident.departmentCode ?? ""),
+  );
+  const [departmentSearch, setDepartmentSearch] = useState(() =>
+    departmentLabelFor(resident.departmentCode),
+  );
+
+  useEffect(() => {
+    const nextCode = String(resident.departmentCode ?? "");
+    setDepartmentCode(nextCode);
+    setDepartmentSearch(departmentLabelFor(nextCode));
+  }, [resident.id, resident.departmentCode, departmentOptions]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
@@ -28356,10 +28404,24 @@ function HousingResidentEditForm({
           className={HOUSING_FIELD_CLASS}
         />
         <input
+          type="hidden"
           name="departmentCode"
-          defaultValue={resident.departmentCode ?? ""}
-          placeholder="Department code"
-          className={HOUSING_FIELD_CLASS}
+          value={departmentCode}
+          readOnly
+        />
+        <SearchableDropdownField
+          value={departmentSearch}
+          options={departmentOptions}
+          placeholder="Search/select department"
+          onInput={(value) => {
+            setDepartmentSearch(value);
+            setDepartmentCode(value);
+          }}
+          onSelect={(option) => {
+            setDepartmentCode(option.value);
+            setDepartmentSearch(option.label);
+          }}
+          className="md:col-span-1"
         />
         <input
           name="nationality"
