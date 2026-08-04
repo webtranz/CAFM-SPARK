@@ -29910,25 +29910,47 @@ function HousingPreviewModal({
 }) {
   const attachments = attachmentList(record.photoUrls || record.attachmentUrls);
   const images = attachments.filter(isImageUrl);
+  const bookingPreviewFields: [string, unknown][] =
+    type === "booking"
+      ? [
+          ["Booking Status", record.status],
+          ["Start Date", formatDateCell(record.checkIn || record.startDate)],
+          ["End Date", formatDateCell(record.checkOut || record.endDate)],
+          ["Extension", record.extensionStatus],
+        ]
+      : [];
+  const suppressedPreviewKeys = new Set([
+    "property",
+    "block",
+    "room",
+    "bed",
+    "resident",
+    "approvals",
+    "beds",
+    "status",
+    "checkIn",
+    "checkOut",
+    "startDate",
+    "endDate",
+    "extensionStatus",
+  ]);
   return (
     <RequestModalShell
       title={`Housing ${type}: ${record.bookingNo || record.inspectionNo || record.code || record.tag || record.sku || record.name}`}
       onClose={onClose}
     >
       <div className="grid gap-4">
+        {bookingPreviewFields.length > 0 && (
+          <div className="grid gap-3 rounded-lg border border-emerald-100 bg-emerald-50 p-3 md:grid-cols-2">
+            {bookingPreviewFields.map(([label, value]) => (
+              <PreviewField key={label} label={label} value={value} />
+            ))}
+          </div>
+        )}
         <div className="grid gap-3 md:grid-cols-2">
           {Object.entries(record)
             .filter(
-              ([key]) =>
-                ![
-                  "property",
-                  "block",
-                  "room",
-                  "bed",
-                  "resident",
-                  "approvals",
-                  "beds",
-                ].includes(key),
+              ([key]) => !suppressedPreviewKeys.has(key),
             )
             .slice(0, 18)
             .map(([key, value]) => (
