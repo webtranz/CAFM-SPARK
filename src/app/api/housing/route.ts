@@ -11,6 +11,7 @@ import { prisma } from "@/lib/prisma";
 const activeBookingStatuses = ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHECKED_IN"];
 const closedBookingStatuses = ["CHECKED_OUT", "REJECTED", "CANCELLED", "NO_SHOW", "TRANSFERRED"];
 const activeExtensionStatuses = ["EXTEND_PENDING", "EXTENDED"];
+const unavailableRoomStatuses = ["BLOCKED", "MAINTENANCE", "RESERVED", "OCCUPIED", "HOLD", "ON_HOLD"];
 const bookingStatuses = ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHECKED_IN", "CHECKED_OUT", "REJECTED", "CANCELLED", "NO_SHOW", "TRANSFERRED"];
 const bookingApprovalSteps = [
   { step: 1, level: "Housing Coordinator Review", approver: "Housing Coordinator" },
@@ -647,8 +648,8 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
   let room = await firstRoom(input.roomId);
   await reconcileRoomAvailability(room.id);
   room = await firstRoom(room.id);
-  if (["BLOCKED", "MAINTENANCE"].includes(room.status)) {
-    throw new HousingInputError("Blocked or under-maintenance rooms cannot be allocated.");
+  if (unavailableRoomStatuses.includes(String(room.status || "").toUpperCase())) {
+    throw new HousingInputError("Only available rooms can be allocated. Checked-in, approved, reserved, occupied, or held rooms are not available for booking.");
   }
   const resident = await resolveResident(input);
   const employeeId = input.employeeId || input.residentNo || resident?.residentNo || "";

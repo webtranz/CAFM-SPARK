@@ -28040,7 +28040,7 @@ function housingRoomIsBookable(
   const roomStatus = String(room.status || "").toUpperCase();
   const capacity = Number(room.capacity || 0);
   if (capacity <= 0) return false;
-  if (["BLOCKED", "MAINTENANCE"].includes(roomStatus)) return false;
+  if (roomStatus !== "AVAILABLE") return false;
   if (housingRoomHasBlockingHold(room, holds, windowStart, windowEnd)) return false;
   if (housingRoomHasBlockingBooking(room, bookings)) return false;
   return true;

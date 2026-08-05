@@ -11,6 +11,7 @@ const bodySchema = z.record(z.unknown());
 const activeBookingStatuses = ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHECKED_IN"];
 const closedBookingStatuses = ["CHECKED_OUT", "REJECTED", "CANCELLED", "NO_SHOW", "TRANSFERRED"];
 const activeExtensionStatuses = ["EXTEND_PENDING", "EXTENDED"];
+const unavailableRoomStatuses = ["BLOCKED", "MAINTENANCE", "RESERVED", "OCCUPIED", "HOLD", "ON_HOLD"];
 const approvalSteps = [
   { step: 1, level: "Housing Coordinator Review", next: "Housing Supervisor" },
   { step: 2, level: "Housing Supervisor Approval", next: "Camp Manager" },
@@ -148,8 +149,13 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
         await assertNoOverlappingBooking(nextRoom.id, current.checkIn, requestedExtensionEnd, id, current.bedId);
       }
     }
-    if (["CHECKED_IN", "APPROVED", "PENDING_APPROVAL"].includes(effectiveStatus) && ["BLOCKED", "MAINTENANCE"].includes(nextRoom.status)) {
-      throw new Error("Blocked or under-maintenance rooms cannot be allocated.");
+    if (["CHECKED_IN", "APPROVED", "PENDING_APPROVAL", "REQUESTED"].includes(effectiveStatus)) {
+      const nextRoomStatus = String(nextRoom.status || "").toUpperCase();
+      const hardBlocked = ["BLOCKED", "MAINTENANCE"].includes(nextRoomStatus);
+      const unavailableForNewAssignment = roomChanged && unavailableRoomStatuses.includes(nextRoomStatus);
+      if (hardBlocked || unavailableForNewAssignment) {
+        throw new Error("Only available rooms can be allocated. Checked-in, approved, reserved, occupied, or held rooms are not available for booking.");
+      }
     }
     if (["CHECKED_IN", "APPROVED", "PENDING_APPROVAL", "REQUESTED"].includes(effectiveStatus)) {
       await assertNoOverlappingHold(nextRoom.id, nextCheckIn, nextCheckOut);
