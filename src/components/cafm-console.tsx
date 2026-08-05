@@ -10572,6 +10572,15 @@ const STANDARD_HOUSING_DEPARTMENT_OPTIONS: SearchableOption[] = [
   "EMERGENCY",
 ].map((department) => ({ value: department, label: department }));
 
+function standardHousingDepartmentValue(value: unknown) {
+  const code = String(value || "").trim();
+  if (!code) return "";
+  const match = STANDARD_HOUSING_DEPARTMENT_OPTIONS.find(
+    (department) => department.value.toLowerCase() === code.toLowerCase(),
+  );
+  return match?.value || "";
+}
+
 function mergeSearchableOptions(...optionGroups: SearchableOption[][]) {
   const merged = new Map<string, SearchableOption>();
   optionGroups.flat().forEach((option) => {
@@ -26546,7 +26555,6 @@ function HousingOperations({
         >
           <HousingResidentEditForm
             resident={editingResident}
-            departmentOptions={housingDepartmentOptions}
             saving={saving}
             onSubmit={async (body) => {
               const response = await updateHousing("resident", editingResident.id, body);
@@ -28357,36 +28365,20 @@ function HousingSetupForms({
 
 function HousingResidentEditForm({
   resident,
-  departmentOptions,
   saving,
   onSubmit,
 }: {
   resident: any;
-  departmentOptions: SearchableOption[];
   saving: boolean;
   onSubmit: (body: Record<string, unknown>) => Promise<void> | void;
 }) {
-  const departmentLabelFor = (value: unknown) => {
-    const code = String(value || "").trim();
-    if (!code) return "";
-    return (
-      departmentOptions.find(
-        (option) => option.value.toLowerCase() === code.toLowerCase(),
-      )?.label || code
-    );
-  };
   const [departmentCode, setDepartmentCode] = useState(
-    String(resident.departmentCode ?? ""),
-  );
-  const [departmentSearch, setDepartmentSearch] = useState(() =>
-    departmentLabelFor(resident.departmentCode),
+    standardHousingDepartmentValue(resident.departmentCode),
   );
 
   useEffect(() => {
-    const nextCode = String(resident.departmentCode ?? "");
-    setDepartmentCode(nextCode);
-    setDepartmentSearch(departmentLabelFor(nextCode));
-  }, [resident.id, resident.departmentCode, departmentOptions]);
+    setDepartmentCode(standardHousingDepartmentValue(resident.departmentCode));
+  }, [resident.id, resident.departmentCode]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -28426,26 +28418,19 @@ function HousingResidentEditForm({
           placeholder="Company name"
           className={HOUSING_FIELD_CLASS}
         />
-        <input
-          type="hidden"
+        <select
           name="departmentCode"
           value={departmentCode}
-          readOnly
-        />
-        <SearchableDropdownField
-          value={departmentSearch}
-          options={departmentOptions}
-          placeholder="Search/select department"
-          onInput={(value) => {
-            setDepartmentSearch(value);
-            setDepartmentCode(value);
-          }}
-          onSelect={(option) => {
-            setDepartmentCode(option.value);
-            setDepartmentSearch(option.label);
-          }}
-          className="md:col-span-1"
-        />
+          onChange={(event) => setDepartmentCode(event.target.value)}
+          className={HOUSING_FIELD_CLASS}
+        >
+          <option value="">Select department</option>
+          {STANDARD_HOUSING_DEPARTMENT_OPTIONS.map((department) => (
+            <option key={department.value} value={department.value}>
+              {department.label}
+            </option>
+          ))}
+        </select>
         <input
           name="nationality"
           defaultValue={resident.nationality ?? ""}
