@@ -144,7 +144,7 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
       if (requestedExtensionEnd <= compareFrom) throw new Error("Extension end date/time must be after the current end date.");
       if (isExtensionApproved) {
         await assertNoOverlappingHold(nextRoom.id, current.checkIn, requestedExtensionEnd);
-        await assertNoOverlappingBooking(nextRoom.id, current.checkIn, requestedExtensionEnd, id);
+        await assertNoOverlappingBooking(nextRoom.id, current.checkIn, requestedExtensionEnd, id, current.bedId);
       }
     }
     if (["CHECKED_IN", "APPROVED", "PENDING_APPROVAL"].includes(effectiveStatus) && ["BLOCKED", "MAINTENANCE"].includes(nextRoom.status)) {
@@ -152,7 +152,6 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     }
     if (["CHECKED_IN", "APPROVED", "PENDING_APPROVAL", "REQUESTED"].includes(effectiveStatus)) {
       await assertNoOverlappingHold(nextRoom.id, nextCheckIn, nextCheckOut);
-      await assertNoOverlappingBooking(nextRoom.id, nextCheckIn, nextCheckOut, id);
     }
     const requestedBedId = text(input.bedId);
     const autoBed = !requestedBedId && roomChanged ? await prisma.housingBed.findFirst({ where: { roomId: nextRoom.id, status: "AVAILABLE" } }) : null;
@@ -161,6 +160,9 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     if (nextBed && nextBed.roomId !== nextRoom.id) throw new Error("Selected bed does not belong to the selected room.");
     if (nextBed && nextBed.id !== current.bedId && ["RESERVED", "OCCUPIED"].includes(nextBed.status)) throw new Error("Occupied beds cannot be assigned twice.");
     if (nextRoom.capacity > 1 && !nextBed) throw new Error("No available bed found for the selected room.");
+    if (["CHECKED_IN", "APPROVED", "PENDING_APPROVAL", "REQUESTED"].includes(effectiveStatus)) {
+      await assertNoOverlappingBooking(nextRoom.id, nextCheckIn, nextCheckOut, id, nextBedId);
+    }
     const booking = await prisma.housingBooking.update({
       where: { id },
       data: {
@@ -854,22 +856,48 @@ async function assertNoOverlappingHold(roomId: string, start: Date, end: Date, e
   if (overlap) throw new Error(`Room ${overlap.room.roomNumber} is already on hold from ${overlap.startDate.toISOString().slice(0, 10)} to ${overlap.endDate.toISOString().slice(0, 10)}.`);
 }
 
-async function assertNoOverlappingBooking(roomId: string, _start: Date, _end: Date, excludeId?: string) {
+async function assertNoOverlappingBooking(roomId: string, _start: Date, _end: Date, excludeId?: string, bedId?: string | null) {
   const room = await prisma.housingRoom.findUnique({
     where: { id: roomId },
     include: { property: true, block: true },
   });
   if (!room) throw new Error("Selected room does not exist.");
+  const overlapping = await activeOverlappingBookingsForRoom(room, _start, _end, excludeId);
+  const blocking = overlapping.find(
+    (booking) =>
+      room.capacity <= 1 ||
+      !bedId ||
+      !booking.bedId ||
+      booking.bedId === bedId,
+  );
+  if (blocking) throw new Error(`Room already has active booking/reservation ${blocking.bookingNo}. Check out or cancel the booking before allocating this room again.`);
+}
+
+async function activeOverlappingBookingsForRoom(room: any, start: Date, end: Date, excludeId?: string) {
   const activeBookings = await prisma.housingBooking.findMany({
     where: {
       id: excludeId ? { not: excludeId } : undefined,
       status: { in: activeBookingStatuses as any },
+      OR: [
+        { roomId: room.id },
+        { roomNumber: room.roomNumber },
+      ],
     },
     include: { room: { include: { property: true, block: true } } },
   });
-  const overlap = activeBookings.find((booking) =>
-    housingRoomMatchesBooking(room, booking),
+  return activeBookings.filter(
+    (booking) =>
+      housingRoomMatchesBooking(room, booking) &&
+      housingDateRangesOverlap(
+        new Date(booking.checkIn),
+        booking.checkOut ? new Date(booking.checkOut) : new Date("2999-12-31T23:59:59"),
+        start,
+        end,
+      ),
   );
-  if (overlap) throw new Error(`Room already has active booking/reservation ${overlap.bookingNo}. Check out or cancel the booking before allocating this room again.`);
+}
+
+function housingDateRangesOverlap(startA: Date, endA: Date, startB: Date, endB: Date) {
+  return startA.getTime() <= endB.getTime() && endA.getTime() >= startB.getTime();
 }
 

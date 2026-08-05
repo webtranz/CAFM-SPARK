@@ -28968,7 +28968,9 @@ function HousingBookingForm({
   const [nationality, setNationality] = useState("");
   const [contactNumber, setContactNumber] = useState("");
   const [gender, setGender] = useState("");
-  const minBookingDateTime = useMemo(() => formatLocalDateTimeInput(), []);
+  const [minBookingDateTime, setMinBookingDateTime] = useState(() =>
+    formatLocalDateTimeInput(),
+  );
   const [checkInValue, setCheckInValue] = useState(minBookingDateTime);
   const [checkOutValue, setCheckOutValue] = useState(() =>
     formatLocalDateTimeInput(addHours(new Date(), 24)),
@@ -29013,6 +29015,23 @@ function HousingBookingForm({
       setSelectedRoomId("");
     }
   }, [bookableRoomIds, selectedRoomId]);
+  useEffect(() => {
+    const syncMinDateTime = () => {
+      const now = new Date();
+      const nextMinimum = formatLocalDateTimeInput(now);
+      const nextDefaultEnd = formatLocalDateTimeInput(addHours(now, 24));
+      setMinBookingDateTime(nextMinimum);
+      setCheckInValue((current) => {
+        if (current && current >= nextMinimum) return current;
+        setCheckOutValue((currentEnd) =>
+          currentEnd && currentEnd > nextMinimum ? currentEnd : nextDefaultEnd,
+        );
+        return nextMinimum;
+      });
+    };
+    const interval = window.setInterval(syncMinDateTime, 30000);
+    return () => window.clearInterval(interval);
+  }, []);
   const [showCompanyAdd, setShowCompanyAdd] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
   const [customCompanyOptions, setCustomCompanyOptions] = useState<SearchableOption[]>([]);
@@ -29040,12 +29059,30 @@ function HousingBookingForm({
     setContactNumber(resident.phone || resident.contactNumber || "");
     setGender(resident.gender || "");
   };
+  const handleBookingSubmit = async (formData: FormData) => {
+    const now = new Date();
+    const currentMinimum = formatLocalDateTimeInput(now);
+    const submittedStart = String(formData.get("checkIn") || "");
+    const submittedEnd = String(formData.get("checkOut") || "");
+    const startDate = parseHousingDateTime(submittedStart);
+    const endDate = parseHousingDateTime(submittedEnd);
+    if (!startDate || submittedStart < currentMinimum) {
+      formData.set("checkIn", currentMinimum);
+      setCheckInValue(currentMinimum);
+    }
+    if (!endDate || submittedEnd <= String(formData.get("checkIn"))) {
+      const nextEnd = formatLocalDateTimeInput(addHours(new Date(), 24));
+      formData.set("checkOut", nextEnd);
+      setCheckOutValue(nextEnd);
+    }
+    await onSubmit(formData);
+  };
   return (
     <HousingForm
       title="Accommodation & Booking Management"
       type="booking"
       saving={saving}
-      onSubmit={onSubmit}
+      onSubmit={handleBookingSubmit}
     >
       <input type="hidden" name="residentId" value={residentId} />
       <SearchableDropdownField

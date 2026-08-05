@@ -604,9 +604,10 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
   if (Number.isNaN(bookingStart.getTime()) || Number.isNaN(bookingEnd.getTime())) {
     throw new HousingInputError("Valid start and end date/time are required for accommodation bookings.");
   }
-  const currentMinute = new Date();
-  currentMinute.setSeconds(0, 0);
-  if (bookingStart < currentMinute) {
+      const currentMinute = new Date();
+      currentMinute.setSeconds(0, 0);
+      const bookingStartGrace = new Date(currentMinute.getTime() - 2 * 60 * 1000);
+      if (bookingStart < bookingStartGrace) {
     throw new HousingInputError("Accommodation booking start date/time cannot be in the past.");
   }
   if (bookingEnd < bookingStart) {
@@ -614,19 +615,29 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
   }
   await expireRoomHolds();
   await assertNoOverlappingHold(room.id, bookingStart, bookingEnd);
-  await assertNoOverlappingBooking(room.id, bookingStart, bookingEnd);
-  const bed = input.bedId ? await prisma.housingBed.findUnique({ where: { id: input.bedId } }) : await prisma.housingBed.findFirst({ where: { roomId: room.id, status: "AVAILABLE" } });
+  const overlappingBookings = await activeOverlappingBookingsForRoom(room, bookingStart, bookingEnd);
+  if (room.capacity <= 1 && overlappingBookings.length) {
+    throw new HousingInputError(`Room already has active booking/reservation ${overlappingBookings[0].bookingNo}. Check out or cancel the booking before allocating this room again.`);
+  }
+  const busyBedIds = new Set(overlappingBookings.map((booking) => booking.bedId).filter(Boolean));
+  const roomBeds = await prisma.housingBed.findMany({ where: { roomId: room.id }, orderBy: { label: "asc" } });
+  const bed = input.bedId
+    ? roomBeds.find((item) => item.id === input.bedId) || null
+    : roomBeds.find((item) => item.status === "AVAILABLE" && !busyBedIds.has(item.id)) ||
+      roomBeds.find((item) => !busyBedIds.has(item.id)) ||
+      null;
   if (!bed && room.capacity > 1) throw new HousingInputError("No available bed found for this room.");
   if (bed && bed.roomId !== room.id) throw new HousingInputError("Selected bed does not belong to the selected room.");
-  if (bed && ["RESERVED", "OCCUPIED"].includes(bed.status)) throw new HousingInputError("Occupied beds cannot be assigned twice.");
+  if (bed && busyBedIds.has(bed.id)) throw new HousingInputError("Selected bed is already occupied or reserved for the selected dates.");
 
-  const duplicate = await prisma.housingBooking.findFirst({
-    where: {
-      status: { in: activeBookingStatuses as any },
-      OR: [{ roomId: room.id, bedId: null }, ...(bed ? [{ bedId: bed.id }] : [])],
-    },
-  });
-  if (duplicate && (room.capacity <= 1 || duplicate.bedId === bed?.id)) {
+  const duplicate = overlappingBookings.find(
+    (booking) =>
+      room.capacity <= 1 ||
+      !bed ||
+      !booking.bedId ||
+      booking.bedId === bed.id,
+  );
+  if (duplicate) {
     throw new HousingInputError("Duplicate room or bed allocation is not allowed.");
   }
 
@@ -1017,16 +1028,35 @@ async function assertNoOverlappingBooking(roomId: string, _start: Date, _end: Da
     include: { property: true, block: true },
   });
   if (!room) throw new HousingInputError("Selected room does not exist.");
+  const overlap = await activeOverlappingBookingsForRoom(room, _start, _end, excludeId);
+  if (overlap.length) throw new HousingInputError(`Room already has active booking/reservation ${overlap[0].bookingNo}. Check out or cancel the booking before allocating this room again.`);
+}
+
+async function activeOverlappingBookingsForRoom(room: any, start: Date, end: Date, excludeId?: string) {
   const activeBookings = await prisma.housingBooking.findMany({
     where: {
       id: excludeId ? { not: excludeId } : undefined,
       status: { in: activeBookingStatuses as any },
+      OR: [
+        { roomId: room.id },
+        { roomNumber: room.roomNumber },
+      ],
     },
     include: { room: { include: { property: true, block: true } } },
   });
-  const overlap = activeBookings.find((booking) =>
-    housingRoomMatchesBooking(room, booking),
+  return activeBookings.filter(
+    (booking) =>
+      housingRoomMatchesBooking(room, booking) &&
+      housingDateRangesOverlap(
+        new Date(booking.checkIn),
+        booking.checkOut ? new Date(booking.checkOut) : new Date("2999-12-31T23:59:59"),
+        start,
+        end,
+      ),
   );
-  if (overlap) throw new HousingInputError(`Room already has active booking/reservation ${overlap.bookingNo}. Check out or cancel the booking before allocating this room again.`);
+}
+
+function housingDateRangesOverlap(startA: Date, endA: Date, startB: Date, endB: Date) {
+  return startA.getTime() <= endB.getTime() && endA.getTime() >= startB.getTime();
 }
 
