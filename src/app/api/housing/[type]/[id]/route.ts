@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 const bodySchema = z.record(z.unknown());
 const activeBookingStatuses = ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHECKED_IN"];
 const closedBookingStatuses = ["CHECKED_OUT", "REJECTED", "CANCELLED", "NO_SHOW", "TRANSFERRED"];
+const activeExtensionStatuses = ["EXTEND_PENDING", "EXTENDED"];
 const approvalSteps = [
   { step: 1, level: "Housing Coordinator Review", next: "Housing Supervisor" },
   { step: 2, level: "Housing Supervisor Approval", next: "Camp Manager" },
@@ -193,8 +194,8 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
         transferReason: text(input.transferReason) || undefined,
         blacklistReason: text(input.blacklistReason) || undefined,
         noShowAt: status === "NO_SHOW" ? new Date() : input.noShowAt ? new Date(String(input.noShowAt)) : undefined,
-        extensionStatus: isExtensionPending || isExtensionApproved ? extensionStatusInput : undefined,
-        extensionEndDate: requestedExtensionEnd || undefined,
+        extensionStatus: status === "CHECKED_OUT" ? "" : isExtensionPending || isExtensionApproved ? extensionStatusInput : undefined,
+        extensionEndDate: status === "CHECKED_OUT" ? null : requestedExtensionEnd || undefined,
         extensionRemarks: text(input.extensionRemarks) || text(input.remarks) || undefined,
         extensionRequestedAt: isExtensionPending ? new Date() : undefined,
         extensionApprovedAt: isExtensionApproved ? new Date() : undefined,
@@ -618,7 +619,14 @@ async function reconcileRoomAvailability(roomId: string) {
   if (!room || room.status === "MAINTENANCE" || room.status === "BLOCKED") return;
 
   const activeBedBookings = await prisma.housingBooking.findMany({
-    where: { roomId, status: { in: activeBookingStatuses as any } },
+    where: {
+      roomId,
+      status: { notIn: closedBookingStatuses as any },
+      OR: [
+        { status: { in: activeBookingStatuses as any } },
+        { extensionStatus: { in: activeExtensionStatuses as any } },
+      ],
+    },
     select: { bedId: true },
   });
   const activeBedIds = new Set(
@@ -856,48 +864,47 @@ async function assertNoOverlappingHold(roomId: string, start: Date, end: Date, e
   if (overlap) throw new Error(`Room ${overlap.room.roomNumber} is already on hold from ${overlap.startDate.toISOString().slice(0, 10)} to ${overlap.endDate.toISOString().slice(0, 10)}.`);
 }
 
-async function assertNoOverlappingBooking(roomId: string, _start: Date, _end: Date, excludeId?: string, bedId?: string | null) {
+async function assertNoOverlappingBooking(roomId: string, _start: Date, _end: Date, excludeId?: string, _bedId?: string | null) {
   const room = await prisma.housingRoom.findUnique({
     where: { id: roomId },
     include: { property: true, block: true },
   });
   if (!room) throw new Error("Selected room does not exist.");
   const overlapping = await activeOverlappingBookingsForRoom(room, _start, _end, excludeId);
-  const blocking = overlapping.find(
-    (booking) =>
-      room.capacity <= 1 ||
-      !bedId ||
-      !booking.bedId ||
-      booking.bedId === bedId,
-  );
+  const blocking = overlapping[0];
   if (blocking) throw new Error(`Room already has active booking/reservation ${blocking.bookingNo}. Check out or cancel the booking before allocating this room again.`);
 }
 
-async function activeOverlappingBookingsForRoom(room: any, start: Date, end: Date, excludeId?: string) {
+async function activeOverlappingBookingsForRoom(room: any, _start: Date, _end: Date, excludeId?: string) {
   const activeBookings = await prisma.housingBooking.findMany({
     where: {
       id: excludeId ? { not: excludeId } : undefined,
-      status: { in: activeBookingStatuses as any },
-      OR: [
-        { roomId: room.id },
-        { roomNumber: room.roomNumber },
+      status: { notIn: closedBookingStatuses as any },
+      AND: [
+        {
+          OR: [
+            { status: { in: activeBookingStatuses as any } },
+            { extensionStatus: { in: activeExtensionStatuses as any } },
+          ],
+        },
+        {
+          OR: [
+            { roomId: room.id },
+            { roomNumber: room.roomNumber },
+          ],
+        },
       ],
     },
     include: { room: { include: { property: true, block: true } } },
   });
   return activeBookings.filter(
-    (booking) =>
-      housingRoomMatchesBooking(room, booking) &&
-      housingDateRangesOverlap(
-        new Date(booking.checkIn),
-        booking.checkOut ? new Date(booking.checkOut) : new Date("2999-12-31T23:59:59"),
-        start,
-        end,
-      ),
+    (booking) => bookingKeepsRoomUnavailable(booking) && housingRoomMatchesBooking(room, booking),
   );
 }
 
-function housingDateRangesOverlap(startA: Date, endA: Date, startB: Date, endB: Date) {
-  return startA.getTime() <= endB.getTime() && endA.getTime() >= startB.getTime();
+function bookingKeepsRoomUnavailable(booking: { status?: string | null; extensionStatus?: string | null }) {
+  const status = String(booking.status || "").toUpperCase();
+  if (closedBookingStatuses.includes(status)) return false;
+  const extensionStatus = String(booking.extensionStatus || "").toUpperCase();
+  return activeBookingStatuses.includes(status) || activeExtensionStatuses.includes(extensionStatus);
 }
-

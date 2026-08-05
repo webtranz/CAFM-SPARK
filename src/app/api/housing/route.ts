@@ -9,6 +9,8 @@ import { syncHousingResidentToBookings } from "@/lib/housing-resident-sync";
 import { prisma } from "@/lib/prisma";
 
 const activeBookingStatuses = ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHECKED_IN"];
+const closedBookingStatuses = ["CHECKED_OUT", "REJECTED", "CANCELLED", "NO_SHOW", "TRANSFERRED"];
+const activeExtensionStatuses = ["EXTEND_PENDING", "EXTENDED"];
 const bookingStatuses = ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHECKED_IN", "CHECKED_OUT", "REJECTED", "CANCELLED", "NO_SHOW", "TRANSFERRED"];
 const bookingApprovalSteps = [
   { step: 1, level: "Housing Coordinator Review", approver: "Housing Coordinator" },
@@ -677,7 +679,7 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
   await expireRoomHolds();
   await assertNoOverlappingHold(room.id, bookingStart, bookingEnd);
   const overlappingBookings = await activeOverlappingBookingsForRoom(room, bookingStart, bookingEnd);
-  if (room.capacity <= 1 && overlappingBookings.length) {
+  if (overlappingBookings.length) {
     throw new HousingInputError(`Room already has active booking/reservation ${overlappingBookings[0].bookingNo}. Check out or cancel the booking before allocating this room again.`);
   }
   const busyBedIds = new Set(overlappingBookings.map((booking) => booking.bedId).filter(Boolean));
@@ -1057,7 +1059,14 @@ async function reconcileRoomAvailability(roomId: string) {
   if (!room || room.status === "MAINTENANCE" || room.status === "BLOCKED") return;
 
   const activeBedBookings = await prisma.housingBooking.findMany({
-    where: { roomId, status: { in: activeBookingStatuses as any } },
+    where: {
+      roomId,
+      status: { notIn: closedBookingStatuses as any },
+      OR: [
+        { status: { in: activeBookingStatuses as any } },
+        { extensionStatus: { in: activeExtensionStatuses as any } },
+      ],
+    },
     select: { bedId: true },
   });
   const activeBedIds = new Set(
@@ -1116,31 +1125,37 @@ async function assertNoOverlappingBooking(roomId: string, _start: Date, _end: Da
   if (overlap.length) throw new HousingInputError(`Room already has active booking/reservation ${overlap[0].bookingNo}. Check out or cancel the booking before allocating this room again.`);
 }
 
-async function activeOverlappingBookingsForRoom(room: any, start: Date, end: Date, excludeId?: string) {
+async function activeOverlappingBookingsForRoom(room: any, _start: Date, _end: Date, excludeId?: string) {
   const activeBookings = await prisma.housingBooking.findMany({
     where: {
       id: excludeId ? { not: excludeId } : undefined,
-      status: { in: activeBookingStatuses as any },
-      OR: [
-        { roomId: room.id },
-        { roomNumber: room.roomNumber },
+      status: { notIn: closedBookingStatuses as any },
+      AND: [
+        {
+          OR: [
+            { status: { in: activeBookingStatuses as any } },
+            { extensionStatus: { in: activeExtensionStatuses as any } },
+          ],
+        },
+        {
+          OR: [
+            { roomId: room.id },
+            { roomNumber: room.roomNumber },
+          ],
+        },
       ],
     },
     include: { room: { include: { property: true, block: true } } },
   });
-  return activeBookings.filter(
-    (booking) =>
-      housingRoomMatchesBooking(room, booking) &&
-      housingDateRangesOverlap(
-        new Date(booking.checkIn),
-        booking.checkOut ? new Date(booking.checkOut) : new Date("2999-12-31T23:59:59"),
-        start,
-        end,
-      ),
-  );
+  return activeBookings.filter((booking) => {
+    if (!bookingKeepsRoomUnavailable(booking) || !housingRoomMatchesBooking(room, booking)) return false;
+    return true;
+  });
 }
 
-function housingDateRangesOverlap(startA: Date, endA: Date, startB: Date, endB: Date) {
-  return startA.getTime() <= endB.getTime() && endA.getTime() >= startB.getTime();
+function bookingKeepsRoomUnavailable(booking: { status?: string | null; extensionStatus?: string | null }) {
+  const status = String(booking.status || "").toUpperCase();
+  if (closedBookingStatuses.includes(status)) return false;
+  const extensionStatus = String(booking.extensionStatus || "").toUpperCase();
+  return activeBookingStatuses.includes(status) || activeExtensionStatuses.includes(extensionStatus);
 }
-

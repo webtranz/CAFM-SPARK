@@ -24754,12 +24754,6 @@ function HousingOperations({
     if (dateTo && time > new Date(`${dateTo}T23:59:59`).getTime()) return false;
     return true;
   };
-  const activeBookingStatuses = new Set([
-    "APPROVED",
-    "CHECKED_IN",
-    "PENDING_APPROVAL",
-    "REQUESTED",
-  ]);
   const bookingCompany = (booking: any) =>
     booking?.companyName ||
     booking?.resident?.companyName ||
@@ -24816,7 +24810,10 @@ function HousingOperations({
     holds.filter((hold) => activeHoldForDate(hold)).map((hold) => hold.roomId),
   );
   const availableRooms = dashboardRooms.filter(
-    (room) => room.status === "AVAILABLE" && !activeHeldRoomIds.has(room.id),
+    (room) =>
+      room.status === "AVAILABLE" &&
+      !activeHeldRoomIds.has(room.id) &&
+      !housingRoomHasBlockingBooking(room, filteredBookings),
   ).length;
   const occupiedRooms = dashboardRooms.filter(
     (room) =>
@@ -24824,7 +24821,11 @@ function HousingOperations({
       Number(room.occupancy || 0) >= Number(room.capacity || 0),
   ).length;
   const vacantRooms = dashboardRooms.filter(
-    (room) => room.status === "AVAILABLE" && Number(room.occupancy || 0) === 0,
+    (room) =>
+      room.status === "AVAILABLE" &&
+      Number(room.occupancy || 0) === 0 &&
+      !activeHeldRoomIds.has(room.id) &&
+      !housingRoomHasBlockingBooking(room, filteredBookings),
   ).length;
   const blockedRooms = dashboardRooms.filter(
     (room) => room.status === "BLOCKED",
@@ -24911,9 +24912,7 @@ function HousingOperations({
     return Array.from(map.entries()).map(([name, value]) => ({ name, value }));
   };
   const companyOccupancyData = groupCount(
-    filteredBookings.filter((booking) =>
-      activeBookingStatuses.has(booking.status),
-    ),
+    filteredBookings.filter((booking) => housingBookingBlocksAvailability(booking)),
     bookingCompany,
   );
   const buildingOccupancyData = groupRooms(dashboardRooms, roomBuilding);
@@ -27840,6 +27839,17 @@ const ACTIVE_HOUSING_BOOKING_STATUSES = new Set([
   "APPROVED",
   "CHECKED_IN",
 ]);
+const CLOSED_HOUSING_BOOKING_STATUSES = new Set([
+  "CHECKED_OUT",
+  "REJECTED",
+  "CANCELLED",
+  "NO_SHOW",
+  "TRANSFERRED",
+]);
+const ACTIVE_HOUSING_EXTENSION_STATUSES = new Set([
+  "EXTEND_PENDING",
+  "EXTENDED",
+]);
 
 function parseHousingDateTime(value: unknown, fallback?: Date) {
   if (!value) return fallback ?? null;
@@ -27854,7 +27864,12 @@ function housingDateRangesOverlap(startA: Date, endA: Date, startB: Date, endB: 
 
 function housingBookingBlocksAvailability(booking: any) {
   const status = String(booking?.status || "").toUpperCase();
-  return ACTIVE_HOUSING_BOOKING_STATUSES.has(status);
+  if (CLOSED_HOUSING_BOOKING_STATUSES.has(status)) return false;
+  const extensionStatus = String(booking?.extensionStatus || "").toUpperCase();
+  return (
+    ACTIVE_HOUSING_BOOKING_STATUSES.has(status) ||
+    ACTIVE_HOUSING_EXTENSION_STATUSES.has(extensionStatus)
+  );
 }
 
 function housingBedHasActiveBooking(bed: any, bookings: any[]) {
