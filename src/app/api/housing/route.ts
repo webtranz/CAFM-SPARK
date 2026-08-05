@@ -21,6 +21,45 @@ class HousingInputError extends Error {
   status = 400;
 }
 
+function prismaErrorCode(error: unknown) {
+  return typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code?: unknown }).code || "")
+    : "";
+}
+
+function prismaErrorTargetIncludes(error: unknown, field: string) {
+  const target =
+    typeof error === "object" && error !== null && "meta" in error
+      ? (error as { meta?: { target?: unknown } }).meta?.target
+      : undefined;
+  const normalizedField = field.toLowerCase();
+  if (Array.isArray(target)) {
+    return target.some((item) => String(item).toLowerCase() === normalizedField);
+  }
+  return String(target || "").toLowerCase().includes(normalizedField);
+}
+
+function isPrismaError(error: unknown, code: string) {
+  return prismaErrorCode(error) === code;
+}
+
+function normalizeHousingSaveError(error: unknown) {
+  if (error instanceof HousingInputError) return error;
+  if (isPrismaError(error, "P2002")) {
+    if (prismaErrorTargetIncludes(error, "bookingNo")) {
+      return new HousingInputError("Booking number already exists. Save again and the system will generate the next available booking number.");
+    }
+    if (prismaErrorTargetIncludes(error, "residentNo")) {
+      return new HousingInputError("Employee ID already exists in guest profile. Select the existing guest or use a different employee ID.");
+    }
+    return new HousingInputError("A duplicate housing record already exists. Check the employee, room, bed, and booking details.");
+  }
+  if (isPrismaError(error, "P2003")) {
+    return new HousingInputError("Selected guest, room, or bed is no longer valid. Re-select the employee and available room, then save again.");
+  }
+  return error;
+}
+
 const housingSchema = z.object({
   type: z.string(),
   code: z.string().optional(),
@@ -230,11 +269,12 @@ export async function POST(request: Request) {
     await auditAction({ user, action: `HOUSING_${input.type.toUpperCase()}_CREATE`, entity: `housing_${input.type}`, entityId: result.id, details: { input, createdRecord: result } });
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
+    const normalizedError = normalizeHousingSaveError(error);
     const status =
-      typeof (error as { status?: unknown }).status === "number"
-        ? (error as { status: number }).status
+      typeof (normalizedError as { status?: unknown }).status === "number"
+        ? (normalizedError as { status: number }).status
         : 500;
-    return apiError(error, "Unable to save housing record", status);
+    return apiError(normalizedError, "Unable to save housing record", status);
   }
 }
 
@@ -577,6 +617,27 @@ async function createRoomHold(input: z.infer<typeof housingSchema>, actor: strin
   await housingHistory("hold", hold.id, actor, "Room hold created", `${hold.reason} / ${hold.status}`, { roomId: room.id });
   return hold;
 }
+
+async function nextHousingBookingNo(attempt = 0) {
+  const prefix = "HBK-";
+  const rows = await prisma.housingBooking.findMany({
+    where: { bookingNo: { startsWith: prefix } },
+    select: { bookingNo: true },
+  });
+  let highest = 0;
+  for (const row of rows) {
+    const match = /^HBK-(\d+)$/i.exec(String(row.bookingNo || "").trim());
+    if (match) highest = Math.max(highest, Number(match[1]));
+  }
+  if (!highest) highest = await prisma.housingBooking.count();
+  for (let offset = attempt + 1; offset <= attempt + 100; offset += 1) {
+    const bookingNo = `${prefix}${String(highest + offset).padStart(5, "0")}`;
+    const existing = await prisma.housingBooking.findUnique({ where: { bookingNo }, select: { id: true } });
+    if (!existing) return bookingNo;
+  }
+  return `${prefix}${Date.now()}${attempt ? `-${attempt}` : ""}`;
+}
+
 async function createBooking(input: z.infer<typeof housingSchema>, actor: string) {
   if (!input.roomId?.trim()) {
     throw new HousingInputError("Select an available room before saving the booking.");
@@ -641,67 +702,87 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
     throw new HousingInputError("Duplicate room or bed allocation is not allowed.");
   }
 
-  const count = await prisma.housingBooking.count();
-  const bookingNo = input.code || `HBK-${String(count + 1).padStart(5, "0")}`;
   const requestedStatus = bookingStatuses.includes(input.status || "") ? input.status as any : "PENDING_APPROVAL";
-  const booking = await prisma.$transaction(async (tx) => {
-    const created = await tx.housingBooking.create({
-      data: {
-        bookingNo,
-        residentId: resident?.id || input.residentId,
-        residentName: employeeName,
-        departmentCode: input.departmentCode || resident?.departmentCode || "",
-        employeeId,
-        companyName: input.companyName || resident?.companyName || input.companyId || "",
-        nationality: input.nationality || resident?.nationality || "",
-        contactNumber: input.contactNumber || input.phone || resident?.phone || "",
-        gender: occupantGender || "",
-        buildingNumber: input.buildingNumber || room.block?.name || room.property?.name || "",
-        floorNumber: input.floorNumber || room.floor,
-        roomNumber: input.roomNumber || room.roomNumber,
-        bedNumber: input.bedNumber || bed?.label || "",
-        bookingType: input.bookingType || "TEMPORARY",
-        allocationType: input.allocationType || "STANDARD",
-        roomId: room.id,
-        bedId: bed?.id,
-        checkIn: bookingStart,
-        checkOut: input.checkOut ? bookingEnd : undefined,
-        status: requestedStatus,
-        priority: (input.priority as any) || "MEDIUM",
-        requestedBy: input.requestedBy || actor,
-        approvedBy: input.approvedBy || "",
-        approvalLevel: ["APPROVED", "CHECKED_IN"].includes(requestedStatus) ? bookingApprovalSteps[3].level : bookingApprovalSteps[0].level,
-        attachmentUrls: input.attachmentUrls || "",
-        notes: input.notes || "",
-        keyHandoverBy: input.keyHandoverBy || "",
-        keyHandoverAt: input.keyHandoverAt ? new Date(input.keyHandoverAt) : undefined,
-        campIdNumber: input.campIdNumber || "",
-        campIdIssuedAt: input.campIdIssuedAt ? new Date(input.campIdIssuedAt) : undefined,
-      },
-    });
-    await tx.housingApproval.createMany({
-      data: bookingApprovalSteps.map((step) => ({
-        entity: "booking",
-        entityId: created.id,
-        bookingId: created.id,
-        level: step.level,
-        step: step.step,
-        approver: step.approver,
-        status: ["APPROVED", "CHECKED_IN"].includes(requestedStatus) ? "APPROVED" : step.step === 1 ? "PENDING" : "WAITING",
-        remarks: ["APPROVED", "CHECKED_IN"].includes(requestedStatus) ? "Approved during booking creation" : step.step === 1 ? created.notes || "" : "",
-      })),
-    });
-    await tx.housingNotification.create({
-      data: {
-        title: "Housing booking pending coordinator review",
-        message: `${created.bookingNo} for ${created.residentName} is waiting for Housing Coordinator review.`,
-        recipient: bookingApprovalSteps[0].approver,
-        severity: created.priority,
-        bookingId: created.id,
-      },
-    });
-    return created;
-  });
+  const requestedBookingNo = input.code?.trim();
+  let booking: any = null;
+  let lastCreateError: unknown = null;
+  const createAttempts = requestedBookingNo ? 1 : 5;
+  for (let attempt = 0; attempt < createAttempts; attempt += 1) {
+    const bookingNo = requestedBookingNo || (await nextHousingBookingNo(attempt));
+    try {
+      booking = await prisma.$transaction(async (tx) => {
+        const created = await tx.housingBooking.create({
+          data: {
+            bookingNo,
+            residentId: resident?.id,
+            residentName: employeeName,
+            departmentCode: input.departmentCode || resident?.departmentCode || "",
+            employeeId,
+            companyName: input.companyName || resident?.companyName || input.companyId || "",
+            nationality: input.nationality || resident?.nationality || "",
+            contactNumber: input.contactNumber || input.phone || resident?.phone || "",
+            gender: occupantGender || "",
+            buildingNumber: input.buildingNumber || room.block?.name || room.property?.name || "",
+            floorNumber: input.floorNumber || room.floor,
+            roomNumber: input.roomNumber || room.roomNumber,
+            bedNumber: input.bedNumber || bed?.label || "",
+            bookingType: input.bookingType || "TEMPORARY",
+            allocationType: input.allocationType || "STANDARD",
+            roomId: room.id,
+            bedId: bed?.id,
+            checkIn: bookingStart,
+            checkOut: input.checkOut ? bookingEnd : undefined,
+            status: requestedStatus,
+            priority: (input.priority as any) || "MEDIUM",
+            requestedBy: input.requestedBy || actor,
+            approvedBy: input.approvedBy || "",
+            approvalLevel: ["APPROVED", "CHECKED_IN"].includes(requestedStatus) ? bookingApprovalSteps[3].level : bookingApprovalSteps[0].level,
+            attachmentUrls: input.attachmentUrls || "",
+            notes: input.notes || "",
+            keyHandoverBy: input.keyHandoverBy || "",
+            keyHandoverAt: input.keyHandoverAt ? new Date(input.keyHandoverAt) : undefined,
+            campIdNumber: input.campIdNumber || "",
+            campIdIssuedAt: input.campIdIssuedAt ? new Date(input.campIdIssuedAt) : undefined,
+          },
+        });
+        await tx.housingApproval.createMany({
+          data: bookingApprovalSteps.map((step) => ({
+            entity: "booking",
+            entityId: created.id,
+            bookingId: created.id,
+            level: step.level,
+            step: step.step,
+            approver: step.approver,
+            status: ["APPROVED", "CHECKED_IN"].includes(requestedStatus) ? "APPROVED" : step.step === 1 ? "PENDING" : "WAITING",
+            remarks: ["APPROVED", "CHECKED_IN"].includes(requestedStatus) ? "Approved during booking creation" : step.step === 1 ? created.notes || "" : "",
+          })),
+        });
+        await tx.housingNotification.create({
+          data: {
+            title: "Housing booking pending coordinator review",
+            message: `${created.bookingNo} for ${created.residentName} is waiting for Housing Coordinator review.`,
+            recipient: bookingApprovalSteps[0].approver,
+            severity: created.priority,
+            bookingId: created.id,
+          },
+        });
+        return created;
+      });
+      break;
+    } catch (error) {
+      lastCreateError = error;
+      if (!requestedBookingNo && isPrismaError(error, "P2002") && prismaErrorTargetIncludes(error, "bookingNo")) {
+        continue;
+      }
+      const normalizedError = normalizeHousingSaveError(error);
+      throw normalizedError instanceof Error ? normalizedError : new Error("Unable to save housing record");
+    }
+  }
+  if (!booking) {
+    const normalizedError = normalizeHousingSaveError(lastCreateError);
+    if (normalizedError instanceof Error) throw normalizedError;
+    throw new HousingInputError("Unable to create a unique housing booking number. Please save again.");
+  }
   if (bed && ["APPROVED", "CHECKED_IN"].includes(requestedStatus)) {
     await prisma.housingBed.update({
       where: { id: bed.id },
@@ -718,7 +799,10 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
 }
 
 async function resolveResident(input: z.infer<typeof housingSchema>) {
-  if (input.residentId) return prisma.housingResident.findUnique({ where: { id: input.residentId } });
+  if (input.residentId) {
+    const resident = await prisma.housingResident.findUnique({ where: { id: input.residentId } });
+    if (resident) return resident;
+  }
   const employeeId = input.employeeId || input.residentNo;
   if (!employeeId && !(input.residentName || input.name)) return null;
   const residentNo = employeeId || `RES-${String((await prisma.housingResident.count()) + 1).padStart(5, "0")}`;
@@ -740,7 +824,7 @@ function residentData(input: z.infer<typeof housingSchema>, residentNo: string) 
     gender: input.gender || "",
     nationality: input.nationality || "",
     departmentCode: input.departmentCode || "",
-    status: input.status || "ACTIVE",
+    status: input.type === "resident" ? input.status || "ACTIVE" : "ACTIVE",
   };
 }
 
