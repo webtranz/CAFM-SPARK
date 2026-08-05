@@ -28838,14 +28838,20 @@ function HousingRoomSwapForm({
     const transferReason = String(
       formData.get("transferReason") || "Room swapped by housing operations",
     );
+    const bookingStatus = String(booking.status || "").toUpperCase();
+    const isCheckedInSwap = bookingStatus === "CHECKED_IN";
+    const swapDate = String(formData.get("swapDate") || new Date().toISOString());
     await onSubmit({
+      swapOnly: true,
       roomId,
       bedId: bedId || undefined,
-      status: "CHECKED_IN",
-      checkIn: String(formData.get("swapDate") || new Date().toISOString()),
-      keyHandoverAt: String(
-        formData.get("swapDate") || new Date().toISOString(),
-      ),
+      status: bookingStatus || undefined,
+      ...(isCheckedInSwap
+        ? {
+            checkIn: swapDate,
+            keyHandoverAt: swapDate,
+          }
+        : {}),
       buildingNumber:
         selectedRoom.block?.name ||
         selectedRoom.property?.name ||
