@@ -10550,6 +10550,28 @@ function locationOptionDetail(location: any) {
 
 type SearchableOption = { value: string; label: string };
 
+const STANDARD_HOUSING_DEPARTMENT_OPTIONS: SearchableOption[] = [
+  "KGPD",
+  "KPOD",
+  "WGP",
+  "FGP",
+  "NAGPD",
+  "SECURITY",
+  "FrPD",
+  "LOSS PREVENTION",
+  "POD",
+  "T&ESD",
+  "IT",
+  "MATERIALS",
+  "COMMUNITY SERVICES",
+  "NAGO",
+  "NA WELL",
+  "MEDICAL",
+  "TRANSIENT",
+  "OTHER",
+  "EMERGENCY",
+].map((department) => ({ value: department, label: department }));
+
 function mergeSearchableOptions(...optionGroups: SearchableOption[][]) {
   const merged = new Map<string, SearchableOption>();
   optionGroups.flat().forEach((option) => {
@@ -24668,6 +24690,7 @@ function HousingOperations({
   const housingDepartmentOptions = useMemo(
     () =>
       mergeSearchableOptions(
+        STANDARD_HOUSING_DEPARTMENT_OPTIONS,
         (departments ?? []).map((department: any) => {
           const value = String(
             department?.code || department?.departmentCode || department?.name || "",
@@ -28954,6 +28977,7 @@ function HousingBookingForm({
   const sourceDepartmentOptions = useMemo(
     () =>
       mergeSearchableOptions(
+        STANDARD_HOUSING_DEPARTMENT_OPTIONS,
         uniqueTextOptions(residents, (resident) => resident.departmentCode),
         uniqueTextOptions(bookings, (booking) => booking.departmentCode),
       ),
