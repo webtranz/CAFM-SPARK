@@ -7914,6 +7914,146 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
   printWindow.document.close();
 }
 
+const PPM_TODAY_REPORT_STATUS_FILTERS = [
+  "All",
+  "Open",
+  "Pending",
+  "In Progress",
+  "In Review",
+  "Closed",
+] as const;
+
+function ppmTodayStatusBucket(work: any) {
+  const status = workOrderStatus(work);
+  if (["CLOSED", "VERIFIED"].includes(status)) return "Closed";
+  if (isReviewReadyWorkOrder(work) || ["IN_REVIEW", "SUBMITTED"].includes(status))
+    return "In Review";
+  if (isInProgressWorkOrder(work)) return "In Progress";
+  if (isPendingAssignmentWorkOrder(work)) return "Pending";
+  if (["CANCELLED", "REJECTED"].includes(status)) return "Closed";
+  return status ? "Open" : "Pending";
+}
+
+function ppmTodayStatusCounts(rows: any[]) {
+  const counts = {
+    total: rows.length,
+    open: 0,
+    pending: 0,
+    inProgress: 0,
+    inReview: 0,
+    closed: 0,
+  };
+  rows.forEach((work) => {
+    const bucket = ppmTodayStatusBucket(work);
+    if (bucket === "Closed") counts.closed += 1;
+    else counts.open += 1;
+    if (bucket === "Pending") counts.pending += 1;
+    if (bucket === "In Progress") counts.inProgress += 1;
+    if (bucket === "In Review") counts.inReview += 1;
+  });
+  return counts;
+}
+
+function ppmTodayReportMatchesStatus(work: any, filter: string) {
+  if (!filter || filter === "All") return true;
+  if (filter === "Open") return ppmTodayStatusBucket(work) !== "Closed";
+  if (PPM_TODAY_REPORT_STATUS_FILTERS.includes(filter as any)) {
+    return ppmTodayStatusBucket(work) === filter;
+  }
+  return workOrderStatus(work) === filter.toUpperCase();
+}
+
+function downloadPpmTodayReport(rows: any[], selectedDate: string, statusFilter: string) {
+  const reportRows = rows.filter((work) =>
+    ppmTodayReportMatchesStatus(work, statusFilter),
+  );
+  const counts = ppmTodayStatusCounts(rows);
+  const selectedStatus = statusFilter || "All";
+  const columns = [
+    "No",
+    "WO No",
+    "PPM Code",
+    "Title",
+    "Status",
+    "Status Group",
+    "Department",
+    "Asset Code",
+    "Asset Description",
+    "Location",
+    "Due Date",
+    "Assigned Team",
+    "Checklist",
+  ];
+  const summaryRows = [
+    ["Report Date", selectedDate],
+    ["Status Filter", selectedStatus],
+    ["Total Preventive WOs", counts.total],
+    ["Open WOs", counts.open],
+    ["Pending", counts.pending],
+    ["In Progress", counts.inProgress],
+    ["In Review", counts.inReview],
+    ["Closed", counts.closed],
+    ["Exported Rows", reportRows.length],
+  ];
+  const bodyRows = reportRows.map((work, index) => {
+    const asset = ppmTodayAssetDetails(work, 500, 500);
+    return [
+      index + 1,
+      work.woNo ?? "",
+      workOrderPpmCode(work) || "",
+      work.title ?? "",
+      work.status ?? "",
+      ppmTodayStatusBucket(work),
+      work.departmentCode ?? "",
+      asset.code,
+      asset.description,
+      work.asset?.buildingCode || work.asset?.floor || work.location || "",
+      formatDateCell(work.dueAt),
+      work.assignedTeamCode ?? "",
+      ppmTodayChecklistItems(work).join("\n"),
+    ];
+  });
+  const table = `<!doctype html><html><head><meta charset="utf-8" /></head><body>
+    <table>
+      <thead><tr><th colspan="2">PPM Today Status Summary</th></tr></thead>
+      <tbody>${summaryRows
+        .map(
+          ([label, value]) =>
+            `<tr><th>${escapeHtml(String(label))}</th><td>${escapeHtml(
+              String(value),
+            )}</td></tr>`,
+        )
+        .join("")}</tbody>
+    </table>
+    <br/>
+    <table>
+      <thead><tr>${columns
+        .map((column) => `<th>${escapeHtml(column)}</th>`)
+        .join("")}</tr></thead>
+      <tbody>${bodyRows
+        .map(
+          (row) =>
+            `<tr>${row
+              .map((value) => `<td>${escapeHtml(String(value ?? ""))}</td>`)
+              .join("")}</tr>`,
+        )
+        .join("")}</tbody>
+    </table>
+  </body></html>`;
+  const blob = new Blob([table], {
+    type: "application/vnd.ms-excel;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const safeStatus = selectedStatus.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  link.href = url;
+  link.download = `ppm-today-${selectedDate}-${safeStatus || "all"}.xls`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function PpmTodayWorkOrders({
   role,
   updateWorkStatus,
@@ -7938,6 +8078,7 @@ function PpmTodayWorkOrders({
   const [bulkProgress, setBulkProgress] = useState<{ total: number; done: number; label: string } | null>(null);
   const [actionMessage, setActionMessage] = useState("");
   const [closingIds, setClosingIds] = useState<Set<string>>(new Set());
+  const [reportStatusFilter, setReportStatusFilter] = useState("All");
 
   const mergeUpdatedRow = (updated: any) => {
     if (!updated?.id) return;
@@ -7977,6 +8118,33 @@ function PpmTodayWorkOrders({
         .includes(text),
     );
   }, [rows, role, search]);
+
+  const statusCounts = useMemo(() => ppmTodayStatusCounts(rows), [rows]);
+  const exactStatusOptions = useMemo(
+    () => sortedUniqueStrings(rows.map((work) => work.status)),
+    [rows],
+  );
+  const reportStatusOptions = useMemo(() => {
+    const groupedOptionKeys = new Set(
+      PPM_TODAY_REPORT_STATUS_FILTERS.map((option) => option.toUpperCase()),
+    );
+    const exactOptions = exactStatusOptions.filter(
+      (status) => !groupedOptionKeys.has(status.toUpperCase()),
+    );
+    return [...PPM_TODAY_REPORT_STATUS_FILTERS, ...exactOptions];
+  }, [exactStatusOptions]);
+  const reportRows = useMemo(
+    () => rows.filter((work) => ppmTodayReportMatchesStatus(work, reportStatusFilter)),
+    [reportStatusFilter, rows],
+  );
+  const reportCountCards = [
+    { label: "Total PPM WOs", value: statusCounts.total, className: "text-ink" },
+    { label: "Open", value: statusCounts.open, className: "text-lagoon" },
+    { label: "Pending", value: statusCounts.pending, className: "text-amber-600" },
+    { label: "In Progress", value: statusCounts.inProgress, className: "text-blue-600" },
+    { label: "In Review", value: statusCounts.inReview, className: "text-purple-600" },
+    { label: "Closed", value: statusCounts.closed, className: "text-emerald-600" },
+  ];
 
   const selectedRows = useMemo(
     () => visibleRows.filter((work) => selectedIds.has(work.id)),
@@ -8210,6 +8378,58 @@ function PpmTodayWorkOrders({
             className="h-10 rounded-lg bg-ink px-4 text-sm font-black text-white disabled:bg-slate-300"
           >
             Print Preview
+          </button>
+        </div>
+        <div className="mb-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+          {reportCountCards.map((card) => (
+            <div key={card.label} className="rounded-lg border border-slate-200 bg-white p-3">
+              <p className="text-[11px] font-black uppercase text-slate-500">{card.label}</p>
+              <p className={`mt-1 text-2xl font-black ${card.className}`}>
+                {card.value.toLocaleString()}
+              </p>
+            </div>
+          ))}
+        </div>
+        <div className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="mr-auto min-w-[240px]">
+            <p className="text-xs font-black uppercase text-slate-500">PPM Today Report</p>
+            <p className="text-sm font-bold text-slate-600">
+              Download all preventive work orders for the selected day or filter by status.
+            </p>
+          </div>
+          <label className="grid min-w-[220px] gap-1 text-xs font-black uppercase text-slate-500">
+            Status
+            <select
+              value={reportStatusFilter}
+              onChange={(event) => setReportStatusFilter(event.target.value)}
+              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-ink outline-none focus:border-lagoon"
+            >
+              {reportStatusOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="rounded-lg border border-slate-200 bg-white px-4 py-2">
+            <p className="text-[11px] font-black uppercase text-slate-500">Report Rows</p>
+            <p className="text-sm font-black text-ink">{reportRows.length.toLocaleString()}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => downloadPpmTodayReport(rows, selectedDate, reportStatusFilter)}
+            disabled={!reportRows.length}
+            className="h-10 rounded-lg bg-leaf px-4 text-sm font-black text-white disabled:bg-slate-300"
+          >
+            Download Excel
+          </button>
+          <button
+            type="button"
+            onClick={() => setReportStatusFilter("All")}
+            disabled={reportStatusFilter === "All"}
+            className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon disabled:text-slate-300"
+          >
+            Whole Day
           </button>
         </div>
         <div className="mb-4 flex flex-wrap items-center gap-2">
