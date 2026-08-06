@@ -7788,6 +7788,31 @@ function localDateInputValue(value: Date | string = new Date()) {
     .slice(0, 10);
 }
 
+function normalizedPpmDateRange(fromDate: string, toDate: string) {
+  const from = fromDate || localDateInputValue();
+  const to = toDate || from;
+  return to < from ? { fromDate: to, toDate: from } : { fromDate: from, toDate: to };
+}
+
+function ppmDateRangeLabel(fromDate: string, toDate: string) {
+  return fromDate === toDate ? fromDate : `${fromDate} to ${toDate}`;
+}
+
+function ppmMonthBounds(value: string) {
+  const base = new Date(`${value || localDateInputValue()}T00:00:00`);
+  const date = Number.isNaN(base.getTime()) ? new Date() : base;
+  const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+  const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+  return {
+    monthFrom: localDateInputValue(monthStart),
+    monthTo: localDateInputValue(monthEnd),
+    monthLabel: date.toLocaleDateString(undefined, {
+      month: "long",
+      year: "numeric",
+    }),
+  };
+}
+
 function compactPpmPrintText(value: unknown, limit = 220) {
   const text = String(value ?? "-").replace(/\s+/g, " ").trim();
   if (!text) return "-";
@@ -7825,7 +7850,7 @@ function ppmTodayChecklistItems(work: any) {
   return items.length ? items : ["No checklist description provided."];
 }
 
-function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
+function printPpmTodayWorkOrders(rows: any[], periodLabel: string) {
   const printWindow = window.open("", "_blank", "width=1200,height=900");
   if (!printWindow) {
     window.alert("Allow pop-ups to print the PPM work orders.");
@@ -7867,7 +7892,7 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
   printWindow.document.write(`<!doctype html>
 <html>
 <head>
-  <title>PPM Today Checklist - ${escapeHtml(selectedDate)}</title>
+  <title>PPM Today Checklist - ${escapeHtml(periodLabel)}</title>
   <style>
     @page { size: A4 landscape; margin: 6mm; }
     * { box-sizing: border-box; }
@@ -7896,7 +7921,7 @@ function printPpmTodayWorkOrders(rows: any[], selectedDate: string) {
   <div class="top">
     <div>
       <h1>PPM Today Checklist</h1>
-      <div class="muted">Date: ${escapeHtml(selectedDate)} | Printed: ${escapeHtml(printedAt)}</div>
+      <div class="muted">Period: ${escapeHtml(periodLabel)} | Printed: ${escapeHtml(printedAt)}</div>
     </div>
     <div class="count">Total: ${rows.length.toLocaleString()}</div>
   </div>
@@ -7963,12 +7988,19 @@ function ppmTodayReportMatchesStatus(work: any, filter: string) {
   return workOrderStatus(work) === filter.toUpperCase();
 }
 
-function downloadPpmTodayReport(rows: any[], selectedDate: string, statusFilter: string) {
+function downloadPpmTodayReport(
+  rows: any[],
+  fromDate: string,
+  toDate: string,
+  statusFilter: string,
+  monthlyTotal: number,
+) {
   const reportRows = rows.filter((work) =>
     ppmTodayReportMatchesStatus(work, statusFilter),
   );
   const counts = ppmTodayStatusCounts(rows);
   const selectedStatus = statusFilter || "All";
+  const periodLabel = ppmDateRangeLabel(fromDate, toDate);
   const columns = [
     "No",
     "WO No",
@@ -7985,8 +8017,11 @@ function downloadPpmTodayReport(rows: any[], selectedDate: string, statusFilter:
     "Checklist",
   ];
   const summaryRows = [
-    ["Report Date", selectedDate],
+    ["Report From", fromDate],
+    ["Report To", toDate],
+    ["Report Period", periodLabel],
     ["Status Filter", selectedStatus],
+    ["Monthly Total PPM WOs", monthlyTotal],
     ["Total Preventive WOs", counts.total],
     ["Open WOs", counts.open],
     ["Pending", counts.pending],
@@ -8046,8 +8081,9 @@ function downloadPpmTodayReport(rows: any[], selectedDate: string, statusFilter:
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   const safeStatus = selectedStatus.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const safePeriod = periodLabel.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   link.href = url;
-  link.download = `ppm-today-${selectedDate}-${safeStatus || "all"}.xls`;
+  link.download = `ppm-today-${safePeriod}-${safeStatus || "all"}.xls`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -8067,9 +8103,15 @@ function PpmTodayWorkOrders({
   canSubmitReview: boolean;
   canCloseReview: boolean;
 }) {
-  const [selectedDate, setSelectedDate] = useState(() => localDateInputValue());
+  const [fromDate, setFromDate] = useState(() => localDateInputValue());
+  const [toDate, setToDate] = useState(() => localDateInputValue());
+  const { fromDate: reportFromDate, toDate: reportToDate } = normalizedPpmDateRange(fromDate, toDate);
+  const reportPeriodLabel = ppmDateRangeLabel(reportFromDate, reportToDate);
+  const { monthFrom, monthTo, monthLabel } = ppmMonthBounds(reportFromDate);
   const [rows, setRows] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
+  const [monthlyTotal, setMonthlyTotal] = useState(0);
+  const [monthlyLoading, setMonthlyLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -8138,7 +8180,8 @@ function PpmTodayWorkOrders({
     [reportStatusFilter, rows],
   );
   const reportCountCards = [
-    { label: "Total PPM WOs", value: statusCounts.total, className: "text-ink" },
+    { label: "Selected Range", value: statusCounts.total, className: "text-ink" },
+    { label: `Monthly Total ${monthLabel}`, value: monthlyTotal, className: "text-lagoon" },
     { label: "Open", value: statusCounts.open, className: "text-lagoon" },
     { label: "Pending", value: statusCounts.pending, className: "text-amber-600" },
     { label: "In Progress", value: statusCounts.inProgress, className: "text-blue-600" },
@@ -8316,29 +8359,54 @@ function PpmTodayWorkOrders({
           type: "All",
           assigned: "All",
           preventiveOnly: "true",
-          dueDate: selectedDate,
+          dueFrom: reportFromDate,
+          dueTo: reportToDate,
         });
+        const monthParams = new URLSearchParams({
+          page: "1",
+          pageSize: "25",
+          status: "All",
+          priority: "All",
+          category: "All",
+          department: "All",
+          type: "All",
+          assigned: "All",
+          preventiveOnly: "true",
+          dueFrom: monthFrom,
+          dueTo: monthTo,
+        });
+        setMonthlyLoading(true);
         const response = await fetch(`/api/work-orders?${params.toString()}`, {
           cache: "no-store",
           signal: controller.signal,
         });
+        const monthResponse = await fetch(`/api/work-orders?${monthParams.toString()}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
         const result = await response.json().catch(() => ({}));
+        const monthResult = await monthResponse.json().catch(() => ({}));
         if (!response.ok) {
           throw new Error(result.message || "Unable to load PPM work orders.");
         }
+        if (!monthResponse.ok) {
+          throw new Error(monthResult.message || "Unable to load monthly PPM count.");
+        }
         setRows(Array.isArray(result.workOrders) ? result.workOrders : []);
         setTotal(Number(result.total ?? result.workOrders?.length ?? 0));
+        setMonthlyTotal(Number(monthResult.total ?? monthResult.workOrders?.length ?? 0));
       } catch (error: any) {
         if (!(error instanceof DOMException && error.name === "AbortError")) {
           setError(error?.message || "Unable to load PPM work orders.");
         }
       } finally {
         if (!controller.signal.aborted) setLoading(false);
+        if (!controller.signal.aborted) setMonthlyLoading(false);
       }
     }
     void loadTodayPpmWorkOrders();
     return () => controller.abort();
-  }, [selectedDate]);
+  }, [monthFrom, monthTo, reportFromDate, reportToDate]);
 
   return (
     <section className="space-y-5">
@@ -8346,27 +8414,42 @@ function PpmTodayWorkOrders({
         <div className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-emerald-100 bg-emerald-50 p-3">
           <div className="mr-auto min-w-[260px]">
             <p className="text-xs font-black uppercase text-slate-500">
-              Preventive Work Orders By Date
+              Preventive Work Orders By Date Range
             </p>
             <p className="text-lg font-black text-ink">
-              {total.toLocaleString()} preventive WOs due on {selectedDate}
+              {total.toLocaleString()} preventive WOs from {reportPeriodLabel}
             </p>
             <p className="text-xs font-bold text-slate-500">
-              Select one or many work orders, close completed items, then print the compact checklist sheet.
+              Monthly total for {monthLabel}: {monthlyLoading ? "loading..." : monthlyTotal.toLocaleString()} generated PPM WOs.
             </p>
           </div>
           <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
-            Date
+            From Date
             <input
               type="date"
-              value={selectedDate}
-              onChange={(event) => setSelectedDate(event.target.value)}
+              value={fromDate}
+              onChange={(event) => setFromDate(event.target.value)}
+              max={toDate || undefined}
+              className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-ink outline-none focus:border-lagoon"
+            />
+          </label>
+          <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+            To Date
+            <input
+              type="date"
+              value={toDate}
+              onChange={(event) => setToDate(event.target.value)}
+              min={fromDate || undefined}
               className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-ink outline-none focus:border-lagoon"
             />
           </label>
           <button
             type="button"
-            onClick={() => setSelectedDate(localDateInputValue())}
+            onClick={() => {
+              const today = localDateInputValue();
+              setFromDate(today);
+              setToDate(today);
+            }}
             className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon"
           >
             Today
@@ -8380,7 +8463,7 @@ function PpmTodayWorkOrders({
             Print Preview
           </button>
         </div>
-        <div className="mb-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <div className="mb-4 grid gap-3 md:grid-cols-3 xl:grid-cols-7">
           {reportCountCards.map((card) => (
             <div key={card.label} className="rounded-lg border border-slate-200 bg-white p-3">
               <p className="text-[11px] font-black uppercase text-slate-500">{card.label}</p>
@@ -8394,7 +8477,7 @@ function PpmTodayWorkOrders({
           <div className="mr-auto min-w-[240px]">
             <p className="text-xs font-black uppercase text-slate-500">PPM Today Report</p>
             <p className="text-sm font-bold text-slate-600">
-              Download all preventive work orders for the selected day or filter by status.
+              Download all preventive work orders for the selected date range or filter by status.
             </p>
           </div>
           <label className="grid min-w-[220px] gap-1 text-xs font-black uppercase text-slate-500">
@@ -8417,7 +8500,7 @@ function PpmTodayWorkOrders({
           </div>
           <button
             type="button"
-            onClick={() => downloadPpmTodayReport(rows, selectedDate, reportStatusFilter)}
+            onClick={() => downloadPpmTodayReport(rows, reportFromDate, reportToDate, reportStatusFilter, monthlyTotal)}
             disabled={!reportRows.length}
             className="h-10 rounded-lg bg-leaf px-4 text-sm font-black text-white disabled:bg-slate-300"
           >
@@ -8429,7 +8512,7 @@ function PpmTodayWorkOrders({
             disabled={reportStatusFilter === "All"}
             className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon disabled:text-slate-300"
           >
-            Whole Day
+            Whole Range
           </button>
         </div>
         <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -8609,7 +8692,7 @@ function PpmTodayWorkOrders({
               {!visibleRows.length && !loading && (
                 <tr>
                   <td colSpan={13} className="px-3 py-8 text-center font-black text-slate-500">
-                    No preventive work orders found for this date.
+                    No preventive work orders found for this date range.
                   </td>
                 </tr>
               )}
@@ -8619,14 +8702,14 @@ function PpmTodayWorkOrders({
       </Panel>
       {previewOpen && (
         <RequestModalShell
-          title={`Print Preview | PPM ${selectedDate}`}
+          title={`Print Preview | PPM ${reportPeriodLabel}`}
           onClose={() => setPreviewOpen(false)}
         >
           <div className="grid gap-4">
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
               <p className="text-xs font-black uppercase text-slate-500">Compact Checklist Print Preview</p>
               <h3 className="mt-1 text-2xl font-black text-ink">
-                {rowsForPrint.length.toLocaleString()} preventive work orders due on {selectedDate}
+                {rowsForPrint.length.toLocaleString()} preventive work orders from {reportPeriodLabel}
               </h3>
               <p className="mt-1 text-sm font-bold text-slate-500">
                 {selectedRows.length ? "Printing selected work orders." : "No rows selected, printing all visible work orders."}
@@ -8685,7 +8768,7 @@ function PpmTodayWorkOrders({
               </button>
               <button
                 type="button"
-                onClick={() => printPpmTodayWorkOrders(rowsForPrint, selectedDate)}
+                onClick={() => printPpmTodayWorkOrders(rowsForPrint, reportPeriodLabel)}
                 className="h-11 rounded-lg bg-ink px-5 font-black text-white"
               >
                 Confirm & Print

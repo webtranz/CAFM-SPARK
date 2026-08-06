@@ -89,6 +89,8 @@ export async function GET(request: Request) {
   const delayedOnly = url.searchParams.get("delayedOnly") === "true";
   const preventiveOnly = url.searchParams.get("preventiveOnly") === "true";
   const dueDate = url.searchParams.get("dueDate")?.trim() || "";
+  const dueFrom = url.searchParams.get("dueFrom")?.trim() || url.searchParams.get("fromDate")?.trim() || "";
+  const dueTo = url.searchParams.get("dueTo")?.trim() || url.searchParams.get("toDate")?.trim() || "";
   const pageInput = Number(url.searchParams.get("page") || 1);
   const pageSizeParam = url.searchParams.get("pageSize") || "100";
   const pageSizeInput = pageSizeParam === "all" ? Number.MAX_SAFE_INTEGER : Number(pageSizeParam);
@@ -200,7 +202,21 @@ export async function GET(request: Request) {
       ],
     });
   }
-  if (dueDate) {
+  if (dueFrom || dueTo) {
+    const range: { gte?: Date; lt?: Date } = {};
+    if (dueFrom) {
+      const start = new Date(`${dueFrom}T00:00:00.000Z`);
+      if (!Number.isNaN(start.getTime())) range.gte = start;
+    }
+    if (dueTo) {
+      const end = new Date(`${dueTo}T00:00:00.000Z`);
+      if (!Number.isNaN(end.getTime())) {
+        end.setUTCDate(end.getUTCDate() + 1);
+        range.lt = end;
+      }
+    }
+    if (range.gte || range.lt) andFilters.push({ dueAt: range });
+  } else if (dueDate) {
     const start = new Date(`${dueDate}T00:00:00.000Z`);
     if (!Number.isNaN(start.getTime())) {
       const end = new Date(start);
