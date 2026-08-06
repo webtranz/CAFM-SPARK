@@ -616,11 +616,31 @@ async function refreshHousingPropertyRoomCount(propertyId: string) {
 }
 
 async function refreshRoomOccupancy(roomId: string) {
-  const room = await prisma.housingRoom.findUnique({ where: { id: roomId } });
+  const room = await prisma.housingRoom.findUnique({
+    where: { id: roomId },
+    include: { property: true, block: true, beds: true },
+  });
   if (!room) return;
-  const occupancy = await prisma.housingBed.count({ where: { roomId, status: { in: ["RESERVED", "OCCUPIED"] as any } } });
-  const status = room.status === "MAINTENANCE" || room.status === "BLOCKED" ? room.status : occupancy >= room.capacity ? "OCCUPIED" : occupancy > 0 ? "RESERVED" : "AVAILABLE";
-  await prisma.housingRoom.update({ where: { id: roomId }, data: { occupancy, status } });
+  const activeBookings = await activeOverlappingBookingsForRoom(
+    room,
+    new Date(0),
+    new Date("2999-12-31T23:59:59"),
+  );
+  const activeHolds = await prisma.housingRoomHold.findMany({
+    where: { roomId, status: "ACTIVE", endDate: { gte: new Date() } },
+  });
+  const nextRoomState = normalizeRoomAvailabilitySnapshot(
+    room,
+    activeBookings,
+    activeHolds,
+  );
+  await prisma.housingRoom.update({
+    where: { id: roomId },
+    data: {
+      occupancy: nextRoomState.occupancy,
+      status: nextRoomState.status as any,
+    },
+  });
 }
 
 async function reconcileRoomAvailability(roomId: string) {
@@ -919,4 +939,47 @@ function bookingKeepsRoomUnavailable(booking: { status?: string | null; extensio
   if (closedBookingStatuses.includes(status)) return false;
   const extensionStatus = String(booking.extensionStatus || "").toUpperCase();
   return activeBookingStatuses.includes(status) || activeExtensionStatuses.includes(extensionStatus);
+}
+
+function activeHoldBlocksRoom(room: any, hold: any) {
+  const holdRoomId = hold?.roomId || hold?.room?.id;
+  if (!room?.id || !holdRoomId || holdRoomId !== room.id) return false;
+  if (String(hold?.status || "").toUpperCase() !== "ACTIVE") return false;
+  const holdEnd = hold?.endDate ? new Date(String(hold.endDate)) : null;
+  if (!holdEnd || Number.isNaN(holdEnd.getTime())) return false;
+  return holdEnd.getTime() >= Date.now();
+}
+
+function normalizeRoomAvailabilitySnapshot(room: any, bookings: any[] = [], holds: any[] = []) {
+  const roomStatus = String(room?.status || "").toUpperCase();
+  const beds: any[] = Array.isArray(room?.beds) ? room.beds : [];
+  const bedOccupancy = beds.filter((bed) =>
+    ["RESERVED", "OCCUPIED"].includes(String(bed?.status || "").toUpperCase()),
+  ).length;
+  const hasOccupiedBed = beds.some(
+    (bed) => String(bed?.status || "").toUpperCase() === "OCCUPIED",
+  );
+  const activeRoomBookings = bookings.filter(
+    (booking) =>
+      bookingKeepsRoomUnavailable(booking) &&
+      housingRoomMatchesBooking(room, booking),
+  );
+  const hasCheckedInBooking = activeRoomBookings.some(
+    (booking) => String(booking?.status || "").toUpperCase() === "CHECKED_IN",
+  );
+  const hasActiveHold = holds.some((hold) => activeHoldBlocksRoom(room, hold));
+  const capacity = Number(room?.capacity || 0);
+  const occupancy = Math.min(
+    capacity || Math.max(bedOccupancy, activeRoomBookings.length),
+    Math.max(bedOccupancy, activeRoomBookings.length),
+  );
+  const status =
+    roomStatus === "MAINTENANCE" || roomStatus === "BLOCKED"
+      ? roomStatus
+      : hasCheckedInBooking || hasOccupiedBed
+        ? "OCCUPIED"
+        : activeRoomBookings.length || hasActiveHold || bedOccupancy
+          ? "RESERVED"
+          : "AVAILABLE";
+  return { ...room, occupancy, status };
 }

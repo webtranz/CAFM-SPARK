@@ -24723,6 +24723,13 @@ function HousingOperations({
   const approvals = housing?.approvals ?? [];
   const notifications = housing?.notifications ?? [];
   const holds = housing?.holds ?? [];
+  const strictHousingRooms = useMemo(
+    () =>
+      rooms.map((room: any) =>
+        housingRoomWithStrictAvailability(room, bookings, holds),
+      ),
+    [bookings, holds, rooms],
+  );
   const notificationSettings = housing?.notificationSettings ?? [];
   const history = housing?.history ?? [];
   const todayKey = new Date().toISOString().slice(0, 10);
@@ -24772,7 +24779,7 @@ function HousingOperations({
       .map((booking) => booking.roomId || booking.room?.id)
       .filter(Boolean),
   );
-  const dashboardRooms = rooms.filter(
+  const dashboardRooms = strictHousingRooms.filter(
     (room) =>
       roomMatchesLocationFilters(room) &&
       (companyFilter === "All" || companyRoomIds.has(room.id)),
@@ -24865,16 +24872,16 @@ function HousingOperations({
   const dashboardCompanies = Array.from(new Set(bookings.map(bookingCompany)))
     .filter(Boolean)
     .sort();
-  const dashboardBuildings = Array.from(new Set(rooms.map(roomBuilding)))
+  const dashboardBuildings = Array.from(new Set(strictHousingRooms.map(roomBuilding)))
     .filter(Boolean)
     .sort();
   const dashboardFloors = Array.from(
-    new Set(rooms.map((room) => String(room.floor ?? ""))),
+    new Set(strictHousingRooms.map((room) => String(room.floor ?? ""))),
   )
     .filter(Boolean)
     .sort();
   const dashboardCategories = Array.from(
-    new Set(rooms.map((room) => String(room.roomType ?? ""))),
+    new Set(strictHousingRooms.map((room) => String(room.roomType ?? ""))),
   )
     .filter(Boolean)
     .sort();
@@ -25001,7 +25008,7 @@ function HousingOperations({
       matchesDateRange
     );
   });
-  const visibleRooms = rooms.filter((room) => {
+  const visibleRooms = strictHousingRooms.filter((room) => {
     const haystack =
       `${room.code} ${room.roomNumber} ${room.property?.name} ${room.block?.name} ${room.floor} ${room.roomType} ${room.status}`.toLowerCase();
     return (
@@ -25592,7 +25599,7 @@ function HousingOperations({
             <HousingSetupForms
               properties={housing.properties ?? []}
               blocks={housing.blocks ?? []}
-              rooms={rooms}
+              rooms={strictHousingRooms}
               saving={saving}
               onSubmit={submitHousing}
             />
@@ -25630,7 +25637,7 @@ function HousingOperations({
             <HousingSetupForms
               properties={housing.properties ?? []}
               blocks={housing.blocks ?? []}
-              rooms={rooms}
+              rooms={strictHousingRooms}
               saving={saving}
               onSubmit={submitHousing}
             />
@@ -26458,7 +26465,7 @@ function HousingOperations({
       )}
 
       {activePanel === "reports" && (
-        <HousingReportsWorkspace rooms={rooms} bookings={bookings} />
+        <HousingReportsWorkspace rooms={strictHousingRooms} bookings={bookings} />
       )}
 
       {swapBooking && (
@@ -26468,7 +26475,7 @@ function HousingOperations({
         >
           <HousingRoomSwapForm
             booking={swapBooking}
-            rooms={rooms}
+            rooms={strictHousingRooms}
             beds={housing.beds ?? []}
             bookings={bookings}
             holds={holds}
@@ -26673,7 +26680,7 @@ function HousingOperations({
         >
           {createHousingForm === "booking" && (
             <HousingBookingForm
-              rooms={rooms}
+              rooms={strictHousingRooms}
               beds={housing.beds ?? []}
               residents={housing.residents ?? []}
               bookings={bookings}
@@ -26687,7 +26694,7 @@ function HousingOperations({
           )}
           {createHousingForm === "hold" && (
             <HousingHoldForm
-              rooms={rooms}
+              rooms={strictHousingRooms}
               saving={saving}
               onSubmit={async (formData) => {
                 await submitHousing(formData);
@@ -26697,7 +26704,7 @@ function HousingOperations({
           )}
           {createHousingForm === "inspection" && (
             <HousingInspectionForm
-              rooms={rooms}
+              rooms={strictHousingRooms}
               beds={housing.beds ?? []}
               bookings={bookings}
               assets={assets}
@@ -26710,7 +26717,7 @@ function HousingOperations({
           )}
           {createHousingForm === "asset" && (
             <HousingAssetForm
-              rooms={rooms}
+              rooms={strictHousingRooms}
               saving={saving}
               onSubmit={async (formData) => {
                 await submitHousing(formData);
@@ -26720,7 +26727,7 @@ function HousingOperations({
           )}
           {createHousingForm === "inventory" && (
             <HousingInventoryForm
-              rooms={rooms}
+              rooms={strictHousingRooms}
               saving={saving}
               onSubmit={async (formData) => {
                 await submitHousing(formData);
@@ -28030,6 +28037,52 @@ function housingRoomHasBlockingHold(
   });
 }
 
+function housingRoomWithStrictAvailability(
+  room: any,
+  bookings: any[],
+  holds: any[],
+) {
+  const storedStatus = String(room?.status || "").toUpperCase();
+  const beds = Array.isArray(room?.beds) ? room.beds : [];
+  const bedOccupancy = beds.filter((bed: any) =>
+    ["RESERVED", "OCCUPIED"].includes(String(bed?.status || "").toUpperCase()),
+  ).length;
+  const hasOccupiedBed = beds.some(
+    (bed: any) => String(bed?.status || "").toUpperCase() === "OCCUPIED",
+  );
+  const blockingBookings = bookings.filter(
+    (booking) =>
+      housingBookingBlocksAvailability(booking) &&
+      housingRoomMatchesBooking(room, booking),
+  );
+  const hasCheckedInBooking = blockingBookings.some(
+    (booking) => String(booking?.status || "").toUpperCase() === "CHECKED_IN",
+  );
+  const hasActiveHold = holds.some((hold) => {
+    const holdRoomId = hold?.roomId || hold?.room?.id;
+    if (!room?.id || !holdRoomId || holdRoomId !== room.id) return false;
+    if (String(hold?.status || "").toUpperCase() !== "ACTIVE") return false;
+    const holdEnd = parseHousingDateTime(
+      hold?.endDate,
+      new Date("2999-12-31T23:59:59"),
+    );
+    return Boolean(holdEnd && holdEnd.getTime() >= Date.now());
+  });
+  const usedCapacity = Math.max(bedOccupancy, blockingBookings.length);
+  const capacity = Number(room?.capacity || 0);
+  const occupancy = Math.min(capacity || usedCapacity, usedCapacity);
+  const status =
+    storedStatus === "MAINTENANCE" || storedStatus === "BLOCKED"
+      ? storedStatus
+      : hasCheckedInBooking || hasOccupiedBed
+        ? "OCCUPIED"
+        : blockingBookings.length || hasActiveHold || bedOccupancy
+          ? "RESERVED"
+          : "AVAILABLE";
+
+  return { ...room, occupancy, status };
+}
+
 function housingRoomIsBookable(
   room: any,
   bookings: any[],
@@ -28037,12 +28090,14 @@ function housingRoomIsBookable(
   windowStart: Date,
   windowEnd: Date,
 ) {
-  const roomStatus = String(room.status || "").toUpperCase();
-  const capacity = Number(room.capacity || 0);
+  const strictRoom = housingRoomWithStrictAvailability(room, bookings, holds);
+  const roomStatus = String(strictRoom.status || "").toUpperCase();
+  const capacity = Number(strictRoom.capacity || 0);
   if (capacity <= 0) return false;
   if (roomStatus !== "AVAILABLE") return false;
-  if (housingRoomHasBlockingHold(room, holds, windowStart, windowEnd)) return false;
-  if (housingRoomHasBlockingBooking(room, bookings)) return false;
+  if (housingRoomHasBlockingHold(strictRoom, holds, windowStart, windowEnd))
+    return false;
+  if (housingRoomHasBlockingBooking(strictRoom, bookings)) return false;
   return true;
 }
 
