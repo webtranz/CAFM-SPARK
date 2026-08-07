@@ -25466,6 +25466,11 @@ function HousingOperations({
     isAdmin ||
     normalizedHousingRole.includes("helpdesk") ||
     normalizedHousingRole.includes("help desk");
+  const canCancelReservation = (booking: any) => {
+    const bookingStatus = String(booking?.status || "").toUpperCase();
+    const bedStatus = String(booking?.bed?.status || "").toUpperCase();
+    return canOperateBookings && (bookingStatus === "APPROVED" || bedStatus === "RESERVED");
+  };
   const approvalLevelKey = (value: unknown) =>
     String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
   const currentApprovalFor = (booking: any) => {
@@ -26223,7 +26228,7 @@ function HousingOperations({
                         Check-in Today
                       </button>
                     )}
-                    {!["CHECKED_OUT", "CANCELLED", "REJECTED", "NO_SHOW"].includes(record.status) && (
+                    {canCancelReservation(record) && (
                       <button
                         type="button"
                         onClick={(event) => {
@@ -28956,6 +28961,7 @@ function HousingCancelBookingForm({
 }) {
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
 
   async function submitCancellation() {
     const trimmedReason = reason.trim();
@@ -28963,10 +28969,10 @@ function HousingCancelBookingForm({
       setError("Cancellation reason is required.");
       return;
     }
-    const confirmed = window.confirm(
-      `Cancel reservation ${booking.bookingNo || booking.residentName || ""}? This will release the reserved room/bed.`,
-    );
-    if (!confirmed) return;
+    if (!confirmed) {
+      setError("Confirm that this approved/reserved reservation should be cancelled.");
+      return;
+    }
     try {
       setError("");
       await onSubmit({
@@ -28988,8 +28994,8 @@ function HousingCancelBookingForm({
   return (
     <div className="grid gap-4 rounded-lg border border-white/80 bg-white p-5 shadow-lift">
       <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-black text-amber-800">
-        Confirm before cancelling. The room and bed will be released only after
-        the cancellation is saved.
+        This will cancel the approved/reserved-bed reservation and release the
+        assigned room/bed. Enter the reason and confirm before saving.
       </p>
       <div className="grid gap-3 md:grid-cols-2">
         <PreviewField label="Booking" value={booking.bookingNo} />
@@ -29026,6 +29032,25 @@ function HousingCancelBookingForm({
           }`}
         />
       </label>
+      <label
+        className={`flex items-start gap-3 rounded-lg border p-3 text-sm font-bold ${
+          error && !confirmed ? "border-coral bg-red-50" : "border-slate-200 bg-slate-50"
+        }`}
+      >
+        <input
+          type="checkbox"
+          checked={confirmed}
+          onChange={(event) => {
+            setConfirmed(event.target.checked);
+            if (error) setError("");
+          }}
+          className="mt-1 h-4 w-4"
+        />
+        <span>
+          I confirm this reservation should be cancelled and the cancellation
+          reason is correct.
+        </span>
+      </label>
       {error ? (
         <p className="rounded-lg bg-coral/10 px-3 py-2 text-sm font-black text-coral">
           {error}
@@ -29037,7 +29062,7 @@ function HousingCancelBookingForm({
         onClick={submitCancellation}
         className="h-11 rounded-lg bg-coral px-4 font-black text-white disabled:bg-slate-300"
       >
-        Confirm Cancellation
+        Cancel Reservation
       </button>
     </div>
   );

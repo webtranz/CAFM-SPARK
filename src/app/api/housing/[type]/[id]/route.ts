@@ -87,6 +87,13 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     }
     const current = await prisma.housingBooking.findUnique({ where: { id }, include: { bed: true, room: true } });
     if (!current) throw new Error("Booking not found.");
+    if (isCancellation) {
+      const currentStatus = String(current.status || "").toUpperCase();
+      const currentBedStatus = String(current.bed?.status || "").toUpperCase();
+      if (currentStatus !== "APPROVED" && currentBedStatus !== "RESERVED") {
+        throw new HousingInputError("Only approved/reserved bed reservations can be cancelled. Checked-in bookings must be checked out instead.");
+      }
+    }
     const role = String(user?.role || "").toLowerCase();
     const requestedRoomId = text(input.roomId);
     const nextRoomId = requestedRoomId || current.roomId;
