@@ -687,11 +687,21 @@ function housingInvalidFieldsFromMessage(message: string) {
   }
   if (
     lower.includes("room") ||
-    lower.includes("bed") ||
     lower.includes("hold") ||
     lower.includes("allocation")
   ) {
     fields.add("roomId");
+  }
+  if (lower.includes("bed") || lower.includes("duplicate room or bed")) {
+    fields.add("bedId");
+  }
+  if (lower.includes("gender-restricted") || lower.includes("male and female")) {
+    fields.add("gender");
+    fields.add("roomId");
+  }
+  if (lower.includes("blacklisted occupants")) {
+    fields.add("employeeId");
+    fields.add("residentName");
   }
   if (lower.includes("cancellation reason") || lower.includes("cancel reason")) {
     fields.add("cancellationReason");
@@ -706,9 +716,19 @@ function housingClearInvalidFields(form: HTMLFormElement) {
 }
 
 function housingClearInvalidField(field: HTMLElement) {
-  field.classList.remove(...HOUSING_INVALID_FIELD_CLASSES);
-  field.removeAttribute("data-housing-field-invalid");
-  field.removeAttribute("aria-invalid");
+  const targets = [
+    field,
+    ...Array.from(
+      field.querySelectorAll<HTMLElement>(
+        "input:not([type='hidden']), select, textarea",
+      ),
+    ),
+  ];
+  targets.forEach((target) => {
+    target.classList.remove(...HOUSING_INVALID_FIELD_CLASSES);
+    target.removeAttribute("data-housing-field-invalid");
+    target.removeAttribute("aria-invalid");
+  });
 }
 
 function housingFieldTargets(form: HTMLFormElement, name: string) {
@@ -726,15 +746,34 @@ function housingFieldTargets(form: HTMLFormElement, name: string) {
 function housingMarkInvalidFields(form: HTMLFormElement, fieldNames: string[]) {
   housingClearInvalidFields(form);
   const names = Array.from(new Set(fieldNames.filter(Boolean)));
-  names.forEach((name) => {
-    housingFieldTargets(form, name).forEach((field) => {
-      field.classList.add(...HOUSING_INVALID_FIELD_CLASSES);
-      field.setAttribute("data-housing-field-invalid", "true");
-      field.setAttribute("aria-invalid", "true");
+  const markField = (field: HTMLElement) => {
+    const targets = [
+      field,
+      ...Array.from(
+        field.querySelectorAll<HTMLElement>(
+          "input:not([type='hidden']), select, textarea",
+        ),
+      ),
+    ];
+    targets.forEach((target) => {
+      target.classList.add(...HOUSING_INVALID_FIELD_CLASSES);
+      target.setAttribute("data-housing-field-invalid", "true");
+      target.setAttribute("aria-invalid", "true");
     });
+  };
+  names.forEach((name) => {
+    housingFieldTargets(form, name).forEach(markField);
   });
   const firstInvalid = names
     .flatMap((name) => housingFieldTargets(form, name))
+    .flatMap((field) => [
+      field,
+      ...Array.from(
+        field.querySelectorAll<HTMLElement>(
+          "input:not([type='hidden']), select, textarea",
+        ),
+      ),
+    ])
     .find((field) => field instanceof HTMLElement);
   firstInvalid?.focus();
 }
