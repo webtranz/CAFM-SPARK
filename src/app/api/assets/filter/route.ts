@@ -241,6 +241,7 @@ export async function GET(request: Request) {
   const hierarchyBuilding = url.searchParams.get("hierarchyBuilding")?.trim() || "";
   const hierarchyFloor = url.searchParams.get("hierarchyFloor")?.trim() || "";
   const hierarchyRoom = url.searchParams.get("hierarchyRoom")?.trim() || "";
+  const includeLocationCounts = url.searchParams.get("includeLocationCounts") !== "false";
   const classValue = url.searchParams.get("class")?.trim() || "";
   const status = url.searchParams.get("status")?.trim() || "";
   const pageInput = Number(url.searchParams.get("page") || 1);
@@ -358,13 +359,17 @@ export async function GET(request: Request) {
     ...(role === "supervisor" || role === "technician" ? { departmentCode: { in: userDepartments.length ? userDepartments : ["__none__"] } } : {}),
   };
   const [allTotal, total, locationGroups, assets] = await Promise.all([
-    prisma.asset.count({ where: locationCountWhere }),
+    includeLocationCounts
+      ? prisma.asset.count({ where: locationCountWhere })
+      : Promise.resolve(undefined),
     prisma.asset.count({ where }),
-    prisma.asset.groupBy({
-      by: ["locationCode"],
-      where: locationCountWhere,
-      _count: { _all: true },
-    }),
+    includeLocationCounts
+      ? prisma.asset.groupBy({
+          by: ["locationCode"],
+          where: locationCountWhere,
+          _count: { _all: true },
+        })
+      : Promise.resolve([]),
     prisma.asset.findMany({
       where,
       skip: (page - 1) * pageSize,
@@ -376,7 +381,7 @@ export async function GET(request: Request) {
     counts[item.locationCode || "Unassigned"] = item._count._all;
     return counts;
   }, {});
-  return NextResponse.json({ assets, allTotal, total, locationCounts, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
+  return NextResponse.json({ assets, allTotal: allTotal ?? total, total, locationCounts, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
 }
 
 export async function HEAD() {

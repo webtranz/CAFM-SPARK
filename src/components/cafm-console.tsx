@@ -1591,7 +1591,7 @@ export function CafmConsole({
         ? `Service request ${result.ticketNo} created and saved.`
         : cleanMessage(result.message ?? "Service request failed."),
     );
-    if (response.ok) await refreshData();
+    if (response.ok) mergeServiceRequestRecord(result);
     setSaving(false);
   }
 
@@ -1609,20 +1609,7 @@ export function CafmConsole({
         ? `Work order ${result.woNo} created and saved.`
         : cleanMessage(result.message ?? "Work order failed."),
     );
-    if (response.ok) {
-      setRecords((current) => ({
-        ...current,
-        workOrders: [
-          result,
-          ...current.workOrders.filter((work) => work.id !== result.id),
-        ],
-        workOrdersTotal: Math.max(
-          current.workOrdersTotal ?? 0,
-          current.workOrders.length + 1,
-        ),
-      }));
-      await refreshData();
-    }
+    if (response.ok) mergeWorkOrderRecord(result);
     setSaving(false);
   }
 
@@ -1795,7 +1782,6 @@ export function CafmConsole({
             (response.ok ? "Bulk upload complete." : "Bulk upload failed."),
         ),
       );
-      await refreshData();
       await refreshUploadedModule(module);
       setBulkUploadProgress(null);
     } catch (error) {
@@ -1818,6 +1804,8 @@ export function CafmConsole({
         spaces: { path: "/api/spaces", key: "spaces" },
         locations: { path: "/api/locations", key: "locations" },
         requests: { path: "/api/service-requests", key: "requests" },
+        assets: { path: "/api/assets/filter", key: "assets" },
+        workOrders: { path: "/api/work-orders", key: "workOrders" },
         ppm: { path: "/api/ppm", key: "ppms" },
       };
     const endpoint = endpoints[module];
@@ -1833,6 +1821,9 @@ export function CafmConsole({
       [endpoint.key]: nextRows,
       ...(module === "ppm"
         ? { ppmsTotal: result.total ?? nextRows.length }
+        : {}),
+      ...(module === "workOrders"
+        ? { workOrdersTotal: result.total ?? nextRows.length }
         : {}),
     }));
   }
@@ -1903,12 +1894,22 @@ export function CafmConsole({
 
   function mergeServiceRequestRecord(updated: any) {
     if (!updated?.id) return;
-    setRecords((current) => ({
-      ...current,
-      requests: current.requests.map((request) =>
-        request.id === updated.id ? { ...request, ...updated } : request,
-      ),
-    }));
+    const stamped = {
+      ...updated,
+      updatedAt: updated.updatedAt || new Date().toISOString(),
+      clientActivityAt: new Date().toISOString(),
+    };
+    setRecords((current) => {
+      const exists = current.requests.some((request) => request.id === updated.id);
+      return {
+        ...current,
+        requests: exists
+          ? current.requests.map((request) =>
+              request.id === updated.id ? { ...request, ...stamped } : request,
+            )
+          : [stamped, ...current.requests],
+      };
+    });
   }
 
   async function updateWorkOrderRecord(id: string, formData: FormData) {
@@ -2001,7 +2002,13 @@ export function CafmConsole({
         ? `${deleted} assets deleted. ${failed} failed: ${results.find((result) => !result.ok)?.message}`
         : `${deleted} assets deleted.`,
     );
-    if (deleted) await refreshData();
+    if (deleted) {
+      const deletedIds = new Set(ids);
+      setRecords((current) => ({
+        ...current,
+        assets: current.assets.filter((asset) => !deletedIds.has(asset.id)),
+      }));
+    }
     setSaving(false);
   }
 
@@ -2046,7 +2053,17 @@ export function CafmConsole({
             ? `${deleted} work orders deleted. ${failed} failed: ${results.find((result) => !result.ok)?.message}`
             : `${deleted} work orders deleted.`,
         );
-      if (deleted && refresh) await refreshData();
+      if (deleted && refresh) {
+        const deletedIds = new Set(ids);
+        setRecords((current) => ({
+          ...current,
+          workOrders: current.workOrders.filter((work) => !deletedIds.has(work.id)),
+          workOrdersTotal:
+            current.workOrdersTotal === undefined
+              ? undefined
+              : Math.max(0, current.workOrdersTotal - deleted),
+        }));
+      }
       return { deleted, failed, results };
     } finally {
       setSaving(false);
@@ -2076,7 +2093,23 @@ export function CafmConsole({
         ? `Work order ${result.woNo} created from request.`
         : cleanMessage(result.message ?? "Conversion failed."),
     );
-    if (response.ok) await refreshData();
+    if (response.ok) {
+      mergeWorkOrderRecord(result);
+      setRecords((current) => ({
+        ...current,
+        requests: current.requests.map((request) =>
+          request.id === id
+            ? {
+                ...request,
+                status: "ASSIGNED",
+                workOrderId: result.id,
+                workOrder: result,
+                updatedAt: new Date().toISOString(),
+              }
+            : request,
+        ),
+      }));
+    }
     setSaving(false);
   }
 
@@ -11423,6 +11456,7 @@ function ServiceRequestForm({
       locationQuery: selectedCode,
       strictLocation: "true",
       pageSize: "all",
+      includeLocationCounts: "false",
     });
     const parsedLocation = selectedParsedHierarchy(selectedCode, selectedLocation);
     const hierarchySite = selectedLocation?.site || parsedLocation.site;
@@ -19114,13 +19148,23 @@ function ScrollableRowsTable({
     () => applyExcelTableFilters(rows, columns, excelFilters, excelSort),
     [rows, columns, excelFilters, excelSort],
   );
-  const visibleRows = filteredRows.slice(0, visibleCount);
   const rowKey = (row: any, index: number) =>
     String(row.id ?? row.reference ?? row.title ?? index);
-  const visibleRowKeys = visibleRows.map((row, index) => rowKey(row, index));
-  const selectedRows = filteredRows.filter((row, index) =>
-    selectedRowKeys.has(rowKey(row, index)),
+  const filteredEntries = useMemo(
+    () =>
+      filteredRows.map((row, index) => ({
+        row,
+        index,
+        key: rowKey(row, index),
+      })),
+    [filteredRows],
   );
+  const visibleEntries = filteredEntries.slice(0, visibleCount);
+  const visibleRows = visibleEntries.map((entry) => entry.row);
+  const visibleRowKeys = visibleEntries.map((entry) => entry.key);
+  const selectedRows = filteredEntries
+    .filter((entry) => selectedRowKeys.has(entry.key))
+    .map((entry) => entry.row);
   const selectedVisibleKeys = visibleRowKeys.filter((key) =>
     selectedRowKeys.has(key),
   );
@@ -19165,8 +19209,7 @@ function ScrollableRowsTable({
   function toggleVisibleRows(checked: boolean) {
     setSelectedRowKeys((current) => {
       const next = new Set(current);
-      visibleRows.forEach((row, index) => {
-        const key = rowKey(row, index);
+      visibleEntries.forEach(({ key }) => {
         if (checked) next.add(key);
         else next.delete(key);
       });
@@ -19213,7 +19256,7 @@ function ScrollableRowsTable({
     const target = Math.ceil((filteredRows.length * percent) / 100);
     setSelectedRowKeys(
       new Set(
-        filteredRows.slice(0, target).map((row, index) => rowKey(row, index)),
+        filteredEntries.slice(0, target).map((entry) => entry.key),
       ),
     );
   }
@@ -19345,8 +19388,7 @@ function ScrollableRowsTable({
             </tr>
           </thead>
           <tbody>
-            {visibleRows.map((row, index) => {
-              const key = rowKey(row, index);
+            {visibleEntries.map(({ row, key, index }) => {
               return (
                 <tr
                   key={key}
@@ -31568,16 +31610,22 @@ function applyExcelTableFilters<T>(
   sort: ExcelSort,
   getValue?: (row: T, key: string) => unknown,
 ) {
-  const filtered = rows.filter((row) =>
-    columns.every(([key]) => {
+  const activeFilterSets = columns
+    .map(([key]) => {
       const selected = filters[key];
-      if (!selected) return true;
-      const value = excelCellText(
-        getValue ? getValue(row, key) : (row as any)[key],
-      );
-      return selected.includes(value);
-    }),
-  );
+      return Array.isArray(selected) ? ([key, new Set(selected)] as const) : null;
+    })
+    .filter((entry): entry is readonly [string, Set<string>] => Boolean(entry));
+  const filtered = activeFilterSets.length
+    ? rows.filter((row) =>
+        activeFilterSets.every(([key, selected]) => {
+          const value = excelCellText(
+            getValue ? getValue(row, key) : (row as any)[key],
+          );
+          return selected.has(value);
+        }),
+      )
+    : rows;
   if (!sort) return filtered;
   return [...filtered].sort((left, right) => {
     const leftValue = excelCellText(
@@ -31884,7 +31932,6 @@ function DataTable({
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const startIndex = (currentPage - 1) * PAGE_SIZE;
-  const visibleRows = filteredRows.slice(startIndex, startIndex + PAGE_SIZE);
   const rowKey = (row: any, index: number) =>
     String(
       row.id ??
@@ -31895,12 +31942,23 @@ function DataTable({
         row.woNo ??
         index,
     );
-  const visibleRowKeys = visibleRows.map((row, index) =>
-    rowKey(row, startIndex + index),
+  const filteredEntries = useMemo(
+    () =>
+      filteredRows.map((row, index) => ({
+        row,
+        index,
+        key: rowKey(row, index),
+      })),
+    [filteredRows],
   );
-  const selectedRows = rows.filter((row, index) =>
-    selectedRowKeys.has(rowKey(row, index)),
+  const visibleEntries = filteredEntries.slice(
+    startIndex,
+    startIndex + PAGE_SIZE,
   );
+  const visibleRowKeys = visibleEntries.map((entry) => entry.key);
+  const selectedRows = filteredEntries
+    .filter((entry) => selectedRowKeys.has(entry.key))
+    .map((entry) => entry.row);
   const selectedVisibleKeys = visibleRowKeys.filter((key) =>
     selectedRowKeys.has(key),
   );
@@ -31938,8 +31996,7 @@ function DataTable({
   function toggleVisibleRows(checked: boolean) {
     setSelectedRowKeys((current) => {
       const next = new Set(current);
-      visibleRows.forEach((row, index) => {
-        const key = rowKey(row, startIndex + index);
+      visibleEntries.forEach(({ key }) => {
         if (checked) next.add(key);
         else next.delete(key);
       });
@@ -31983,9 +32040,9 @@ function DataTable({
       }
       return;
     }
-    const target = Math.ceil((rows.length * percent) / 100);
+    const target = Math.ceil((filteredEntries.length * percent) / 100);
     setSelectedRowKeys(
-      new Set(rows.slice(0, target).map((row, index) => rowKey(row, index))),
+      new Set(filteredEntries.slice(0, target).map((entry) => entry.key)),
     );
   }
 
@@ -32122,30 +32179,25 @@ function DataTable({
             </tr>
           </thead>
           <tbody>
-            {visibleRows.map((row, index) => (
+            {visibleEntries.map(({ row, key, index }) => (
               <tr
-                key={row.id ?? index}
-                aria-selected={selectedRowKeys.has(rowKey(row, startIndex + index))}
+                key={key}
+                aria-selected={selectedRowKeys.has(key)}
                 className="border-t border-slate-100"
               >
                 {bulkSelectable && (
                   <td className="whitespace-nowrap px-3 py-3">
                     <input
                       type="checkbox"
-                      checked={selectedRowKeys.has(
-                        rowKey(row, startIndex + index),
-                      )}
+                      checked={selectedRowKeys.has(key)}
                       onChange={(event) =>
-                        toggleRow(
-                          rowKey(row, startIndex + index),
-                          event.target.checked,
-                        )
+                        toggleRow(key, event.target.checked)
                       }
                     />
                   </td>
                 )}
                 <td className="whitespace-nowrap px-3 py-3 font-black text-slate-500">
-                  {startIndex + index + 1}
+                  {index + 1}
                 </td>
                 {columns.map(([key]) => (
                   <td
@@ -32192,6 +32244,19 @@ function PaginationControls({
     return (
       <p className="text-sm font-bold text-slate-500">No entries found.</p>
     );
+  const pageItems: Array<number | string> =
+    totalPages <= 9
+      ? Array.from({ length: totalPages }, (_, index) => index + 1)
+      : (() => {
+          const items: Array<number | string> = [1];
+          const start = Math.max(2, page - 2);
+          const end = Math.min(totalPages - 1, page + 2);
+          if (start > 2) items.push("start-ellipsis");
+          for (let item = start; item <= end; item += 1) items.push(item);
+          if (end < totalPages - 1) items.push("end-ellipsis");
+          items.push(totalPages);
+          return items;
+        })();
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-slate-50 p-3">
@@ -32208,8 +32273,8 @@ function PaginationControls({
         >
           Previous
         </button>
-        {Array.from({ length: totalPages }, (_, index) => index + 1).map(
-          (item) => (
+        {pageItems.map((item) =>
+          typeof item === "number" ? (
             <button
               type="button"
               key={item}
@@ -32218,6 +32283,13 @@ function PaginationControls({
             >
               {item}
             </button>
+          ) : (
+            <span
+              key={item}
+              className="flex h-9 min-w-9 items-center justify-center px-2 text-sm font-black text-slate-400"
+            >
+              ...
+            </span>
           ),
         )}
         <button

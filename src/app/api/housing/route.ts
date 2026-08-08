@@ -258,11 +258,72 @@ export async function GET() {
     prisma.housingRoomHold.findMany({ include: { room: { include: { property: true, block: true } } }, orderBy: [{ status: "asc" }, { startDate: "desc" }] }),
   ]);
 
+  const bookingIndex = indexHousingRows(
+    bookings.filter((booking) => bookingKeepsRoomUnavailable(booking)),
+    bookingRoomLookupKeys,
+  );
+  const holdIndex = indexHousingRows(holds, (hold) => [
+    hold?.roomId,
+    hold?.room?.id,
+  ]);
   const normalizedRooms = rooms.map((room) =>
-    normalizeRoomAvailabilitySnapshot(room, bookings, holds),
+    normalizeRoomAvailabilitySnapshot(
+      room,
+      collectIndexedHousingRows(bookingIndex, housingRoomLookupKeys(room)),
+      collectIndexedHousingRows(holdIndex, [room?.id]),
+    ),
   );
 
   return NextResponse.json({ properties, blocks, rooms: normalizedRooms, beds, residents, bookings, inspections, assets, inventory, approvals, notifications, notificationSettings, history, holds });
+}
+
+function addIndexedHousingRow<T>(index: Map<string, T[]>, key: unknown, row: T) {
+  const normalizedKey = compactHousingToken(key);
+  if (!normalizedKey) return;
+  const existing = index.get(normalizedKey);
+  if (existing) existing.push(row);
+  else index.set(normalizedKey, [row]);
+}
+
+function indexHousingRows<T>(
+  rows: T[],
+  keysForRow: (row: T) => unknown[],
+) {
+  const index = new Map<string, T[]>();
+  rows.forEach((row) => {
+    keysForRow(row).forEach((key) => addIndexedHousingRow(index, key, row));
+  });
+  return index;
+}
+
+function collectIndexedHousingRows<T>(index: Map<string, T[]>, keys: unknown[]) {
+  const seen = new Set<string>();
+  const rows: T[] = [];
+  keys.forEach((key) => {
+    const indexedRows = index.get(compactHousingToken(key)) || [];
+    indexedRows.forEach((row: any) => {
+      const rowKey = String(row?.id || row?.bookingNo || row?.code || rows.length);
+      if (seen.has(rowKey)) return;
+      seen.add(rowKey);
+      rows.push(row);
+    });
+  });
+  return rows;
+}
+
+function housingRoomLookupKeys(room: any) {
+  return [room?.id, room?.code, room?.roomNumber];
+}
+
+function bookingRoomLookupKeys(booking: any) {
+  return [
+    booking?.roomId,
+    booking?.room?.id,
+    booking?.room?.code,
+    booking?.roomCode,
+    booking?.roomNumber,
+    booking?.room?.roomNumber,
+  ];
 }
 
 export async function POST(request: Request) {
