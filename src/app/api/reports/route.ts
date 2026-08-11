@@ -444,6 +444,60 @@ function generatedWorkOrderType(row: { type: string; title: string; jobPlan: str
   if (text.includes("corrective") || text.includes("reactive") || text.includes("repair")) return "Corrective";
   return "Other";
 }
+
+const housingReportActiveBookingStatuses = ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHECKED_IN", "RESERVED"];
+const housingReportClosedBookingStatuses = ["CHECKED_OUT", "REJECTED", "CANCELLED", "CANCELED", "NO_SHOW", "TRANSFERRED"];
+const housingReportActiveExtensionStatuses = ["EXTEND_PENDING", "EXTENDED"];
+
+function housingReportBookingBlocksAvailability(booking: { status?: string | null; extensionStatus?: string | null }) {
+  const status = String(booking.status || "").toUpperCase();
+  if (housingReportClosedBookingStatuses.includes(status)) return false;
+  const extensionStatus = String(booking.extensionStatus || "").toUpperCase();
+  return (
+    housingReportActiveBookingStatuses.includes(status) ||
+    housingReportActiveExtensionStatuses.includes(extensionStatus)
+  );
+}
+
+function housingReportHoldIsActive(hold: { status?: string | null; startDate?: Date | null; endDate?: Date | null }) {
+  if (String(hold.status || "").toUpperCase() !== "ACTIVE") return false;
+  const holdStart = hold.startDate ? new Date(hold.startDate) : null;
+  const holdEnd = hold.endDate ? new Date(hold.endDate) : null;
+  if (!holdEnd || Number.isNaN(holdEnd.getTime())) return false;
+  const now = Date.now();
+  if (holdStart && !Number.isNaN(holdStart.getTime()) && holdStart.getTime() > now) return false;
+  return holdEnd.getTime() >= now;
+}
+
+function housingReportRoomSnapshot(
+  room: { status?: string | null; capacity?: number | null; occupancy?: number | null; beds?: { status?: string | null }[] },
+  bookingState: { active: number; checkedIn: number } | undefined,
+  hasActiveHold: boolean,
+) {
+  const storedStatus = String(room.status || "").toUpperCase();
+  const beds = Array.isArray(room.beds) ? room.beds : [];
+  const bedOccupancy = beds.filter((bed) =>
+    ["RESERVED", "OCCUPIED"].includes(String(bed.status || "").toUpperCase()),
+  ).length;
+  const hasOccupiedBed = beds.some((bed) => String(bed.status || "").toUpperCase() === "OCCUPIED");
+  const activeBookings = bookingState?.active ?? 0;
+  const checkedInBookings = bookingState?.checkedIn ?? 0;
+  const usedCapacity = Math.max(bedOccupancy, activeBookings, Number(room.occupancy || 0));
+  const capacity = Number(room.capacity || 0);
+  const occupancy = Math.min(capacity || usedCapacity, usedCapacity);
+  const status =
+    storedStatus === "MAINTENANCE" || storedStatus === "BLOCKED"
+      ? storedStatus
+      : hasActiveHold
+        ? "HOLD"
+        : checkedInBookings || hasOccupiedBed
+          ? "OCCUPIED"
+          : activeBookings || bedOccupancy
+            ? "RESERVED"
+            : "AVAILABLE";
+  return { occupancy, status };
+}
+
 async function housingReportRows(type: string, filters: ReturnType<typeof reportFilters>): Promise<ReportRow[]> {
   if (type === "housing-dashboard") {
     const [rooms, bookings, inspections, assets, inventory, approvals, notifications] = await Promise.all([
@@ -514,9 +568,52 @@ async function housingReportRows(type: string, filters: ReturnType<typeof report
     return applyHousingFilters([...metricRows, ...companyRows, ...buildingRows, ...categoryRows], filters);
   }
   if (["housing-rooms", "housing-room-utilization", "housing-room-readiness"].includes(type)) {
-    const rows = await prisma.housingRoom.findMany({ include: { property: true, block: true, beds: true }, orderBy: { roomNumber: "asc" } });
-    const mapped = rows.map((row) => ({ code: row.code, property: row.property.name, building: row.block?.name ?? row.property.name, block: row.block?.name ?? "", floor: row.floor, room: row.roomNumber, roomNumber: row.roomNumber, roomType: row.roomType, genderRestriction: row.genderRestriction, capacity: row.capacity, occupancy: row.occupancy, utilizationPercent: row.capacity ? Math.round((row.occupancy / row.capacity) * 100) : 0, vacantBeds: Math.max(0, row.capacity - row.occupancy), status: row.status, readiness: row.status === "AVAILABLE" && row.occupancy === 0 ? "READY" : row.status, qrCode: row.qrCode, remarks: row.remarks, createdAt: dateValue(row.createdAt) }));
-    return applyHousingFilters(type === "housing-room-readiness" ? mapped.filter((row) => ["READY", "AVAILABLE", "MAINTENANCE", "BLOCKED"].includes(String(row.readiness))) : mapped, filters);
+    const [rows, bookings, holds] = await Promise.all([
+      prisma.housingRoom.findMany({ include: { property: true, block: true, beds: true }, orderBy: { roomNumber: "asc" } }),
+      prisma.housingBooking.findMany({ select: { roomId: true, status: true, extensionStatus: true } }),
+      prisma.housingRoomHold.findMany({ where: { status: "ACTIVE" }, select: { roomId: true, status: true, startDate: true, endDate: true } }),
+    ]);
+    const bookingStateByRoom = new Map<string, { active: number; checkedIn: number }>();
+    bookings.forEach((booking) => {
+      if (!booking.roomId || !housingReportBookingBlocksAvailability(booking)) return;
+      const current = bookingStateByRoom.get(booking.roomId) ?? { active: 0, checkedIn: 0 };
+      current.active += 1;
+      if (String(booking.status || "").toUpperCase() === "CHECKED_IN") current.checkedIn += 1;
+      bookingStateByRoom.set(booking.roomId, current);
+    });
+    const activeHoldRoomIds = new Set(
+      holds
+        .filter((hold) => Boolean(hold.roomId) && housingReportHoldIsActive(hold))
+        .map((hold) => String(hold.roomId)),
+    );
+    const mapped = rows.map((row) => {
+      const snapshot = housingReportRoomSnapshot(
+        row,
+        bookingStateByRoom.get(row.id),
+        activeHoldRoomIds.has(row.id),
+      );
+      return {
+        code: row.code,
+        property: row.property.name,
+        building: row.block?.name ?? row.property.name,
+        block: row.block?.name ?? "",
+        floor: row.floor,
+        room: row.roomNumber,
+        roomNumber: row.roomNumber,
+        roomType: row.roomType,
+        genderRestriction: row.genderRestriction,
+        capacity: row.capacity,
+        occupancy: snapshot.occupancy,
+        utilizationPercent: row.capacity ? Math.round((snapshot.occupancy / row.capacity) * 100) : 0,
+        vacantBeds: Math.max(0, row.capacity - snapshot.occupancy),
+        status: snapshot.status,
+        readiness: snapshot.status === "AVAILABLE" && snapshot.occupancy === 0 ? "READY" : snapshot.status,
+        qrCode: row.qrCode,
+        remarks: row.remarks,
+        createdAt: dateValue(row.createdAt),
+      };
+    });
+    return applyHousingFilters(type === "housing-room-readiness" ? mapped.filter((row) => ["READY", "AVAILABLE", "MAINTENANCE", "BLOCKED", "HOLD"].includes(String(row.readiness))) : mapped, filters);
   }
   if (type === "housing-room-holds") {
     const rows = await prisma.housingRoomHold.findMany({ include: { room: { include: { property: true, block: true } } }, orderBy: [{ status: "asc" }, { startDate: "desc" }] });

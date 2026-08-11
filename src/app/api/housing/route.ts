@@ -1250,9 +1250,12 @@ function activeHoldBlocksRoom(room: any, hold: any) {
   const holdRoomId = hold?.roomId || hold?.room?.id;
   if (!room?.id || !holdRoomId || holdRoomId !== room.id) return false;
   if (String(hold?.status || "").toUpperCase() !== "ACTIVE") return false;
+  const holdStart = hold?.startDate ? new Date(String(hold.startDate)) : null;
   const holdEnd = hold?.endDate ? new Date(String(hold.endDate)) : null;
   if (!holdEnd || Number.isNaN(holdEnd.getTime())) return false;
-  return holdEnd.getTime() >= Date.now();
+  const now = Date.now();
+  if (holdStart && !Number.isNaN(holdStart.getTime()) && holdStart.getTime() > now) return false;
+  return holdEnd.getTime() >= now;
 }
 
 function normalizeRoomAvailabilitySnapshot(room: any, bookings: any[] = [], holds: any[] = []) {
@@ -1281,10 +1284,12 @@ function normalizeRoomAvailabilitySnapshot(room: any, bookings: any[] = [], hold
   const status =
     roomStatus === "MAINTENANCE" || roomStatus === "BLOCKED"
       ? roomStatus
-      : hasCheckedInBooking || hasOccupiedBed
-        ? "OCCUPIED"
-        : activeRoomBookings.length || hasActiveHold || bedOccupancy
-          ? "RESERVED"
-          : "AVAILABLE";
+      : hasActiveHold
+        ? "HOLD"
+        : hasCheckedInBooking || hasOccupiedBed
+          ? "OCCUPIED"
+          : activeRoomBookings.length || bedOccupancy
+            ? "RESERVED"
+            : "AVAILABLE";
   return { ...room, occupancy, status };
 }

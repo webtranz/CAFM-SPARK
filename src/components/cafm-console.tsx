@@ -25202,7 +25202,7 @@ function HousingOperations({
     0,
   );
   const activeHoldForDate = (hold: any, dateKey = todayKey) =>
-    hold.status === "ACTIVE" &&
+    String(hold.status || "").toUpperCase() === "ACTIVE" &&
     String(hold.startDate || "").slice(0, 10) <= dateKey &&
     String(hold.endDate || "").slice(0, 10) >= dateKey;
   const activeHeldRoomIds = new Set(
@@ -25215,9 +25215,14 @@ function HousingOperations({
       !housingRoomHasBlockingBooking(room, filteredBookings),
   ).length;
   const occupiedRooms = dashboardRooms.filter(
-    (room) =>
-      room.status === "OCCUPIED" ||
-      Number(room.occupancy || 0) >= Number(room.capacity || 0),
+    (room) => {
+      const roomStatus = String(room.status || "").toUpperCase();
+      return (
+        roomStatus !== "HOLD" &&
+        (roomStatus === "OCCUPIED" ||
+          Number(room.occupancy || 0) >= Number(room.capacity || 0))
+      );
+    },
   ).length;
   const vacantRooms = dashboardRooms.filter(
     (room) =>
@@ -28467,11 +28472,18 @@ function housingRoomWithStrictAvailability(
     const holdRoomId = hold?.roomId || hold?.room?.id;
     if (!room?.id || !holdRoomId || holdRoomId !== room.id) return false;
     if (String(hold?.status || "").toUpperCase() !== "ACTIVE") return false;
+    const holdStart = parseHousingDateTime(hold?.startDate, new Date(0));
     const holdEnd = parseHousingDateTime(
       hold?.endDate,
       new Date("2999-12-31T23:59:59"),
     );
-    return Boolean(holdEnd && holdEnd.getTime() >= Date.now());
+    const now = Date.now();
+    return Boolean(
+      holdStart &&
+        holdStart.getTime() <= now &&
+        holdEnd &&
+        holdEnd.getTime() >= now,
+    );
   });
   const usedCapacity = Math.max(bedOccupancy, blockingBookings.length);
   const capacity = Number(room?.capacity || 0);
@@ -28479,11 +28491,13 @@ function housingRoomWithStrictAvailability(
   const status =
     storedStatus === "MAINTENANCE" || storedStatus === "BLOCKED"
       ? storedStatus
-      : hasCheckedInBooking || hasOccupiedBed
-        ? "OCCUPIED"
-        : blockingBookings.length || hasActiveHold || bedOccupancy
-          ? "RESERVED"
-          : "AVAILABLE";
+      : hasActiveHold
+        ? "HOLD"
+        : hasCheckedInBooking || hasOccupiedBed
+          ? "OCCUPIED"
+          : blockingBookings.length || bedOccupancy
+            ? "RESERVED"
+            : "AVAILABLE";
 
   return { ...room, occupancy, status };
 }
