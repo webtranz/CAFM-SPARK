@@ -25121,6 +25121,14 @@ function HousingOperations({
   const [movementTab, setMovementTab] = useState<
     "checkins" | "checkouts" | "combined"
   >("combined");
+  const movementCutoffDate =
+    movementDate && movementDate <= todayKey ? movementDate : todayKey;
+  const movementDateKey = (value: unknown) =>
+    String(value || "").slice(0, 10);
+  const isMovementDueThroughSelectedDate = (value: unknown) => {
+    const key = movementDateKey(value);
+    return Boolean(key) && key <= movementCutoffDate;
+  };
   const roomBuilding = (room: any) =>
     room?.block?.name || room?.property?.name || "Unassigned";
   const roomMatchesLocationFilters = (room: any) => {
@@ -25462,8 +25470,9 @@ function HousingOperations({
         booking.guestId ||
         booking.residentId ||
         "";
-      return [
-        {
+      const rows: any[] = [];
+      if (isMovementDueThroughSelectedDate(booking.checkIn)) {
+        rows.push({
           ...booking,
           guestId,
           _selectionKey: `${booking.id || booking.bookingNo}:check-in`,
@@ -25471,24 +25480,24 @@ function HousingOperations({
           movementDate: booking.checkIn,
           roomNumber: booking.roomNumber || booking.room?.roomNumber,
           roomType: booking.room?.roomType || booking.roomType,
-        },
-        booking.checkOut
-          ? {
-              ...booking,
-              guestId,
-              _selectionKey: `${booking.id || booking.bookingNo}:check-out`,
-              movement: "Check-Out",
-              movementDate: booking.checkOut,
-              roomNumber: booking.roomNumber || booking.room?.roomNumber,
-              roomType: booking.room?.roomType || booking.roomType,
-            }
-          : null,
-      ].filter(Boolean) as any[];
+        });
+      }
+      if (
+        booking.checkOut &&
+        isMovementDueThroughSelectedDate(booking.checkOut)
+      ) {
+        rows.push({
+          ...booking,
+          guestId,
+          _selectionKey: `${booking.id || booking.bookingNo}:check-out`,
+          movement: "Check-Out",
+          movementDate: booking.checkOut,
+          roomNumber: booking.roomNumber || booking.room?.roomNumber,
+          roomType: booking.room?.roomType || booking.roomType,
+        });
+      }
+      return rows;
     })
-    .filter(
-      (booking) =>
-        String(booking.movementDate || "").slice(0, 10) <= movementDate,
-    )
     .filter(
       (booking) =>
         movementTab === "combined" ||
@@ -26335,8 +26344,15 @@ function HousingOperations({
             <div className="mb-4 flex flex-wrap items-center gap-3">
               <input
                 value={movementDate}
-                onChange={(event) => setMovementDate(event.target.value)}
+                onChange={(event) =>
+                  setMovementDate(
+                    event.target.value > todayKey
+                      ? todayKey
+                      : event.target.value,
+                  )
+                }
                 type="date"
+                max={todayKey}
                 className="h-11 min-w-[120px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold"
               />
               <div className="flex flex-wrap gap-2 rounded-lg bg-slate-50 p-1">
@@ -26363,8 +26379,8 @@ function HousingOperations({
                 </button>
               </div>
               <span className="rounded-lg bg-slate-50 px-3 py-2 text-xs font-black text-slate-600">
-                {movementRows.length.toLocaleString()} records through selected
-                date
+                {movementRows.length.toLocaleString()} records through{" "}
+                {movementCutoffDate}
               </span>
             </div>
             <HousingTable
