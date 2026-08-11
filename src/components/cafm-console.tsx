@@ -25564,7 +25564,21 @@ function HousingOperations({
   const canCancelReservation = (booking: any) => {
     const bookingStatus = String(booking?.status || "").toUpperCase();
     const bedStatus = String(booking?.bed?.status || "").toUpperCase();
-    return canOperateBookings && (bookingStatus === "APPROVED" || bedStatus === "RESERVED");
+    const closedStatuses = new Set([
+      "CHECKED_IN",
+      "CHECKED_OUT",
+      "CANCELLED",
+      "REJECTED",
+      "NO_SHOW",
+      "TRANSFERRED",
+    ]);
+    return (
+      canOperateBookings &&
+      !closedStatuses.has(bookingStatus) &&
+      (bookingStatus === "APPROVED" ||
+        bookingStatus === "RESERVED" ||
+        bedStatus === "RESERVED")
+    );
   };
   const approvalLevelKey = (value: unknown) =>
     String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -29084,6 +29098,12 @@ function HousingCancelBookingForm({
       setError("Confirm that this approved/reserved reservation should be cancelled.");
       return;
     }
+    const confirmedByDialog =
+      typeof window === "undefined" ||
+      window.confirm(
+        `Cancel reservation ${booking.bookingNo || booking.residentName || ""}? This will release the assigned room/bed and cannot be undone without creating or approving a new booking.`,
+      );
+    if (!confirmedByDialog) return;
     try {
       setError("");
       await onSubmit({
@@ -29132,6 +29152,7 @@ function HousingCancelBookingForm({
       <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
         Cancellation reason
         <textarea
+          name="cancellationReason"
           value={reason}
           onChange={(event) => {
             setReason(event.target.value);
@@ -29585,19 +29606,38 @@ function HousingBookingForm({
   };
   const handleBookingSubmit = async (formData: FormData) => {
     const now = new Date();
-    const currentMinimum = formatLocalDateTimeInput(now);
+    const bookingStartGrace = new Date(now.getTime() - 2 * 60 * 1000);
     const submittedStart = String(formData.get("checkIn") || "");
     const submittedEnd = String(formData.get("checkOut") || "");
+    const submittedRoomId = String(formData.get("roomId") || "").trim();
+    const submittedEmployeeId = String(formData.get("employeeId") || "").trim();
+    const submittedEmployeeName = String(formData.get("residentName") || "").trim();
     const startDate = parseHousingDateTime(submittedStart);
     const endDate = parseHousingDateTime(submittedEnd);
-    if (!startDate || submittedStart < currentMinimum) {
-      formData.set("checkIn", currentMinimum);
-      setCheckInValue(currentMinimum);
+    if (!submittedEmployeeId) {
+      throw new Error("Employee ID is required for accommodation bookings.");
     }
-    if (!endDate || submittedEnd <= String(formData.get("checkIn"))) {
-      const nextEnd = formatLocalDateTimeInput(addHours(new Date(), 24));
-      formData.set("checkOut", nextEnd);
-      setCheckOutValue(nextEnd);
+    if (!submittedEmployeeName) {
+      throw new Error("Employee name is required for accommodation bookings.");
+    }
+    if (!submittedRoomId) {
+      throw new Error("Select an available room before saving the booking.");
+    }
+    if (!bookableRoomIds.has(submittedRoomId)) {
+      throw new Error(
+        "Selected room is no longer available. Re-select an available room before saving the booking.",
+      );
+    }
+    if (!startDate || !endDate) {
+      throw new Error("Valid start and end date/time are required for accommodation bookings.");
+    }
+    if (startDate < bookingStartGrace) {
+      throw new Error("Accommodation booking start date/time cannot be in the past.");
+    }
+    if (endDate <= startDate) {
+      throw new Error(
+        "Accommodation booking end date/time must be after the start date/time.",
+      );
     }
     await onSubmit(formData);
   };
