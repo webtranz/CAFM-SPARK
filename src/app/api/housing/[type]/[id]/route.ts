@@ -100,7 +100,6 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     const roomChanged = nextRoomId !== current.roomId;
     const isSwapOnlyRequest =
       roomChanged &&
-      current.status !== "CHECKED_IN" &&
       (Boolean(input.swapOnly) || Boolean(text(input.transferReason)));
     if (isSwapOnlyRequest && status === "CHECKED_IN") {
       status = current.status;
@@ -114,7 +113,9 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     if (isBookingEndDateEdit && !canEditBookingEndDate) {
       throw new HousingAccessError("Only Admin or Helpdesk can edit booking end date.");
     }
-    if (status === "CHECKED_IN") {
+    const isCheckInAction = status === "CHECKED_IN" && !isSwapOnlyRequest;
+    const checkInActionAt = isCheckInAction ? new Date() : null;
+    if (isCheckInAction) {
       const isSameDayRecheckIn = current.status === "CHECKED_OUT" && current.checkOut && current.checkOut.toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10);
       const canExecuteAllocation =
         role === "admin" ||
@@ -125,7 +126,7 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
         role.includes("facility manager");
       if (!canExecuteAllocation) throw new Error("Only Reception, Helpdesk, or Housing Operations can execute final room allocation.");
       if (current.status !== "APPROVED" && !roomChanged && !isSameDayRecheckIn) throw new Error("Room allocation can be executed only after Camp Manager final approval.");
-      if (!input.keyHandoverAt) input.keyHandoverAt = new Date().toISOString();
+      input.keyHandoverAt = checkInActionAt?.toISOString();
     }
     const effectiveStatus = isSwapOnlyRequest ? current.status : status || current.status;
     let nextRoom = roomChanged ? await prisma.housingRoom.findUnique({ where: { id: nextRoomId } }) : current.room;
@@ -133,7 +134,7 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     await reconcileRoomAvailability(nextRoom.id);
     nextRoom = await prisma.housingRoom.findUnique({ where: { id: nextRoom.id } });
     if (!nextRoom) throw new Error("Selected room does not exist.");
-    const nextCheckIn = isSwapOnlyRequest ? current.checkIn : status === "CHECKED_IN" && !input.checkIn ? new Date() : input.checkIn ? new Date(String(input.checkIn)) : current.checkIn;
+    const nextCheckIn = isSwapOnlyRequest ? current.checkIn : checkInActionAt || (input.checkIn ? new Date(String(input.checkIn)) : current.checkIn);
     const nextCheckOut = isSwapOnlyRequest ? current.checkOut || nextCheckIn : status === "CHECKED_OUT" ? input.checkOut ? new Date(String(input.checkOut)) : new Date() : input.checkOut ? new Date(String(input.checkOut)) : current.checkOut || nextCheckIn;
     if (isBookingEndDateEdit && (!nextCheckOut || Number.isNaN(nextCheckOut.getTime()))) {
       throw new HousingInputError("A valid booking end date/time is required.");
@@ -192,8 +193,8 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
         approvedBy: text(input.approvedBy) || undefined,
         notes: text(input.notes) || undefined,
         attachmentUrls: text(input.attachmentUrls) || undefined,
-        checkIn: isSwapOnlyRequest ? undefined : status === "CHECKED_IN" || input.checkIn ? nextCheckIn : undefined,
-        checkOut: isSwapOnlyRequest ? undefined : status === "CHECKED_IN" ? null : isExtensionApproved && requestedExtensionEnd ? requestedExtensionEnd : status === "CHECKED_OUT" || input.checkOut ? nextCheckOut : undefined,
+        checkIn: isSwapOnlyRequest ? undefined : (checkInActionAt || input.checkIn ? nextCheckIn : undefined),
+        checkOut: isSwapOnlyRequest ? undefined : isExtensionApproved && requestedExtensionEnd ? requestedExtensionEnd : status === "CHECKED_OUT" || input.checkOut ? nextCheckOut : undefined,
         employeeId: text(input.employeeId) || undefined,
         companyName: text(input.companyName) || undefined,
         nationality: text(input.nationality) || undefined,
@@ -206,7 +207,7 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
         bookingType: text(input.bookingType) || undefined,
         allocationType: text(input.allocationType) || undefined,
         keyHandoverBy: text(input.keyHandoverBy) || undefined,
-        keyHandoverAt: isSwapOnlyRequest ? undefined : input.keyHandoverAt ? new Date(String(input.keyHandoverAt)) : undefined,
+        keyHandoverAt: isSwapOnlyRequest ? undefined : checkInActionAt || (input.keyHandoverAt ? new Date(String(input.keyHandoverAt)) : undefined),
         campIdNumber: text(input.campIdNumber) || undefined,
         campIdIssuedAt: input.campIdIssuedAt ? new Date(String(input.campIdIssuedAt)) : undefined,
         cancellationReason: text(input.cancellationReason) || undefined,

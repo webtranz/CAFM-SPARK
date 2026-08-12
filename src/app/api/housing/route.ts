@@ -869,6 +869,13 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
 async function resolveResident(input: z.infer<typeof housingSchema>) {
   if (input.residentId) {
     const resident = await prisma.housingResident.findUnique({ where: { id: input.residentId } });
+    const nextPhone = input.phone || input.contactNumber || "";
+    if (resident && nextPhone && resident.phone !== nextPhone) {
+      return prisma.housingResident.update({
+        where: { id: resident.id },
+        data: { phone: nextPhone },
+      });
+    }
     if (resident) return resident;
   }
   const employeeId = input.employeeId || input.residentNo;
@@ -886,7 +893,7 @@ function residentData(input: z.infer<typeof housingSchema>, residentNo: string) 
     residentNo,
     name: input.name || input.residentName || residentNo,
     email: input.email || "",
-    phone: input.phone || "",
+    phone: input.phone || input.contactNumber || "",
     companyId: input.companyId || input.companyName || "",
     companyName: input.companyName || input.companyId || "",
     gender: input.gender || "",

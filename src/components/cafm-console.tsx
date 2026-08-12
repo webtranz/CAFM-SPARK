@@ -25398,7 +25398,7 @@ function HousingOperations({
       (!dateFrom || !rangeEnd || rangeEnd >= dateFrom) &&
       (!dateTo || !rangeStart || rangeStart <= dateTo);
     const haystack =
-      `${booking.bookingNo} ${booking.employeeId} ${booking.residentNo} ${booking.guestId} ${booking.residentName} ${booking.companyName} ${booking.departmentCode} ${booking.status} ${booking.bookingType} ${booking.allocationType} ${booking.buildingNumber} ${booking.floorNumber} ${booking.roomNumber} ${booking.bedNumber} ${booking.room?.roomNumber} ${booking.bed?.label} ${startDate} ${endDate}`.toLowerCase();
+      `${booking.bookingNo} ${booking.employeeId} ${booking.residentNo} ${booking.guestId} ${booking.residentName} ${booking.companyName} ${booking.departmentCode} ${booking.contactNumber} ${booking.phone} ${booking.resident?.phone} ${booking.status} ${booking.bookingType} ${booking.allocationType} ${booking.buildingNumber} ${booking.floorNumber} ${booking.roomNumber} ${booking.bedNumber} ${booking.room?.roomNumber} ${booking.bed?.label} ${startDate} ${endDate}`.toLowerCase();
     return (
       (!search || haystack.includes(filterText)) &&
       (status === "All" || booking.status === status) &&
@@ -26160,6 +26160,7 @@ function HousingOperations({
                 ["bookingNo", "Booking"],
                 ["employeeId", "Badge No"],
                 ["residentName", "Employee"],
+                ["contactNumber", "Mobile"],
                 ["companyName", "Company"],
                 ["departmentCode", "Department"],
                 ["roomNumber", "Room"],
@@ -28371,7 +28372,7 @@ function hydrateHousingBookingWithResident(booking: any, lookup: Map<string, any
     companyName: resident?.companyName ?? resident?.companyId ?? booking?.companyName,
     departmentCode: resident?.departmentCode ?? booking?.departmentCode,
     nationality: resident?.nationality ?? booking?.nationality,
-    contactNumber: resident?.phone ?? booking?.contactNumber,
+    contactNumber: resident?.phone || booking?.contactNumber || booking?.phone || "",
     gender: resident?.gender ?? booking?.gender,
   };
 }
@@ -29354,19 +29355,11 @@ function HousingRoomSwapForm({
       formData.get("transferReason") || "Room swapped by housing operations",
     );
     const bookingStatus = String(booking.status || "").toUpperCase();
-    const isCheckedInSwap = bookingStatus === "CHECKED_IN";
-    const swapDate = String(formData.get("swapDate") || new Date().toISOString());
     await onSubmit({
       swapOnly: true,
       roomId,
       bedId: bedId || undefined,
       status: bookingStatus || undefined,
-      ...(isCheckedInSwap
-        ? {
-            checkIn: swapDate,
-            keyHandoverAt: swapDate,
-          }
-        : {}),
       buildingNumber:
         selectedRoom.block?.name ||
         selectedRoom.property?.name ||
@@ -29439,12 +29432,6 @@ function HousingRoomSwapForm({
             ))}
           </select>
         </label>
-        <input
-          name="swapDate"
-          type="datetime-local"
-          defaultValue={new Date().toISOString().slice(0, 16)}
-          className={HOUSING_FIELD_CLASS}
-        />
         <textarea
           name="transferReason"
           required
@@ -30652,9 +30639,19 @@ function HousingPreviewModal({
     type === "booking"
       ? [
           ["Booking Status", record.status],
+          ["Mobile Number", record.contactNumber || record.phone || record.resident?.phone],
           ["Start Date", formatDateCell(record.checkIn || record.startDate)],
           ["End Date", formatDateCell(record.checkOut || record.endDate)],
           ["Extension", record.extensionStatus],
+        ]
+      : [];
+  const residentPreviewFields: [string, unknown][] =
+    type === "resident"
+      ? [
+          ["Guest ID", record.residentNo],
+          ["Guest Name", record.name || record.residentName],
+          ["Mobile Number", record.phone || record.contactNumber],
+          ["Department", record.departmentCode],
         ]
       : [];
   const suppressedPreviewKeys = new Set([
@@ -30678,9 +30675,9 @@ function HousingPreviewModal({
       onClose={onClose}
     >
       <div className="grid gap-4">
-        {bookingPreviewFields.length > 0 && (
+        {[...bookingPreviewFields, ...residentPreviewFields].length > 0 && (
           <div className="grid gap-3 rounded-lg border border-emerald-100 bg-emerald-50 p-3 md:grid-cols-2">
-            {bookingPreviewFields.map(([label, value]) => (
+            {[...bookingPreviewFields, ...residentPreviewFields].map(([label, value]) => (
               <PreviewField key={label} label={label} value={value} />
             ))}
           </div>
