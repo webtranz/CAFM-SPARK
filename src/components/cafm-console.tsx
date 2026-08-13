@@ -28922,19 +28922,16 @@ function HousingResidentEditForm({
           placeholder="Company name"
           className={HOUSING_FIELD_CLASS}
         />
-        <select
-          name="departmentCode"
-          value={departmentCode}
-          onChange={(event) => setDepartmentCode(event.target.value)}
-          className={HOUSING_FIELD_CLASS}
-        >
-          <option value="">Select department</option>
-          {STANDARD_HOUSING_DEPARTMENT_OPTIONS.map((department) => (
-            <option key={department.value} value={department.value}>
-              {department.label}
-            </option>
-          ))}
-        </select>
+        <div className="grid gap-1">
+          <input type="hidden" name="departmentCode" value={departmentCode} />
+          <SearchableDropdownField
+            value={departmentCode}
+            options={STANDARD_HOUSING_DEPARTMENT_OPTIONS}
+            placeholder="Department"
+            onInput={setDepartmentCode}
+            onSelect={(option) => setDepartmentCode(option.value)}
+          />
+        </div>
         <input
           name="nationality"
           defaultValue={resident.nationality ?? ""}
