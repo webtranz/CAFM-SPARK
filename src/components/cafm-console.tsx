@@ -1579,20 +1579,34 @@ export function CafmConsole({
   }
   async function submitRequest(formData: FormData) {
     setSaving(true);
-    const payload = Object.fromEntries(formData.entries());
-    const response = await fetch("/api/service-requests", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const result = await response.json();
-    setToast(
-      response.ok
-        ? `Service request ${result.ticketNo} created and saved.`
-        : cleanMessage(result.message ?? "Service request failed."),
-    );
-    if (response.ok) mergeServiceRequestRecord(result);
-    setSaving(false);
+    try {
+      const payload = Object.fromEntries(formData.entries());
+      const response = await fetch("/api/service-requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      setToast(
+        response.ok
+          ? `Service request ${result.ticketNo} created and saved.`
+          : cleanMessage(result.message ?? "Service request failed."),
+      );
+      if (response.ok) {
+        mergeServiceRequestRecord(result);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      setToast(
+        cleanMessage(
+          error instanceof Error ? error.message : "Service request failed.",
+        ),
+      );
+      return false;
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function submitWorkOrder(formData: FormData) {
@@ -1956,7 +1970,11 @@ export function CafmConsole({
       "Service request updated.",
       false,
     );
-    if (ok) mergeServiceRequestRecord(result);
+    if (ok) {
+      mergeServiceRequestRecord(result);
+      return true;
+    }
+    return false;
   }
   async function updateAsset(id: string, formData: FormData) {
     await patchRecord(
@@ -9134,10 +9152,10 @@ function Helpdesk({
   departments: any[];
   teams: any[];
   locations: any[];
-  submitRequest: (formData: FormData) => void;
+  submitRequest: (formData: FormData) => Promise<boolean> | boolean;
   permissions: ActionPermissions;
   role: string;
-  updateRequest: (id: string, formData: FormData) => Promise<void> | void;
+  updateRequest: (id: string, formData: FormData) => Promise<boolean> | boolean;
   deleteRequest: (id: string) => Promise<void> | void;
   convertRequest: (
     id: string,
@@ -9487,7 +9505,7 @@ function Helpdesk({
   async function runRequestAction(
     key: string,
     request: any,
-    action: () => Promise<void> | void,
+    action: () => Promise<unknown> | unknown,
   ) {
     setSelectedRequestId(request.id);
     setRequestAction(key);
@@ -10035,8 +10053,9 @@ function Helpdesk({
             locations={locations}
             assets={assets}
             onSubmit={async (formData) => {
-              await submitRequest(formData);
-              setCreateOpen(false);
+              const saved = await submitRequest(formData);
+              if (saved) setCreateOpen(false);
+              return saved;
             }}
             saving={saving}
             mode="modal"
@@ -10058,8 +10077,9 @@ function Helpdesk({
             locations={locations}
             assets={assets}
             onSubmit={async (formData) => {
-              await updateRequest(editing.id, formData);
-              setEditing(null);
+              const saved = await updateRequest(editing.id, formData);
+              if (saved) setEditing(null);
+              return saved;
             }}
             saving={saving}
             mode="modal"
@@ -11159,15 +11179,15 @@ function ServiceRequestForm({
   teams: any[];
   locations: any[];
   assets: any[];
-  onSubmit: (formData: FormData) => void;
+  onSubmit: (formData: FormData) => Promise<boolean | void> | boolean | void;
   saving: boolean;
   mode?: "panel" | "modal";
 }) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
-    await onSubmit(new FormData(form));
-    if (!request) form.reset();
+    const saved = await onSubmit(new FormData(form));
+    if (!request && saved !== false) form.reset();
   }
 
   const [fullLocations, setFullLocations] = useState<any[]>(locations);

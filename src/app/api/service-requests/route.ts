@@ -33,6 +33,41 @@ const slaByPriority = {
   CRITICAL: 4,
 };
 
+function cleanText(value?: string | null) {
+  const text = String(value ?? "").trim();
+  return text || undefined;
+}
+
+function normalizePriority(value?: string | null) {
+  const priority = cleanText(value)?.toUpperCase();
+  return ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(priority ?? "")
+    ? (priority as keyof typeof slaByPriority)
+    : "LOW";
+}
+
+async function nextServiceRequestTicketNo(startAt: number) {
+  let current = Math.max(24001, startAt);
+  for (let attempt = 0; attempt < 25000; attempt += 1) {
+    const ticketNo = `SR-${String(current + attempt).padStart(5, "0")}`;
+    const existing = await prisma.serviceRequest.findUnique({
+      where: { ticketNo },
+      select: { id: true },
+    });
+    if (!existing) return ticketNo;
+  }
+  return `SR-${Date.now()}`;
+}
+
+function createErrorMessage(error: unknown) {
+  if (error instanceof z.ZodError) {
+    return error.issues
+      .map((issue) => `${issue.path.join(".") || "field"}: ${issue.message}`)
+      .join("; ");
+  }
+  if (error instanceof Error) return error.message;
+  return "Unable to create service request";
+}
+
 
 export async function GET(request: Request) {
   try {
@@ -91,16 +126,26 @@ export async function POST(request: Request) {
     const input = schema.parse(await request.json());
     const user = await getCurrentUser();
     const count = await prisma.serviceRequest.count();
-    const priority = ["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(input.priority || "") ? input.priority as keyof typeof slaByPriority : "MEDIUM";
+    const priority = normalizePriority(input.priority);
     const slaHours = slaByPriority[priority];
-    const department = input.departmentCode ? await prisma.department.findUnique({ where: { code: input.departmentCode } }) : null;
-    const supervisor = input.departmentCode
+    const departmentCode = cleanText(input.departmentCode);
+    const serviceCode = cleanText(input.serviceCode);
+    const assignedTeamCode = cleanText(input.assignedTeamCode);
+    const title = cleanText(input.title);
+    const category = cleanText(input.category);
+    const location = cleanText(input.location);
+    const requester = cleanText(input.requester);
+    const description = cleanText(input.description);
+    const attachmentUrls = cleanText(input.attachmentUrls);
+    const ticketNo = await nextServiceRequestTicketNo(count + 24001);
+    const department = departmentCode ? await prisma.department.findUnique({ where: { code: departmentCode } }) : null;
+    const supervisor = departmentCode
       ? await prisma.user.findFirst({
           where: {
             role: { contains: "Supervisor", mode: "insensitive" },
             OR: [
-              { department: { contains: input.departmentCode, mode: "insensitive" } },
-              { department: { contains: department?.name ?? input.departmentCode, mode: "insensitive" } },
+              { department: { contains: departmentCode, mode: "insensitive" } },
+              { department: { contains: department?.name ?? departmentCode, mode: "insensitive" } },
             ],
             active: true,
           },
@@ -110,20 +155,20 @@ export async function POST(request: Request) {
 
     const created = await prisma.serviceRequest.create({
       data: {
-        title: input.title || `Service Request ${count + 1}`,
-        category: input.category || "General",
-        departmentCode: input.departmentCode || null,
-        serviceCode: input.serviceCode || null,
-        assignedTeamCode: input.assignedTeamCode || null,
-        requester: input.requester || user?.name || user?.email || "Requester",
+        title: title || `Service Request ${count + 1}`,
+        category: category || "General",
+        departmentCode: departmentCode || null,
+        serviceCode: serviceCode || null,
+        assignedTeamCode: assignedTeamCode || null,
+        requester: requester || user?.name || user?.email || "Requester",
         priority,
-        location: input.location || "Unassigned",
-        attachmentUrls: input.attachmentUrls || null,
-        description: input.description || input.title || "No description provided.",
+        location: location || "Unassigned",
+        attachmentUrls: attachmentUrls || null,
+        description: description || title || "No description provided.",
         isIncidentCase: input.isIncidentCase ?? false,
         assignedSupervisorEmail: supervisor?.email || null,
         channel: "Web Portal",
-        ticketNo: `SR-${String(count + 24001).padStart(5, "0")}`,
+        ticketNo,
         slaHours,
         dueAt: addHours(new Date(), slaHours),
         status: "NEW",
@@ -133,12 +178,12 @@ export async function POST(request: Request) {
     await auditAction({ user, action: "SERVICE_REQUEST_CREATE", entity: "service_request", entityId: created.id, details: { input, createdRecord: created } });
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
+    console.error("Unable to create service request", error);
     return NextResponse.json(
       {
-        message: "Unable to create service request",
+        message: `Unable to create service request: ${createErrorMessage(error)}`,
       },
-      { status: 500 },
+      { status: error instanceof z.ZodError ? 400 : 500 },
     );
   }
 }
-
