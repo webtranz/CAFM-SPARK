@@ -12,6 +12,9 @@ const activeBookingStatuses = ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHE
 const closedBookingStatuses = ["CHECKED_OUT", "REJECTED", "CANCELLED", "NO_SHOW", "TRANSFERRED"];
 const activeExtensionStatuses = ["EXTEND_PENDING", "EXTENDED"];
 const unavailableRoomStatuses = ["BLOCKED", "MAINTENANCE", "RESERVED", "OCCUPIED", "HOLD", "ON_HOLD"];
+const defaultHousingCompanyName = "ARAMCO";
+const defaultHousingNationality = "Saudi Arabian";
+const defaultHousingGender = "MALE";
 const bookingStatuses = ["REQUESTED", "PENDING_APPROVAL", "APPROVED", "CHECKED_IN", "CHECKED_OUT", "REJECTED", "CANCELLED", "NO_SHOW", "TRANSFERRED"];
 const bookingApprovalSteps = [
   { step: 1, level: "Housing Coordinator Review", approver: "Housing Coordinator" },
@@ -721,15 +724,30 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
   const employeeName = input.residentName || input.name || resident?.name || "";
   if (!employeeId.trim()) throw new HousingInputError("Employee ID is required for accommodation bookings.");
   if (!employeeName.trim()) throw new HousingInputError("Employee name is required for accommodation bookings.");
+  const bookingType = (input.bookingType || "TEMPORARY").toUpperCase();
+  const departmentCode = input.departmentCode || resident?.departmentCode || "";
+  const companyName = input.companyName || resident?.companyName || input.companyId || defaultHousingCompanyName;
+  const nationality = input.nationality || resident?.nationality || defaultHousingNationality;
+  if (bookingType === "PERMANENT" && !departmentCode.trim()) {
+    throw new HousingInputError("Department is required for permanent accommodation bookings.");
+  }
   if (resident?.status === "BLACKLISTED") {
     throw new HousingInputError("Blacklisted occupants cannot receive a new accommodation allocation.");
   }
-  const occupantGender = (input.gender || resident?.gender || "").toUpperCase();
+  const occupantGender = (input.gender || resident?.gender || defaultHousingGender).toUpperCase();
   if (room.genderRestriction && room.genderRestriction !== "MIXED" && occupantGender && occupantGender !== room.genderRestriction.toUpperCase()) {
     throw new HousingInputError("Male and female occupants cannot be assigned to this gender-restricted room.");
   }
-  const bookingStart = input.checkIn ? new Date(input.checkIn) : new Date();
-  const bookingEnd = input.checkOut ? new Date(input.checkOut) : bookingStart;
+  const bookingStartValue = input.checkIn?.trim();
+  const bookingEndValue = input.checkOut?.trim();
+  if (!bookingStartValue) {
+    throw new HousingInputError("Start date is required for accommodation bookings.");
+  }
+  if (!bookingEndValue) {
+    throw new HousingInputError("End date is required for accommodation bookings.");
+  }
+  const bookingStart = new Date(bookingStartValue);
+  const bookingEnd = new Date(bookingEndValue);
   if (Number.isNaN(bookingStart.getTime()) || Number.isNaN(bookingEnd.getTime())) {
     throw new HousingInputError("Valid start and end date/time are required for accommodation bookings.");
   }
@@ -784,17 +802,17 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
             bookingNo,
             residentId: resident?.id,
             residentName: employeeName,
-            departmentCode: input.departmentCode || resident?.departmentCode || "",
+            departmentCode,
             employeeId,
-            companyName: input.companyName || resident?.companyName || input.companyId || "",
-            nationality: input.nationality || resident?.nationality || "",
+            companyName,
+            nationality,
             contactNumber: input.contactNumber || input.phone || resident?.phone || "",
             gender: occupantGender || "",
             buildingNumber: input.buildingNumber || room.block?.name || room.property?.name || "",
             floorNumber: input.floorNumber || room.floor,
             roomNumber: input.roomNumber || room.roomNumber,
             bedNumber: input.bedNumber || bed?.label || "",
-            bookingType: input.bookingType || "TEMPORARY",
+            bookingType,
             allocationType: input.allocationType || "STANDARD",
             roomId: room.id,
             bedId: bed?.id,
@@ -889,15 +907,16 @@ async function resolveResident(input: z.infer<typeof housingSchema>) {
 }
 
 function residentData(input: z.infer<typeof housingSchema>, residentNo: string) {
+  const isBookingResident = input.type === "booking";
   return {
     residentNo,
     name: input.name || input.residentName || residentNo,
     email: input.email || "",
     phone: input.phone || input.contactNumber || "",
-    companyId: input.companyId || input.companyName || "",
-    companyName: input.companyName || input.companyId || "",
-    gender: input.gender || "",
-    nationality: input.nationality || "",
+    companyId: input.companyId || input.companyName || (isBookingResident ? defaultHousingCompanyName : ""),
+    companyName: input.companyName || input.companyId || (isBookingResident ? defaultHousingCompanyName : ""),
+    gender: input.gender || (isBookingResident ? defaultHousingGender : ""),
+    nationality: input.nationality || (isBookingResident ? defaultHousingNationality : ""),
     departmentCode: input.departmentCode || "",
     status: input.type === "resident" ? input.status || "ACTIVE" : "ACTIVE",
   };

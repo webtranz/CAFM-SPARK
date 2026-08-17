@@ -674,6 +674,9 @@ function housingInvalidFieldsFromMessage(message: string) {
   if (lower.includes("employee name") || lower.includes("guest name")) {
     fields.add("residentName");
   }
+  if (lower.includes("department")) {
+    fields.add("departmentCode");
+  }
   if (lower.includes("start date") || lower.includes("start and end")) {
     fields.add("checkIn");
   }
@@ -812,6 +815,9 @@ const HOUSING_NATIONALITIES = [
   "Yemeni",
   "Other",
 ];
+const DEFAULT_HOUSING_COMPANY_NAME = "ARAMCO";
+const DEFAULT_HOUSING_NATIONALITY = "Saudi Arabian";
+const DEFAULT_HOUSING_GENDER = "MALE";
 const FACILITY_FIELD_CLASS =
   "h-11 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 outline-none focus:border-lagoon";
 const RESOURCE_EMPLOYEE_FIELD_CLASS =
@@ -29512,11 +29518,12 @@ function HousingBookingForm({
   const [residentSearch, setResidentSearch] = useState("");
   const [employeeId, setEmployeeId] = useState("");
   const [employeeName, setEmployeeName] = useState("");
-  const [companyName, setCompanyName] = useState("");
+  const [companyName, setCompanyName] = useState(DEFAULT_HOUSING_COMPANY_NAME);
   const [departmentCode, setDepartmentCode] = useState("");
-  const [nationality, setNationality] = useState("");
+  const [nationality, setNationality] = useState(DEFAULT_HOUSING_NATIONALITY);
   const [contactNumber, setContactNumber] = useState("");
-  const [gender, setGender] = useState("");
+  const [gender, setGender] = useState(DEFAULT_HOUSING_GENDER);
+  const [bookingType, setBookingType] = useState("TEMPORARY");
   const [minBookingDateTime, setMinBookingDateTime] = useState(() =>
     formatLocalDateTimeInput(),
   );
@@ -29595,6 +29602,7 @@ function HousingBookingForm({
     () => mergeSearchableOptions(sourceDepartmentOptions, customDepartmentOptions),
     [sourceDepartmentOptions, customDepartmentOptions],
   );
+  const isPermanentBooking = bookingType.toUpperCase() === "PERMANENT";
   const selectResident = (option: SearchableOption) => {
     const resident = residents.find((item) => item.id === option.value);
     setResidentId(option.value);
@@ -29602,11 +29610,11 @@ function HousingBookingForm({
     if (!resident) return;
     setEmployeeId(resident.residentNo || resident.employeeId || "");
     setEmployeeName(resident.name || resident.residentName || "");
-    setCompanyName(resident.companyName || resident.companyId || "");
+    setCompanyName(resident.companyName || resident.companyId || DEFAULT_HOUSING_COMPANY_NAME);
     setDepartmentCode(resident.departmentCode || "");
-    setNationality(resident.nationality || "");
+    setNationality(resident.nationality || DEFAULT_HOUSING_NATIONALITY);
     setContactNumber(resident.phone || resident.contactNumber || "");
-    setGender(resident.gender || "");
+    setGender(resident.gender || DEFAULT_HOUSING_GENDER);
   };
   const handleBookingSubmit = async (formData: FormData) => {
     const now = new Date();
@@ -29616,6 +29624,8 @@ function HousingBookingForm({
     const submittedRoomId = String(formData.get("roomId") || "").trim();
     const submittedEmployeeId = String(formData.get("employeeId") || "").trim();
     const submittedEmployeeName = String(formData.get("residentName") || "").trim();
+    const submittedDepartment = String(formData.get("departmentCode") || "").trim();
+    const submittedBookingType = String(formData.get("bookingType") || bookingType).toUpperCase();
     const startDate = parseHousingDateTime(submittedStart);
     const endDate = parseHousingDateTime(submittedEnd);
     if (!submittedEmployeeId) {
@@ -29623,6 +29633,9 @@ function HousingBookingForm({
     }
     if (!submittedEmployeeName) {
       throw new Error("Employee name is required for accommodation bookings.");
+    }
+    if (submittedBookingType === "PERMANENT" && !submittedDepartment) {
+      throw new Error("Department is required for permanent accommodation bookings.");
     }
     if (!submittedRoomId) {
       throw new Error("Select an available room before saving the booking.");
@@ -29726,13 +29739,13 @@ function HousingBookingForm({
             </div>
           ) : null}
         </div>
-        <div className="grid gap-2">
+        <div className="grid gap-2" data-housing-field="departmentCode">
           <div className="flex gap-2">
             <input type="hidden" name="departmentCode" value={departmentCode} />
             <SearchableDropdownField
               value={departmentCode}
               options={departmentOptions}
-              placeholder="Department"
+              placeholder={isPermanentBooking ? "Department *" : "Department"}
               className="min-w-0 flex-1"
               onInput={setDepartmentCode}
               onSelect={(option) => setDepartmentCode(option.value)}
@@ -29804,7 +29817,12 @@ function HousingBookingForm({
           <option>MALE</option>
           <option>FEMALE</option>
         </select>
-        <select name="bookingType" className={HOUSING_FIELD_CLASS}>
+        <select
+          name="bookingType"
+          value={bookingType}
+          onChange={(event) => setBookingType(event.target.value)}
+          className={HOUSING_FIELD_CLASS}
+        >
           <option value="TEMPORARY">Temporary booking</option>
           <option value="PERMANENT">Permanent booking</option>
         </select>
@@ -29813,7 +29831,7 @@ function HousingBookingForm({
           <option value="VIP">VIP room allocation</option>
           <option value="VISITOR">Visitor room allocation</option>
         </select>
-        <select name="status" className={HOUSING_FIELD_CLASS}>
+        <select name="status" defaultValue="APPROVED" className={HOUSING_FIELD_CLASS}>
           <option value="REQUESTED">Submit request</option>
           <option value="PENDING_APPROVAL">Pending approval</option>
           <option value="APPROVED">Approved / reserve bed</option>
@@ -30583,6 +30601,13 @@ function HousingForm({
     });
     if (type === "booking" && !String(formData.get("roomId") || "").trim()) {
       invalidFieldNames.push("roomId");
+    }
+    if (
+      type === "booking" &&
+      String(formData.get("bookingType") || "").toUpperCase() === "PERMANENT" &&
+      !String(formData.get("departmentCode") || "").trim()
+    ) {
+      invalidFieldNames.push("departmentCode");
     }
     if (invalidFieldNames.length) {
       housingMarkInvalidFields(form, invalidFieldNames);
