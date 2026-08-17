@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { workOrderKpis, workOrderMetrics } from "@/lib/work-order-analytics";
 
 type ReportRow = Record<string, string | number | boolean | null>;
+type WorkbookSheet = { name: string; rows: ReportRow[]; columns?: string[] };
 
 export async function GET(request: Request) {
   const { error } = await requirePermission("reports.view");
@@ -19,7 +20,7 @@ export async function GET(request: Request) {
     return file(csv(rows), "text/csv", `${type}.csv`);
   }
   if (format === "excel") {
-    return file(excel(rows, type, kpis), "application/vnd.ms-excel", `${type}.xls`);
+    return file(excel(rows, type, kpis), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", `${type}.xlsx`);
   }
   if (format === "pdf") {
     return file(pdf(rows, type, kpis, filters), "application/pdf", `${type}.pdf`);
@@ -1002,8 +1003,192 @@ function csv(rows: ReportRow[]) {
 }
 
 function excel(rows: ReportRow[], title: string, kpis: Record<string, unknown> | null) {
-  const headers = rows[0] ? Object.keys(rows[0]) : [];
-  return `<html><body><h1>${escapeHtml(title)}</h1>${kpiHtml(kpis)}<table border="1"><thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${headers.map((h) => `<td>${escapeHtml(spreadsheetSafeValue(row[h] ?? ""))}</td>`).join("")}</tr>`).join("")}</tbody></table></body></html>`;
+  const sheets: WorkbookSheet[] = [{ name: prettyTitle(title).slice(0, 31) || "Report", rows }];
+  if (title === "housing-bookings") {
+    sheets.push({
+      name: "Approved Checked In",
+      columns: ["ID", "Name", "Department", "Start date", "End date", "Guest stay status"],
+      rows: housingApprovedCheckedInRows(rows),
+    });
+  }
+  if (kpis) {
+    sheets.unshift({
+      name: "KPI Summary",
+      columns: ["metric", "value"],
+      rows: Object.entries(kpis).map(([metric, value]) => ({ metric, value: value == null ? "" : String(value) })),
+    });
+  }
+  return workbook(sheets);
+}
+
+function housingApprovedCheckedInRows(rows: ReportRow[]) {
+  return rows
+    .filter((row) => ["APPROVED", "CHECKED_IN"].includes(String(row.status ?? "").toUpperCase()))
+    .map((row) => ({
+      ID: row.employeeId ?? "",
+      Name: row.employeeName ?? "",
+      Department: row.department ?? row.departmentCode ?? "",
+      "Start date": row.checkIn ?? "",
+      "End date": row.checkOut ?? "",
+      "Guest stay status": prettyTitle(String(row.status ?? "").toLowerCase()),
+    }));
+}
+
+function workbook(sheets: WorkbookSheet[]) {
+  const files = new Map<string, string>();
+  files.set("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  ${sheets.map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}
+</Types>`);
+  files.set("_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`);
+  files.set("xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>${sheets.map((sheet, index) => `<sheet name="${escapeXml(sheetName(sheet.name, index))}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`).join("")}</sheets>
+</workbook>`);
+  files.set("xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  ${sheets.map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`).join("")}
+</Relationships>`);
+  sheets.forEach((sheet, index) => files.set(`xl/worksheets/sheet${index + 1}.xml`, worksheet(sheet)));
+  return zip(files);
+}
+
+function worksheet(sheet: WorkbookSheet) {
+  const headers = sheet.columns?.length ? sheet.columns : sheet.rows[0] ? Object.keys(sheet.rows[0]) : [];
+  const rows = [headers, ...sheet.rows.map((row) => headers.map((header) => row[header] ?? ""))];
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>${rows.map((row, rowIndex) => `<row r="${rowIndex + 1}">${row.map((value, columnIndex) => cell(columnIndex, rowIndex, value)).join("")}</row>`).join("")}</sheetData>
+</worksheet>`;
+}
+
+function cell(columnIndex: number, rowIndex: number, value: unknown) {
+  const reference = `${columnName(columnIndex)}${rowIndex + 1}`;
+  return `<c r="${reference}" t="inlineStr"><is><t>${escapeXml(spreadsheetSafeValue(value))}</t></is></c>`;
+}
+
+function columnName(index: number) {
+  let name = "";
+  let current = index + 1;
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    name = String.fromCharCode(65 + remainder) + name;
+    current = Math.floor((current - 1) / 26);
+  }
+  return name;
+}
+
+function sheetName(name: string, index: number) {
+  return (name || `Sheet ${index + 1}`).replace(/[\[\]:*?/\\]/g, " ").slice(0, 31) || `Sheet ${index + 1}`;
+}
+
+function escapeXml(value: unknown) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function zip(files: Map<string, string>) {
+  const encoder = new TextEncoder();
+  const localParts: Uint8Array[] = [];
+  const centralParts: Uint8Array[] = [];
+  let offset = 0;
+  for (const [name, content] of files.entries()) {
+    const nameBytes = encoder.encode(name);
+    const data = encoder.encode(content);
+    const crc = crc32(data);
+    const local = zipHeader(30, [
+      [0, 0x04034b50, 4],
+      [4, 20, 2],
+      [6, 0, 2],
+      [8, 0, 2],
+      [10, 0, 2],
+      [12, 0, 2],
+      [14, crc, 4],
+      [18, data.length, 4],
+      [22, data.length, 4],
+      [26, nameBytes.length, 2],
+      [28, 0, 2],
+    ]);
+    localParts.push(local, nameBytes, data);
+    const central = zipHeader(46, [
+      [0, 0x02014b50, 4],
+      [4, 20, 2],
+      [6, 20, 2],
+      [8, 0, 2],
+      [10, 0, 2],
+      [12, 0, 2],
+      [14, 0, 2],
+      [16, crc, 4],
+      [20, data.length, 4],
+      [24, data.length, 4],
+      [28, nameBytes.length, 2],
+      [30, 0, 2],
+      [32, 0, 2],
+      [34, 0, 2],
+      [36, 0, 2],
+      [38, 0, 4],
+      [42, offset, 4],
+    ]);
+    centralParts.push(central, nameBytes);
+    offset += local.length + nameBytes.length + data.length;
+  }
+  const centralOffset = offset;
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+  const end = zipHeader(22, [
+    [0, 0x06054b50, 4],
+    [4, 0, 2],
+    [6, 0, 2],
+    [8, files.size, 2],
+    [10, files.size, 2],
+    [12, centralSize, 4],
+    [16, centralOffset, 4],
+    [20, 0, 2],
+  ]);
+  return concat([...localParts, ...centralParts, end]);
+}
+
+function zipHeader(size: number, fields: Array<[number, number, 2 | 4]>) {
+  const bytes = new Uint8Array(size);
+  const view = new DataView(bytes.buffer);
+  fields.forEach(([offset, value, width]) => {
+    if (width === 2) view.setUint16(offset, value, true);
+    else view.setUint32(offset, value >>> 0, true);
+  });
+  return bytes;
+}
+
+function concat(parts: Uint8Array[]) {
+  const bytes = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+  let offset = 0;
+  parts.forEach((part) => {
+    bytes.set(part, offset);
+    offset += part.length;
+  });
+  return bytes;
+}
+
+const crcTable = Array.from({ length: 256 }, (_, index) => {
+  let current = index;
+  for (let bit = 0; bit < 8; bit += 1) current = current & 1 ? 0xedb88320 ^ (current >>> 1) : current >>> 1;
+  return current >>> 0;
+});
+
+function crc32(bytes: Uint8Array) {
+  let crc = 0xffffffff;
+  bytes.forEach((byte) => {
+    crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  });
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 function htmlPreview(rows: ReportRow[], title: string, kpis: Record<string, unknown> | null, filters: ReturnType<typeof reportFilters>) {
@@ -1117,7 +1302,7 @@ function spreadsheetSafeValue(value: unknown) {
 }
 
 function prettyTitle(value: string) {
-  return value.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return value.replace(/[-_]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function escapeHtml(value: unknown) {
@@ -1129,7 +1314,7 @@ function escapeHtml(value: unknown) {
     .replaceAll("'", "&#39;");
 }
 
-function file(body: string, contentType: string, filename: string) {
+function file(body: BodyInit, contentType: string, filename: string) {
   return new NextResponse(body, {
     headers: {
       "Content-Type": contentType,
