@@ -155,7 +155,7 @@ function parseChecklistItems(value?: string): ChecklistItem[] {
       status,
       priority: validPriority(item.priority),
       remarks: clean(item.remarks) || undefined,
-      createRequest: Boolean(item.createRequest),
+      createRequest: status === "NOT_OK" || Boolean(item.createRequest),
     };
   });
 }
@@ -181,6 +181,48 @@ async function nextServiceRequestTicketNo(tx: any, reserveOffset = 0) {
   }
   return `SR-${Date.now()}-${reserveOffset}`;
 }
+
+async function resolveChecklistTeamCode(tx: any, item: ChecklistItem, department: any) {
+  const assignedTeamCode = clean(item.assignedTeamCode);
+  if (assignedTeamCode) return assignedTeamCode;
+
+  const serviceCode = clean(item.serviceCode);
+  if (serviceCode) {
+    const service = await tx.serviceCatalog.findFirst({
+      where: {
+        active: true,
+        OR: [
+          { code: { equals: serviceCode, mode: "insensitive" } },
+          { serviceCode: { equals: serviceCode, mode: "insensitive" } },
+        ],
+      },
+      include: { team: true },
+    });
+    if (service?.team?.code) return service.team.code;
+  }
+
+  const departmentCode = clean(item.departmentCode);
+  if (departmentCode) {
+    const departmentName = clean(department?.name) || departmentCode;
+    const team = await tx.team.findFirst({
+      where: {
+        active: true,
+        OR: [
+          { code: { contains: departmentCode, mode: "insensitive" } },
+          { name: { contains: departmentCode, mode: "insensitive" } },
+          { name: { contains: departmentName, mode: "insensitive" } },
+          { type: { contains: departmentCode, mode: "insensitive" } },
+          { coverage: { contains: departmentCode, mode: "insensitive" } },
+        ],
+      },
+      orderBy: { code: "asc" },
+    });
+    if (team?.code) return team.code;
+  }
+
+  return null;
+}
+
 async function createChecklistServiceRequest(tx: any, item: ChecklistItem, input: SecurityInput, actor: string, ticketNo: string, checklistNo: string) {
   const priority = validPriority(item.priority);
   const slaHours = slaByPriority[priority];
@@ -198,6 +240,7 @@ async function createChecklistServiceRequest(tx: any, item: ChecklistItem, input
         orderBy: { name: "asc" },
       })
     : null;
+  const assignedTeamCode = await resolveChecklistTeamCode(tx, item, department);
   const locationParts = [clean(input.securityLocationCode), clean(input.locationName)].filter(Boolean).join(" - ");
 
   return tx.serviceRequest.create({
@@ -206,7 +249,7 @@ async function createChecklistServiceRequest(tx: any, item: ChecklistItem, input
       category: item.section || "Security Checklist",
       departmentCode: item.departmentCode || null,
       serviceCode: item.serviceCode || null,
-      assignedTeamCode: item.assignedTeamCode || null,
+      assignedTeamCode: assignedTeamCode || null,
       requester: actor,
       priority,
       location: locationParts || "Security checkpoint",
@@ -321,7 +364,7 @@ async function saveSecurityRecord(input: SecurityInput, actor: string) {
     const items = parseChecklistItems(input.checklistItemsJson);
     if (!items.length) throw new Error("At least one checklist item is required.");
     const failedItems = items.filter((item) => item.status === "NOT_OK").length;
-    const actionableItems = items.filter((item) => item.status === "NOT_OK" && item.createRequest);
+    const actionableItems = items.filter((item) => item.status === "NOT_OK");
 
     return prisma.$transaction(async (tx) => {
       const linkedRequests = [];

@@ -276,7 +276,11 @@ async function reportRows(type: string, filters: ReturnType<typeof reportFilters
     return rows.map((row) => ({ passNo: row.passNo, requesterName: row.requesterName, visitorName: row.visitorName, visitorCompany: row.visitorCompany ?? "", visitorIdNo: row.visitorIdNo ?? "", contactNo: row.contactNo ?? "", purpose: row.purpose, securityLocationCode: row.securityLocationCode ?? "", locationName: row.locationName ?? "", validFrom: dateValue(row.validFrom), validTo: dateValue(row.validTo), vehicleNo: row.vehicleNo ?? "", status: row.status, helpdeskApprovedBy: row.helpdeskApprovedBy ?? "", issuedBy: row.issuedBy ?? "", createdAt: dateValue(row.createdAt) }));
   }
   if (type === "security-daily-reports") {
-    const rows = await prisma.securityDailyReport.findMany({ orderBy: { reportDate: "desc" } });
+    const reportDate = dateRangeFilter(filters.dateFrom, filters.dateTo);
+    const rows = await prisma.securityDailyReport.findMany({
+      where: reportDate ? { reportDate } : undefined,
+      orderBy: { reportDate: "desc" },
+    });
     return rows.map((row) => ({ reportNo: row.reportNo, reportDate: dateValue(row.reportDate), shift: row.shift, securityLocationCode: row.securityLocationCode ?? "", locationName: row.locationName ?? "", officerName: row.officerName, visitorCount: row.visitorCount, vehicleCount: row.vehicleCount, incidents: row.incidents ?? "", handoverNotes: row.handoverNotes ?? "", createdBy: row.createdBy ?? "" }));
   }
   if (type === "security-fire-drills") {
