@@ -1,6 +1,7 @@
 import { accessRole } from "@/lib/access-control";
 import { prisma } from "@/lib/prisma";
 import { fallbackData } from "@/lib/demo-data";
+import { convertExpiredUncheckedHousingBookingsToNoShow } from "@/lib/housing-no-show";
 import { ensureDefaultRbacOnce } from "@/lib/rbac-runtime";
 
 type OperatingUser = {
@@ -71,6 +72,7 @@ export async function getOperatingData(user: OperatingUser = null) {
 
   try {
     await ensureDefaultRbacOnce();
+    await convertExpiredUncheckedHousingBookingsToNoShow("Operating Data Sync");
 
     const kind = accessRole(user);
     const roleName = String(user?.role ?? "").toLowerCase();

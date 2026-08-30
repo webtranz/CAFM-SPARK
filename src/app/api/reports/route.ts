@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/api-auth";
+import { convertExpiredUncheckedHousingBookingsToNoShow } from "@/lib/housing-no-show";
 import { prisma } from "@/lib/prisma";
 import { workOrderKpis, workOrderMetrics } from "@/lib/work-order-analytics";
 
@@ -504,6 +505,8 @@ function housingReportRoomSnapshot(
 }
 
 async function housingReportRows(type: string, filters: ReturnType<typeof reportFilters>): Promise<ReportRow[]> {
+  await convertExpiredUncheckedHousingBookingsToNoShow("Housing Report Sync");
+
   if (type === "housing-dashboard") {
     const [rooms, bookings, inspections, assets, inventory, approvals, notifications] = await Promise.all([
       prisma.housingRoom.findMany({ include: { property: true, block: true } }),

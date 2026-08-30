@@ -4,6 +4,7 @@ import { apiError } from "@/lib/api-response";
 import { requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth";
+import { convertExpiredUncheckedHousingBookingsToNoShow } from "@/lib/housing-no-show";
 import { syncHousingResidentToBookings } from "@/lib/housing-resident-sync";
 import { prisma } from "@/lib/prisma";
 
@@ -35,6 +36,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ty
     const { error: permissionError } = await requirePermission(permissionCode);
     if (permissionError) return permissionError;
     const user = await getCurrentUser();
+    if (type === "booking" || type === "approval") {
+      await convertExpiredUncheckedHousingBookingsToNoShow(user?.name || user?.email || "Housing Update Sync");
+    }
     const current = await findHousingRecord(type, id);
     const record = await updateHousingRecord(type, id, input, user);
     await auditAction({ user, action: `HOUSING_${type.toUpperCase()}_UPDATE`, entity: `housing_${type}`, entityId: id, details: { before: current, input, after: record } });
@@ -520,6 +524,9 @@ async function updateHousingApproval(id: string, input: Record<string, unknown>,
   if (!["APPROVED", "REJECTED", "RETURNED"].includes(action)) throw new HousingInputError("Approval action must be approve, reject, or return for correction.");
   const approval = await prisma.housingApproval.findUnique({ where: { id }, include: { booking: true } });
   if (!approval || !approval.bookingId || !approval.booking) throw new HousingInputError("Approval record not found.");
+  if (String(approval.booking.status || "").toUpperCase() === "NO_SHOW") {
+    throw new HousingInputError("This reservation has reached the end date without check-in and is already marked as No Show.");
+  }
   if (approval.status !== "PENDING") throw new HousingInputError("Only the current pending approval can be actioned. Refresh the booking list and try the visible pending step.");
   if (!canActApproval(user?.role || "", approval.level)) throw new HousingAccessError(`Only ${approval.level} approvers can action this step.`);
 

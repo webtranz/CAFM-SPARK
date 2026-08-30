@@ -5,6 +5,7 @@ import { requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth";
 import { ensureHousingNotificationSettings } from "@/lib/housing-alerts";
+import { convertExpiredUncheckedHousingBookingsToNoShow } from "@/lib/housing-no-show";
 import { syncHousingResidentToBookings } from "@/lib/housing-resident-sync";
 import { prisma } from "@/lib/prisma";
 
@@ -229,6 +230,7 @@ export async function GET() {
   const { error } = await requirePermission("housing.view");
   if (error) return error;
   await expireRoomHolds();
+  await convertExpiredUncheckedHousingBookingsToNoShow("Housing Data Sync");
   const [
     properties,
     blocks,
@@ -710,6 +712,7 @@ async function nextHousingBookingNo(attempt = 0) {
 }
 
 async function createBooking(input: z.infer<typeof housingSchema>, actor: string) {
+  await convertExpiredUncheckedHousingBookingsToNoShow(actor);
   if (!input.roomId?.trim()) {
     throw new HousingInputError("Select an available room before saving the booking.");
   }

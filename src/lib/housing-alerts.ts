@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { convertExpiredUncheckedHousingBookingsToNoShow } from "@/lib/housing-no-show";
 
 export const HOUSING_ALERT_SETTINGS = [
   ["UPCOMING_CHECKOUT", "Upcoming check-out", "Residents scheduled to check out soon.", "Housing Supervisor,Reception Team", "SYSTEM,EMAIL"],
@@ -11,6 +12,7 @@ export const HOUSING_ALERT_SETTINGS = [
   ["LOW_STOCK", "Low stock inventory", "Housing inventory below reorder or minimum stock.", "Housing Inventory Manager,Housing Supervisor", "SYSTEM,EMAIL"],
   ["EXPIRED_FIRE_EXTINGUISHER", "Expired fire extinguishers", "Fire extinguishers with expired warranty or inspection date.", "Safety Officer,Housing Supervisor", "SYSTEM,EMAIL,SMS"],
   ["EXPIRED_CONTRACT", "Expired contracts", "Housing supplier or booking contract references requiring review.", "Camp Manager,Housing Supervisor", "SYSTEM,EMAIL"],
+  ["NO_SHOW", "No-show reservations", "Reservations whose end date has passed without check-in.", "Housing Supervisor,Reception Team", "SYSTEM,EMAIL"],
   ["EXPIRED_WARRANTY", "Expired warranties", "Housing assets with expired warranties.", "Housing Asset Manager", "SYSTEM,EMAIL"],
   ["UNRESOLVED_COMPLAINT", "Unresolved complaints", "Housing-related service requests still unresolved.", "Helpdesk,Housing Supervisor", "SYSTEM,EMAIL"],
   ["DELAYED_TICKET_CLOSURE", "Delayed ticket closure", "Housing tickets past SLA due date.", "Helpdesk,Housing Supervisor", "SYSTEM,EMAIL,SMS"],
@@ -32,6 +34,7 @@ export async function ensureHousingNotificationSettings() {
 
 export async function runHousingAlertChecks(actor = "Housing Alert Scheduler") {
   const settings = await ensureHousingNotificationSettings();
+  await convertExpiredUncheckedHousingBookingsToNoShow(actor);
   const settingMap = new Map(settings.map((setting) => [setting.alertType, setting]));
   const now = new Date();
   const created: any[] = [];

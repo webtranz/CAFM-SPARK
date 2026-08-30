@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { accessRole } from "@/lib/access-control";
 import { requireUser } from "@/lib/api-auth";
 import { emptyOperatingData } from "@/lib/empty-operating-data";
+import { convertExpiredUncheckedHousingBookingsToNoShow } from "@/lib/housing-no-show";
 import { prisma } from "@/lib/prisma";
 import { ensureDefaultRbacOnce } from "@/lib/rbac-runtime";
 import { getTotalEntryCounts } from "@/lib/data";
@@ -60,6 +61,7 @@ export async function GET() {
 
   try {
     await ensureDefaultRbacOnce();
+    await convertExpiredUncheckedHousingBookingsToNoShow(user?.name || user?.email || "Dashboard Sync");
 
     const [
       requests,
