@@ -941,6 +941,33 @@ function cleanMessage(message: string) {
     .slice(0, 260);
 }
 
+function handleAuthRequiredResponse(
+  response: Response,
+  result: unknown,
+  setToast: (message: string) => void,
+) {
+  const payload =
+    result && typeof result === "object"
+      ? (result as { code?: unknown; message?: unknown })
+      : {};
+  const message = typeof payload.message === "string" ? payload.message : "";
+  const isAuthRequired =
+    response.status === 401 &&
+    (payload.code === "AUTH_REQUIRED" ||
+      message.toLowerCase().includes("authentication required"));
+
+  if (!isAuthRequired) return "";
+
+  const authMessage = "Authentication required. Please sign in again.";
+  setToast(authMessage);
+  if (typeof window !== "undefined") {
+    window.setTimeout(() => {
+      window.location.href = "/login";
+    }, 700);
+  }
+  return authMessage;
+}
+
 function bulkModuleFromView(view: string) {
   const map: Record<string, string> = {
     "bulk-assets": "assets",
@@ -1582,26 +1609,48 @@ export function CafmConsole({
   }
 
   async function refreshData() {
-    const response = await fetch("/api/operating-data", { cache: "no-store" });
+    const response = await fetch("/api/operating-data", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok) {
+      handleAuthRequiredResponse(response, result, setToast);
+      return;
+    }
     if (response.ok) {
-      setRecords(await response.json());
+      setRecords(result);
       setFullDataLoaded(true);
       setHousingFullLoaded(false);
     }
   }
 
   async function refreshHousingData() {
-    const response = await fetch("/api/housing", { cache: "no-store" });
-    if (!response.ok) return;
-    const housing = await response.json();
+    const response = await fetch("/api/housing", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    const housing = await response.json().catch(() => null);
+    if (!response.ok) {
+      handleAuthRequiredResponse(response, housing, setToast);
+      return;
+    }
     setRecords((current) => ({ ...current, housing }));
     setHousingFullLoaded(true);
   }
 
   async function loadDashboardData() {
-    const response = await fetch("/api/dashboard-data", { cache: "no-store" });
+    const response = await fetch("/api/dashboard-data", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok) {
+      handleAuthRequiredResponse(response, result, setToast);
+      return;
+    }
     if (response.ok) {
-      setRecords(await response.json());
+      setRecords(result);
       setFullDataLoaded(false);
     }
   }
@@ -1611,10 +1660,13 @@ export function CafmConsole({
       const payload = Object.fromEntries(formData.entries());
       const response = await fetch("/api/service-requests", {
         method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const result = await response.json().catch(() => ({}));
+      if (handleAuthRequiredResponse(response, result, setToast)) return false;
       setToast(
         response.ok
           ? `Service request ${result.ticketNo} created and saved.`
@@ -1639,20 +1691,28 @@ export function CafmConsole({
 
   async function submitWorkOrder(formData: FormData) {
     setSaving(true);
-    const payload = Object.fromEntries(formData.entries());
-    const response = await fetch("/api/work-orders", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const result = await response.json();
-    setToast(
-      response.ok
-        ? `Work order ${result.woNo} created and saved.`
-        : cleanMessage(result.message ?? "Work order failed."),
-    );
-    if (response.ok) mergeWorkOrderRecord(result);
-    setSaving(false);
+    try {
+      const payload = Object.fromEntries(formData.entries());
+      const response = await fetch("/api/work-orders", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (handleAuthRequiredResponse(response, result, setToast)) return;
+      setToast(
+        response.ok
+          ? `Work order ${result.woNo} created and saved.`
+          : cleanMessage(result.message ?? "Work order failed."),
+      );
+      if (response.ok) mergeWorkOrderRecord(result);
+    } catch (error) {
+      setToast(cleanMessage(error instanceof Error ? error.message : "Work order failed."));
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function postRecord(
@@ -1667,10 +1727,17 @@ export function CafmConsole({
       const payload = Object.fromEntries(formData.entries());
       const response = await fetch(path, {
         method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const result = await response.json().catch(() => ({}));
+      const authMessage = handleAuthRequiredResponse(response, result, setToast);
+      if (authMessage) {
+        if (throwOnError) throw new Error(authMessage);
+        return null;
+      }
       const linkedTickets = Array.isArray(result?.linkedRequests)
         ? result.linkedRequests.map((request: any) => request.ticketNo).filter(Boolean)
         : [];
@@ -1880,10 +1947,15 @@ export function CafmConsole({
     try {
       const response = await fetch(path, {
         method: "PATCH",
+        credentials: "same-origin",
+        cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       const result = await response.json().catch(() => ({}));
+      if (handleAuthRequiredResponse(response, result, setToast)) {
+        return { ok: false, result };
+      }
       setToast(
         response.ok
           ? successLabel
@@ -2018,8 +2090,16 @@ export function CafmConsole({
     refresh = true,
   ) {
     setSaving(true);
-    const response = await fetch(path, { method: "DELETE" });
+    const response = await fetch(path, {
+      method: "DELETE",
+      credentials: "same-origin",
+      cache: "no-store",
+    });
     const result = await response.json();
+    if (handleAuthRequiredResponse(response, result, setToast)) {
+      setSaving(false);
+      return;
+    }
     setToast(
       response.ok
         ? successLabel
@@ -2033,7 +2113,11 @@ export function CafmConsole({
     setSaving(true);
     const results = await Promise.all(
       ids.map(async (id) => {
-        const response = await fetch(`/api/assets/${id}`, { method: "DELETE" });
+        const response = await fetch(`/api/assets/${id}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+          cache: "no-store",
+        });
         const result = await response.json().catch(() => ({}));
         return {
           ok: response.ok,
@@ -2079,6 +2163,8 @@ export function CafmConsole({
             batch.map(async (id) => {
               const response = await fetch(`/api/work-orders/${id}`, {
                 method: "DELETE",
+                credentials: "same-origin",
+                cache: "no-store",
               });
               const result = await response.json().catch(() => ({}));
               return {
@@ -2129,11 +2215,17 @@ export function CafmConsole({
       `/api/service-requests/${id}/convert-work-order`,
       {
         method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(assignment),
       },
     );
     const result = await response.json();
+    if (handleAuthRequiredResponse(response, result, setToast)) {
+      setSaving(false);
+      return;
+    }
     setToast(
       response.ok
         ? `Work order ${result.woNo} created from request.`
@@ -2160,7 +2252,11 @@ export function CafmConsole({
   }
 
   async function logout() {
-    await fetch("/api/logout", { method: "POST" });
+    await fetch("/api/logout", {
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+    });
     window.location.href = "/login";
   }
 

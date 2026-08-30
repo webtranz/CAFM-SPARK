@@ -18,7 +18,7 @@ export const sandboxAdminPassword = "Admin@12345";
 export const sandboxAdminPasswords: Record<string, string> = {
   "admin@cafm.local": sandboxAdminPassword,
 };
-const sessionMaxAgeSeconds = 60 * 60 * 12;
+export const sessionMaxAgeSeconds = 60 * 60 * 24 * 7;
 
 function sessionSecret() {
   return process.env.SESSION_SECRET || process.env.NEXTAUTH_SECRET || process.env.DATABASE_URL || "cafm-development-session-secret";
@@ -31,6 +31,33 @@ function signSessionValue(userId: string, expiresAt: number) {
 export function createSessionToken(userId: string) {
   const expiresAt = Math.floor(Date.now() / 1000) + sessionMaxAgeSeconds;
   return `${userId}.${expiresAt}.${signSessionValue(userId, expiresAt)}`;
+}
+
+function requestUsesHttps(request: Request) {
+  const forwardedProto = request.headers
+    .get("x-forwarded-proto")
+    ?.split(",")[0]
+    ?.trim()
+    .toLowerCase();
+  const protocol = new URL(request.url).protocol;
+  return protocol === "https:" || forwardedProto === "https";
+}
+
+export function sessionCookieOptions(request: Request) {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    secure: requestUsesHttps(request),
+    path: "/",
+    maxAge: sessionMaxAgeSeconds,
+  };
+}
+
+export function clearSessionCookieOptions(request: Request) {
+  return {
+    ...sessionCookieOptions(request),
+    maxAge: 0,
+  };
 }
 
 function verifySessionToken(token: string) {
@@ -55,8 +82,8 @@ export async function getCurrentUser() {
   }
 
   try {
-    return await prisma.user.findUnique({
-      where: { id: userId },
+    return await prisma.user.findFirst({
+      where: { id: userId, active: true },
       select: { id: true, name: true, email: true, role: true, department: true, team: { select: { code: true, name: true } } },
     });
   } catch {

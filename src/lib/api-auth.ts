@@ -5,7 +5,15 @@ import { prisma } from "@/lib/prisma";
 import { DEFAULT_ROLE_NAMES, defaultPermissionCodesForRole, expandPermissionCode, hasPermissionCode } from "@/lib/default-role-permissions";
 
 export function authError(message = "Authentication required.", status = 401) {
-  return NextResponse.json({ message }, { status });
+  const response = NextResponse.json(
+    {
+      message,
+      code: status === 401 ? "AUTH_REQUIRED" : "ACCESS_DENIED",
+    },
+    { status },
+  );
+  response.headers.set("Cache-Control", "no-store");
+  return response;
 }
 
 export async function requireUser() {

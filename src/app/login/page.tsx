@@ -12,6 +12,8 @@ export default function LoginPage() {
     const payload = Object.fromEntries(new FormData(form).entries());
     const response = await fetch("/api/login", {
       method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
