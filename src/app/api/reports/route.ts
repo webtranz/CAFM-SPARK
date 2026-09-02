@@ -668,7 +668,9 @@ async function housingReportRows(type: string, filters: ReturnType<typeof report
   }
   if (["housing-bookings", "housing-occupancy-daily", "housing-occupancy-weekly", "housing-occupancy-monthly", "housing-company-occupancy", "housing-building-occupancy", "housing-bed-occupancy"].includes(type)) {
     const rows = await prisma.housingBooking.findMany({ include: { room: { include: { property: true, block: true } }, bed: true, resident: true }, orderBy: { createdAt: "desc" } });
-    const mapped = rows.map((row) => ({ reportPeriod: periodLabel(type, row.checkIn), bookingNo: row.bookingNo, employeeId: row.employeeId ?? row.resident?.residentNo ?? "", employeeName: row.residentName, companyName: row.companyName ?? row.resident?.companyName ?? "", company: row.companyName ?? row.resident?.companyName ?? "", department: row.departmentCode, nationality: row.nationality ?? row.resident?.nationality ?? "", contactNumber: row.contactNumber ?? row.resident?.phone ?? "", gender: row.gender ?? row.resident?.gender ?? "", building: row.buildingNumber ?? row.room.block?.name ?? "", buildingNumber: row.buildingNumber ?? row.room.block?.name ?? "", floor: row.floorNumber ?? row.room.floor, floorNumber: row.floorNumber ?? row.room.floor, room: row.roomNumber ?? row.room.roomNumber, roomNumber: row.roomNumber ?? row.room.roomNumber, bedNumber: row.bedNumber ?? row.bed?.label ?? "", bookingType: row.bookingType, allocationType: row.allocationType, property: row.room.property.name, block: row.room.block?.name ?? "", checkIn: dateValue(row.checkIn), checkOut: dateValue(row.checkOut), status: row.status, priority: row.priority, requestedBy: row.requestedBy, approvedBy: row.approvedBy, approvalLevel: row.approvalLevel, keyHandoverBy: row.keyHandoverBy, keyHandoverAt: dateValue(row.keyHandoverAt), campIdNumber: row.campIdNumber, campIdIssuedAt: dateValue(row.campIdIssuedAt), cancellationReason: row.cancellationReason, transferReason: row.transferReason, blacklistReason: row.blacklistReason, noShowAt: dateValue(row.noShowAt), notes: row.notes }));
+    const mapped = type === "housing-bookings"
+      ? guestStayReportRows(rows)
+      : rows.map((row) => ({ reportPeriod: periodLabel(type, row.checkIn), bookingNo: row.bookingNo, employeeId: row.employeeId ?? row.resident?.residentNo ?? "", employeeName: row.residentName, companyName: row.companyName ?? row.resident?.companyName ?? "", company: row.companyName ?? row.resident?.companyName ?? "", department: row.departmentCode, nationality: row.nationality ?? row.resident?.nationality ?? "", contactNumber: row.contactNumber ?? row.resident?.phone ?? "", gender: row.gender ?? row.resident?.gender ?? "", building: row.buildingNumber ?? row.room.block?.name ?? "", buildingNumber: row.buildingNumber ?? row.room.block?.name ?? "", floor: row.floorNumber ?? row.room.floor, floorNumber: row.floorNumber ?? row.room.floor, room: row.roomNumber ?? row.room.roomNumber, roomNumber: row.roomNumber ?? row.room.roomNumber, bedNumber: row.bedNumber ?? row.bed?.label ?? "", bookingType: row.bookingType, allocationType: row.allocationType, property: row.room.property.name, block: row.room.block?.name ?? "", checkIn: dateValue(row.checkIn), checkOut: dateValue(row.checkOut), status: row.status, priority: row.priority, requestedBy: row.requestedBy, approvedBy: row.approvedBy, approvalLevel: row.approvalLevel, keyHandoverBy: row.keyHandoverBy, keyHandoverAt: dateValue(row.keyHandoverAt), campIdNumber: row.campIdNumber, campIdIssuedAt: dateValue(row.campIdIssuedAt), cancellationReason: row.cancellationReason, transferReason: row.transferReason, blacklistReason: row.blacklistReason, noShowAt: dateValue(row.noShowAt), notes: row.notes }));
     return applyHousingFilters(mapped, filters);
   }
   if (["housing-inspections", "housing-cleaning-daily", "housing-deep-cleaning", "housing-inspection-report"].includes(type)) {
@@ -879,6 +881,45 @@ function dateValue(value: Date | null | undefined) {
   return value ? value.toISOString() : "";
 }
 
+function reportDateValue(value: Date | null | undefined) {
+  if (!value) return "";
+  const day = String(value.getDate()).padStart(2, "0");
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const year = String(value.getFullYear()).slice(-2);
+  return `${day}-${month}-${year}`;
+}
+
+function guestStayReportRows(rows: Array<{
+  bookingNo: string;
+  residentName: string;
+  companyName?: string | null;
+  departmentCode?: string | null;
+  roomNumber?: string | null;
+  bookingType: string;
+  allocationType: string;
+  checkIn: Date;
+  checkOut?: Date | null;
+  status: string;
+  room: { roomNumber: string; property: { name: string }; block?: { name: string } | null };
+  resident?: { companyName?: string | null } | null;
+}>) {
+  return rows
+    .filter((row) => ["CHECKED_IN", "APPROVED"].includes(String(row.status || "").toUpperCase()))
+    .map((row) => ({
+      LCF_LEASENAME: row.room.property.name,
+      "Lease Status": "Definite",
+      LCF_LEASENUMBER: row.bookingNo,
+      Name: row.residentName,
+      "Start Date": reportDateValue(row.checkIn),
+      "End Date": reportDateValue(row.checkOut),
+      LCF_ROOM: row.roomNumber ?? row.room.roomNumber,
+      "Market Segment": row.allocationType || row.bookingType,
+      "Market segment name": row.companyName ?? row.resident?.companyName ?? row.departmentCode ?? "",
+      "Reservation No.": row.bookingNo,
+      "Guest Stay status": String(row.status).toUpperCase() === "CHECKED_IN" ? "In-House" : "Reserved",
+    }));
+}
+
 async function housingMaintenanceReport(type: string, filters: ReturnType<typeof reportFilters>) {
   const rows = await prisma.serviceRequest.findMany({
     where: { OR: [{ category: { contains: "Housing", mode: "insensitive" } }, { departmentCode: "HOUSING" }] },
@@ -961,11 +1002,11 @@ async function housingTechnicianPerformanceReport(filters: ReturnType<typeof rep
 
 function applyHousingFilters(rows: ReportRow[], filters: ReturnType<typeof reportFilters>) {
   return rows.filter((row) => {
-    if (filters.company && !includesValue(row, ["company", "companyName", "department", "departmentCode"], filters.company)) return false;
-    if (filters.building && !includesValue(row, ["building", "buildingNumber", "buildingLocation", "block", "property"], filters.building)) return false;
+    if (filters.company && !includesValue(row, ["company", "companyName", "department", "departmentCode", "Market Segment", "Market segment name"], filters.company)) return false;
+    if (filters.building && !includesValue(row, ["building", "buildingNumber", "buildingLocation", "block", "property", "LCF_LEASENAME"], filters.building)) return false;
     if (filters.floor && !includesValue(row, ["floor", "floorNumber"], filters.floor)) return false;
-    if (filters.room && !includesValue(row, ["room", "roomNumber", "roomLocation"], filters.room)) return false;
-    if (filters.status && !includesValue(row, ["status", "readiness"], filters.status)) return false;
+    if (filters.room && !includesValue(row, ["room", "roomNumber", "roomLocation", "LCF_ROOM"], filters.room)) return false;
+    if (filters.status && !includesValue(row, ["status", "readiness", "Guest Stay status"], filters.status)) return false;
     if ((filters.dateFrom || filters.dateTo) && !rowMatchesDate(row, filters.dateFrom, filters.dateTo)) return false;
     return true;
   });
@@ -977,16 +1018,25 @@ function includesValue(row: ReportRow, keys: string[], expected: string) {
 }
 
 function rowMatchesDate(row: ReportRow, dateFrom: string, dateTo: string) {
-  const keys = ["createdAt", "updatedAt", "checkIn", "checkOut", "dueAt", "completedAt", "purchaseDate", "warrantyExpiry", "transferredAt", "nextPmDue", "closedAt", "sentAt", "queuedAt"];
+  const keys = ["createdAt", "updatedAt", "checkIn", "checkOut", "Start Date", "End Date", "dueAt", "completedAt", "purchaseDate", "warrantyExpiry", "transferredAt", "nextPmDue", "closedAt", "sentAt", "queuedAt"];
   return keys.some((key) => {
     const value = row[key];
     if (!value) return false;
-    const time = new Date(String(value)).getTime();
+    const time = reportDateTime(String(value));
     if (Number.isNaN(time)) return false;
     if (dateFrom && time < new Date(`${dateFrom}T00:00:00`).getTime()) return false;
     if (dateTo && time > new Date(`${dateTo}T23:59:59`).getTime()) return false;
     return true;
   });
+}
+
+function reportDateTime(value: string) {
+  const match = value.match(/^(\d{2})-(\d{2})-(\d{2})$/);
+  if (match) {
+    const [, day, month, year] = match;
+    return new Date(`20${year}-${month}-${day}T00:00:00`).getTime();
+  }
+  return new Date(value).getTime();
 }
 
 function periodLabel(type: string, value: Date) {
@@ -1011,13 +1061,6 @@ function csv(rows: ReportRow[]) {
 
 function excel(rows: ReportRow[], title: string, kpis: Record<string, unknown> | null) {
   const sheets: WorkbookSheet[] = [{ name: prettyTitle(title).slice(0, 31) || "Report", rows }];
-  if (title === "housing-bookings") {
-    sheets.push({
-      name: "Approved Checked In",
-      columns: ["ID", "Name", "Department", "Start date", "End date", "Guest stay status"],
-      rows: housingApprovedCheckedInRows(rows),
-    });
-  }
   if (kpis) {
     sheets.unshift({
       name: "KPI Summary",
@@ -1026,19 +1069,6 @@ function excel(rows: ReportRow[], title: string, kpis: Record<string, unknown> |
     });
   }
   return workbook(sheets);
-}
-
-function housingApprovedCheckedInRows(rows: ReportRow[]) {
-  return rows
-    .filter((row) => ["APPROVED", "CHECKED_IN"].includes(String(row.status ?? "").toUpperCase()))
-    .map((row) => ({
-      ID: row.employeeId ?? "",
-      Name: row.employeeName ?? "",
-      Department: row.department ?? row.departmentCode ?? "",
-      "Start date": row.checkIn ?? "",
-      "End date": row.checkOut ?? "",
-      "Guest stay status": prettyTitle(String(row.status ?? "").toLowerCase()),
-    }));
 }
 
 function workbook(sheets: WorkbookSheet[]) {
