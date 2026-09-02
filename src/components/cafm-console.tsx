@@ -26404,48 +26404,6 @@ function HousingOperations({
                 onClick={() => setCreateHousingForm("booking")}
               />
             )}
-            {canOperateBookings && (
-              <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-                <button
-                  type="button"
-                  onClick={() =>
-                    bulkCheckInBookings(
-                      visibleBookings,
-                      "Bulk check-in completed",
-                    )
-                  }
-                  className="rounded-lg bg-lagoon px-4 py-2 text-xs font-black text-white"
-                >
-                  Bulk Check-in Approved
-                </button>
-                <button
-                  type="button"
-                  onClick={() => queueBulkCheckoutBookings(visibleBookings)}
-                  className="rounded-lg bg-ink px-4 py-2 text-xs font-black text-white"
-                >
-                  Bulk Check-out Active
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    visibleBookings
-                      .filter(
-                        (booking) => booking.status === "PENDING_APPROVAL",
-                      )
-                      .forEach((booking) =>
-                        updateHousing("booking", booking.id, {
-                          status: "NO_SHOW",
-                          noShowAt: new Date().toISOString(),
-                          notes: "Marked no-show in bulk review",
-                        }),
-                      )
-                  }
-                  className="rounded-lg bg-amber-600 px-4 py-2 text-xs font-black text-white"
-                >
-                  Mark Pending No-show
-                </button>
-              </div>
-            )}
             <HousingTable
               title="Accommodation & Booking Management"
               rows={visibleBookings}
