@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/api-auth";
+import { guestStayReportRows } from "@/lib/guest-stay-report";
 import { convertExpiredUncheckedHousingBookingsToNoShow } from "@/lib/housing-no-show";
 import { prisma } from "@/lib/prisma";
 import { workOrderKpis, workOrderMetrics } from "@/lib/work-order-analytics";
@@ -669,7 +670,7 @@ async function housingReportRows(type: string, filters: ReturnType<typeof report
   if (["housing-bookings", "housing-occupancy-daily", "housing-occupancy-weekly", "housing-occupancy-monthly", "housing-company-occupancy", "housing-building-occupancy", "housing-bed-occupancy"].includes(type)) {
     const rows = await prisma.housingBooking.findMany({ include: { room: { include: { property: true, block: true } }, bed: true, resident: true }, orderBy: { createdAt: "desc" } });
     const mapped = type === "housing-bookings"
-      ? guestStayReportRows(rows)
+      ? await guestStayReportRows()
       : rows.map((row) => ({ reportPeriod: periodLabel(type, row.checkIn), bookingNo: row.bookingNo, employeeId: row.employeeId ?? row.resident?.residentNo ?? "", employeeName: row.residentName, companyName: row.companyName ?? row.resident?.companyName ?? "", company: row.companyName ?? row.resident?.companyName ?? "", department: row.departmentCode, nationality: row.nationality ?? row.resident?.nationality ?? "", contactNumber: row.contactNumber ?? row.resident?.phone ?? "", gender: row.gender ?? row.resident?.gender ?? "", building: row.buildingNumber ?? row.room.block?.name ?? "", buildingNumber: row.buildingNumber ?? row.room.block?.name ?? "", floor: row.floorNumber ?? row.room.floor, floorNumber: row.floorNumber ?? row.room.floor, room: row.roomNumber ?? row.room.roomNumber, roomNumber: row.roomNumber ?? row.room.roomNumber, bedNumber: row.bedNumber ?? row.bed?.label ?? "", bookingType: row.bookingType, allocationType: row.allocationType, property: row.room.property.name, block: row.room.block?.name ?? "", checkIn: dateValue(row.checkIn), checkOut: dateValue(row.checkOut), status: row.status, priority: row.priority, requestedBy: row.requestedBy, approvedBy: row.approvedBy, approvalLevel: row.approvalLevel, keyHandoverBy: row.keyHandoverBy, keyHandoverAt: dateValue(row.keyHandoverAt), campIdNumber: row.campIdNumber, campIdIssuedAt: dateValue(row.campIdIssuedAt), cancellationReason: row.cancellationReason, transferReason: row.transferReason, blacklistReason: row.blacklistReason, noShowAt: dateValue(row.noShowAt), notes: row.notes }));
     return applyHousingFilters(mapped, filters);
   }
@@ -879,45 +880,6 @@ async function totalEntriesReportRows(): Promise<ReportRow[]> {
 }
 function dateValue(value: Date | null | undefined) {
   return value ? value.toISOString() : "";
-}
-
-function reportDateValue(value: Date | null | undefined) {
-  if (!value) return "";
-  const day = String(value.getDate()).padStart(2, "0");
-  const month = String(value.getMonth() + 1).padStart(2, "0");
-  const year = String(value.getFullYear()).slice(-2);
-  return `${day}-${month}-${year}`;
-}
-
-function guestStayReportRows(rows: Array<{
-  bookingNo: string;
-  residentName: string;
-  companyName?: string | null;
-  departmentCode?: string | null;
-  roomNumber?: string | null;
-  bookingType: string;
-  allocationType: string;
-  checkIn: Date;
-  checkOut?: Date | null;
-  status: string;
-  room: { roomNumber: string; property: { name: string }; block?: { name: string } | null };
-  resident?: { companyName?: string | null } | null;
-}>) {
-  return rows
-    .filter((row) => ["CHECKED_IN", "APPROVED"].includes(String(row.status || "").toUpperCase()))
-    .map((row) => ({
-      LCF_LEASENAME: row.room.property.name,
-      "Lease Status": "Definite",
-      LCF_LEASENUMBER: row.bookingNo,
-      Name: row.residentName,
-      "Start Date": reportDateValue(row.checkIn),
-      "End Date": reportDateValue(row.checkOut),
-      LCF_ROOM: row.roomNumber ?? row.room.roomNumber,
-      "Market Segment": row.allocationType || row.bookingType,
-      "Market segment name": row.companyName ?? row.resident?.companyName ?? row.departmentCode ?? "",
-      "Reservation No.": row.bookingNo,
-      "Guest Stay status": String(row.status).toUpperCase() === "CHECKED_IN" ? "In-House" : "Reserved",
-    }));
 }
 
 async function housingMaintenanceReport(type: string, filters: ReturnType<typeof reportFilters>) {
