@@ -2,6 +2,8 @@ import { prisma } from "@/lib/prisma";
 
 type ReportRow = Record<string, string | number | boolean | null>;
 
+const headers = ["ID", "Name", "Room", "Department", "Start date", "End date", "Guest stay status"];
+
 export async function guestStayReportRows(): Promise<ReportRow[]> {
   const rows = await prisma.housingBooking.findMany({
     include: { room: { include: { property: true, block: true } }, resident: true },
@@ -11,23 +13,17 @@ export async function guestStayReportRows(): Promise<ReportRow[]> {
   return rows
     .filter((row) => ["CHECKED_IN", "APPROVED"].includes(String(row.status || "").toUpperCase()))
     .map((row) => ({
-      LCF_LEASENAME: row.room.property.name,
-      "Lease Status": "Definite",
-      LCF_LEASENUMBER: row.bookingNo,
+      ID: row.employeeId ?? row.resident?.residentNo ?? row.bookingNo,
       Name: row.residentName,
-      "Start Date": reportDateValue(row.checkIn),
-      "End Date": reportDateValue(row.checkOut),
-      LCF_ROOM: row.roomNumber ?? row.room.roomNumber,
-      "Market Segment": row.allocationType || row.bookingType,
-      "Market segment name": row.companyName ?? row.resident?.companyName ?? row.departmentCode ?? "",
-      "Reservation No.": row.bookingNo,
-      "Guest Stay status": String(row.status).toUpperCase() === "CHECKED_IN" ? "In-House" : "Reserved",
+      Room: row.roomNumber ?? row.room.roomNumber,
+      Department: row.departmentCode ?? "",
+      "Start date": reportDateValue(row.checkIn),
+      "End date": reportDateValue(row.checkOut),
+      "Guest stay status": guestStayStatus(row.status),
     }));
 }
 
 export function csv(rows: ReportRow[]) {
-  if (!rows.length) return "";
-  const headers = Object.keys(rows[0]);
   return [headers.join(","), ...rows.map((row) => headers.map((header) => quote(row[header])).join(","))].join("\n");
 }
 
@@ -46,4 +42,8 @@ function reportDateValue(value: Date | null | undefined) {
   const month = String(value.getMonth() + 1).padStart(2, "0");
   const year = String(value.getFullYear()).slice(-2);
   return `${day}-${month}-${year}`;
+}
+
+function guestStayStatus(status: string) {
+  return String(status).toUpperCase() === "CHECKED_IN" ? "Checked in" : "Approved";
 }
