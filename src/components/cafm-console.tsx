@@ -11,6 +11,7 @@ import {
 } from "react";
 import type { ReactNode, UIEvent } from "react";
 import Image from "next/image";
+import { HOUSING_DEPARTMENTS } from "@/lib/housing-departments";
 import {
   Activity,
   AlertTriangle,
@@ -11084,27 +11085,7 @@ function locationOptionDetail(location: any) {
 
 type SearchableOption = { value: string; label: string };
 
-const STANDARD_HOUSING_DEPARTMENT_OPTIONS: SearchableOption[] = [
-  "KGPD",
-  "KPOD",
-  "WGP",
-  "FGP",
-  "NAGPD",
-  "SECURITY",
-  "FrPD",
-  "LOSS PREVENTION",
-  "POD",
-  "T&ESD",
-  "IT",
-  "MATERIALS",
-  "COMMUNITY SERVICES",
-  "NAGO",
-  "NA WELL",
-  "MEDICAL",
-  "TRANSIENT",
-  "OTHER",
-  "EMERGENCY",
-].map((department) => ({ value: department, label: department }));
+const STANDARD_HOUSING_DEPARTMENT_OPTIONS: SearchableOption[] = HOUSING_DEPARTMENTS.map((value) => ({ value, label: value }));
 
 function standardHousingDepartmentValue(value: unknown) {
   const code = String(value || "").trim();
@@ -29101,11 +29082,7 @@ function HousingSetupForms({
               placeholder="Nationality"
               className={HOUSING_FIELD_CLASS}
             />
-            <input
-              name="departmentCode"
-              placeholder="Department code"
-              className={HOUSING_FIELD_CLASS}
-            />
+            <HousingDepartmentField />
             <select name="status" className={HOUSING_FIELD_CLASS}>
               <option>ACTIVE</option>
               <option>BLACKLISTED</option>
@@ -29115,6 +29092,31 @@ function HousingSetupForms({
         </HousingForm>
       )}
     </Panel>
+  );
+}
+
+function HousingDepartmentField({ value, onChange, required = false }: {
+  value?: string; onChange?: (value: string) => void; required?: boolean;
+}) {
+  const [localValue, setLocalValue] = useState("");
+  const [query, setQuery] = useState("");
+  const selected = value ?? localValue;
+  const options = HOUSING_DEPARTMENTS.filter((item) => item.toLowerCase().includes(query.toLowerCase()));
+  return (
+    <label className="grid gap-2" data-housing-field="departmentCode">
+      <span className="text-sm font-bold text-slate-600">Department{required ? " *" : ""}</span>
+      <input type="search" aria-label="Search departments" placeholder="Search departments" value={query}
+        onChange={(event) => setQuery(event.target.value)} className={HOUSING_FIELD_CLASS} />
+      <select name="departmentCode" aria-label="Department" required={required} value={selected}
+        onChange={(event) => { setLocalValue(event.target.value); onChange?.(event.target.value); }}
+        className={HOUSING_FIELD_CLASS}>
+        <option value="">Select department</option>
+        {selected && !options.some((item) => item === selected) && HOUSING_DEPARTMENTS.some((item) => item === selected)
+          ? <option value={selected}>{selected}</option> : null}
+        {options.map((item) => <option key={item} value={item}>{item}</option>)}
+      </select>
+      {!options.length ? <span className="text-sm text-slate-500">No matching departments</span> : null}
+    </label>
   );
 }
 
@@ -29173,16 +29175,7 @@ function HousingResidentEditForm({
           placeholder="Company name"
           className={HOUSING_FIELD_CLASS}
         />
-        <div className="grid gap-1">
-          <input type="hidden" name="departmentCode" value={departmentCode} />
-          <SearchableDropdownField
-            value={departmentCode}
-            options={STANDARD_HOUSING_DEPARTMENT_OPTIONS}
-            placeholder="Department"
-            onInput={setDepartmentCode}
-            onSelect={(option) => setDepartmentCode(option.value)}
-          />
-        </div>
+        <HousingDepartmentField value={departmentCode} onChange={setDepartmentCode} />
         <input
           name="nationality"
           defaultValue={resident.nationality ?? ""}
@@ -29730,15 +29723,6 @@ function HousingBookingForm({
       ),
     [bookings, residents],
   );
-  const sourceDepartmentOptions = useMemo(
-    () =>
-      mergeSearchableOptions(
-        STANDARD_HOUSING_DEPARTMENT_OPTIONS,
-        uniqueTextOptions(residents, (resident) => resident.departmentCode),
-        uniqueTextOptions(bookings, (booking) => booking.departmentCode),
-      ),
-    [bookings, residents],
-  );
   const [residentId, setResidentId] = useState("");
   const [residentSearch, setResidentSearch] = useState("");
   const [employeeId, setEmployeeId] = useState("");
@@ -29816,16 +29800,9 @@ function HousingBookingForm({
   const [showCompanyAdd, setShowCompanyAdd] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
   const [customCompanyOptions, setCustomCompanyOptions] = useState<SearchableOption[]>([]);
-  const [showDepartmentAdd, setShowDepartmentAdd] = useState(false);
-  const [newDepartmentName, setNewDepartmentName] = useState("");
-  const [customDepartmentOptions, setCustomDepartmentOptions] = useState<SearchableOption[]>([]);
   const companyOptions = useMemo(
     () => mergeSearchableOptions(sourceCompanyOptions, customCompanyOptions),
     [sourceCompanyOptions, customCompanyOptions],
-  );
-  const departmentOptions = useMemo(
-    () => mergeSearchableOptions(sourceDepartmentOptions, customDepartmentOptions),
-    [sourceDepartmentOptions, customDepartmentOptions],
   );
   const isPermanentBooking = bookingType.toUpperCase() === "PERMANENT";
   const selectResident = (option: SearchableOption) => {
@@ -29836,7 +29813,7 @@ function HousingBookingForm({
     setEmployeeId(resident.residentNo || resident.employeeId || "");
     setEmployeeName(resident.name || resident.residentName || "");
     setCompanyName(resident.companyName || resident.companyId || DEFAULT_HOUSING_COMPANY_NAME);
-    setDepartmentCode(resident.departmentCode || "");
+    setDepartmentCode(standardHousingDepartmentValue(resident.departmentCode));
     setNationality(resident.nationality || DEFAULT_HOUSING_NATIONALITY);
     setContactNumber(resident.phone || resident.contactNumber || "");
     setGender(resident.gender || DEFAULT_HOUSING_GENDER);
@@ -29964,52 +29941,7 @@ function HousingBookingForm({
             </div>
           ) : null}
         </div>
-        <div className="grid gap-2" data-housing-field="departmentCode">
-          <div className="flex gap-2">
-            <input type="hidden" name="departmentCode" value={departmentCode} />
-            <SearchableDropdownField
-              value={departmentCode}
-              options={departmentOptions}
-              placeholder={isPermanentBooking ? "Department *" : "Department"}
-              className="min-w-0 flex-1"
-              onInput={setDepartmentCode}
-              onSelect={(option) => setDepartmentCode(option.value)}
-            />
-            <button
-              type="button"
-              onClick={() => setShowDepartmentAdd((value) => !value)}
-              className="h-11 w-11 rounded-lg border border-emerald-200 bg-emerald-50 text-lg font-black text-emerald-700"
-              aria-label="Add new department"
-              title="Add new department"
-            >
-              +
-            </button>
-          </div>
-          {showDepartmentAdd ? (
-            <div className="flex gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-2">
-              <input
-                value={newDepartmentName}
-                onChange={(event) => setNewDepartmentName(event.target.value)}
-                placeholder="New department"
-                className={`${HOUSING_FIELD_CLASS} min-w-0 flex-1`}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const value = newDepartmentName.trim();
-                  if (!value) return;
-                  setDepartmentCode(value);
-                  setCustomDepartmentOptions((current) => mergeSearchableOptions(current, [{ value, label: value }]));
-                  setNewDepartmentName("");
-                  setShowDepartmentAdd(false);
-                }}
-                className="h-11 rounded-lg bg-lagoon px-4 text-sm font-black text-white"
-              >
-                Add
-              </button>
-            </div>
-          ) : null}
-        </div>
+        <HousingDepartmentField value={departmentCode} onChange={setDepartmentCode} required={isPermanentBooking} />
         <select
           name="nationality"
           value={nationality}

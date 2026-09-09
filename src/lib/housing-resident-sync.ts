@@ -1,3 +1,5 @@
+import { validateHousingDepartment } from "./housing-departments";
+
 type HousingResidentSnapshot = {
   id: string;
   residentNo: string;
@@ -32,7 +34,7 @@ export async function syncHousingResidentToBookings(
       residentId: resident.id,
       residentName: resident.name,
       employeeId: resident.residentNo,
-      departmentCode: resident.departmentCode || "",
+      departmentCode: validateHousingDepartment(resident.departmentCode),
       companyName: resident.companyName || resident.companyId || "",
       nationality: resident.nationality || "",
       contactNumber: resident.phone || "",

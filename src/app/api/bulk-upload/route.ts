@@ -1,4 +1,5 @@
-﻿import { createHash } from "crypto";
+import { validateHousingDepartment } from "@/lib/housing-departments";
+import { createHash } from "crypto";
 import { copyFile, mkdir, readFile, stat, writeFile } from "fs/promises";
 import path from "path";
 import { NextResponse } from "next/server";
@@ -938,7 +939,7 @@ async function importHousingGuest(row: Row, context: ImportContext = {}) {
     companyName: value(row, "companyName", "Company Name") || null,
     gender: value(row, "gender", "Gender") || null,
     nationality: value(row, "nationality", "Nationality") || null,
-    departmentCode: value(row, "departmentCode", "Department Code", "department") || null,
+    departmentCode: validateHousingDepartment(value(row, "departmentCode", "Department Code", "department")) || null,
     status: value(row, "status", "Status") || "ACTIVE",
   };
   const guest = await prisma.housingResident.upsert({
@@ -954,6 +955,7 @@ async function importHousingOccupancy(row: Row, context: ImportContext = {}) {
   const existing = await prisma.housingBooking.findUnique({ where: { bookingNo } });
   if (existing && !shouldReplace(context)) return existingResult("housing_booking", existing, bookingNo, existing.residentName);
 
+  validateHousingDepartment(value(row, "departmentCode", "Department Code"));
   const room = await housingRoomForOccupancy(row);
   const residentNo = value(row, "residentNo", "Resident No", "guestId", "Guest ID", "Agreement/ Budge No.", "Budge No.", "Badge No.");
   const resident = residentNo ? await findOrCreateHousingResident(row, residentNo) : null;
@@ -964,7 +966,7 @@ async function importHousingOccupancy(row: Row, context: ImportContext = {}) {
   const payload = {
     residentId: resident?.id,
     residentName,
-    departmentCode: value(row, "departmentCode", "Department Code") || resident?.departmentCode || null,
+    departmentCode: validateHousingDepartment(value(row, "departmentCode", "Department Code") || resident?.departmentCode, value(row, "bookingType", "Booking Type").toUpperCase() === "PERMANENT") || null,
     employeeId: residentNo || null,
     companyName: value(row, "companyName", "Company Name") || resident?.companyName || null,
     nationality: value(row, "nationality", "Nationality") || resident?.nationality || null,
@@ -1050,7 +1052,7 @@ async function findOrCreateHousingResident(row: Row, residentNo: string) {
       companyName: value(row, "companyName", "Company Name") || null,
       gender: value(row, "gender", "Gender") || null,
       nationality: value(row, "nationality", "Nationality") || null,
-      departmentCode: value(row, "departmentCode", "Department Code") || null,
+      departmentCode: validateHousingDepartment(value(row, "departmentCode", "Department Code")) || null,
       status: "ACTIVE",
     },
   });

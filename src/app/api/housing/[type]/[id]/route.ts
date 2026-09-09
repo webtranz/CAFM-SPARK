@@ -1,3 +1,4 @@
+import { validateHousingDepartment } from "@/lib/housing-departments";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api-response";
@@ -32,6 +33,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ty
   try {
     const { type, id } = await params;
     const input = bodySchema.parse(await request.json());
+    if ((type === "booking" || type === "resident") && "departmentCode" in input) validateHousingDepartment(input.departmentCode);
     const permissionCode = type === "approval" ? "housing.approve" : "housing.edit";
     const { error: permissionError } = await requirePermission(permissionCode);
     if (permissionError) return permissionError;
@@ -295,7 +297,7 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
           companyName: text(input.companyName) || text(input.companyId),
           gender: text(input.gender),
           nationality: text(input.nationality),
-          departmentCode: text(input.departmentCode),
+          departmentCode: validateHousingDepartment(input.departmentCode),
           status: text(input.status) || current.status,
         },
       });

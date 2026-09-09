@@ -1,3 +1,4 @@
+import { validateHousingDepartment } from "@/lib/housing-departments";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api-response";
@@ -336,6 +337,7 @@ export async function POST(request: Request) {
     const { error } = await requirePermission("housing.create");
     if (error) return error;
     const input = housingSchema.parse(await request.json());
+    if (input.type === "booking" || input.type === "resident") validateHousingDepartment(input.departmentCode, input.type === "booking" && input.bookingType?.toUpperCase() === "PERMANENT");
     const user = await getCurrentUser();
     const actor = user?.name || user?.email || "System";
     const result = await createHousingRecord(input, actor);
@@ -728,7 +730,7 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
   if (!employeeId.trim()) throw new HousingInputError("Employee ID is required for accommodation bookings.");
   if (!employeeName.trim()) throw new HousingInputError("Employee name is required for accommodation bookings.");
   const bookingType = (input.bookingType || "TEMPORARY").toUpperCase();
-  const departmentCode = input.departmentCode || resident?.departmentCode || "";
+  const departmentCode = validateHousingDepartment(input.departmentCode ?? resident?.departmentCode, bookingType === "PERMANENT");
   const companyName = input.companyName || resident?.companyName || input.companyId || defaultHousingCompanyName;
   const nationality = input.nationality || resident?.nationality || defaultHousingNationality;
   if (bookingType === "PERMANENT" && !departmentCode.trim()) {
@@ -920,7 +922,7 @@ function residentData(input: z.infer<typeof housingSchema>, residentNo: string) 
     companyName: input.companyName || input.companyId || (isBookingResident ? defaultHousingCompanyName : ""),
     gender: input.gender || (isBookingResident ? defaultHousingGender : ""),
     nationality: input.nationality || (isBookingResident ? defaultHousingNationality : ""),
-    departmentCode: input.departmentCode || "",
+    departmentCode: validateHousingDepartment(input.departmentCode),
     status: input.type === "resident" ? input.status || "ACTIVE" : "ACTIVE",
   };
 }
