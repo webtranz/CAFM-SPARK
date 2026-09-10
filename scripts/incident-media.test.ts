@@ -1,0 +1,21 @@
+import assert from "node:assert/strict";
+import { validateIncidentMedia } from "../src/lib/incident-media";
+import { contentTypeForFile } from "../src/lib/private-files";
+
+const jpeg = Buffer.from([255, 216, 255, 224]);
+assert.equal(validateIncidentMedia("photo.JPG", jpeg), ".jpg");
+assert.equal(validateIncidentMedia("photo.png", Buffer.from([137,80,78,71,13,10,26,10])), ".png");
+const mp4 = Buffer.from([0,0,0,24,102,116,121,112,105,115,111,109]);
+assert.equal(validateIncidentMedia("incident.mp4", mp4), ".mp4");
+assert.equal(validateIncidentMedia("incident.mov", mp4), ".mov");
+assert.equal(validateIncidentMedia("incident.webm", Buffer.from([26,69,223,163])), ".webm");
+assert.throws(() => validateIncidentMedia("fake.jpg", Buffer.from("<script>alert(1)</script>")));
+assert.throws(() => validateIncidentMedia("fake.mp4", jpeg));
+assert.throws(() => validateIncidentMedia("photo.html", jpeg));
+assert.throws(() => validateIncidentMedia("empty.mp4", Buffer.alloc(0)));
+assert.throws(() => validateIncidentMedia("large.jpg", Buffer.alloc(5 * 1024 * 1024 + 1)));
+assert.throws(() => validateIncidentMedia("large.mp4", Buffer.alloc(50 * 1024 * 1024 + 1)));
+assert.equal(contentTypeForFile("incident.mp4"), "video/mp4");
+assert.equal(contentTypeForFile("incident.webm"), "video/webm");
+assert.equal(contentTypeForFile("incident.mov"), "video/quicktime");
+console.log("Incident media format, size and playback content-type checks passed.");

@@ -11,6 +11,7 @@ import {
 } from "react";
 import type { ReactNode, UIEvent } from "react";
 import Image from "next/image";
+import { IncidentMediaGallery, IncidentMediaUpload } from "./incident-media";
 import { HOUSING_DEPARTMENTS } from "@/lib/housing-departments";
 import {
   Activity,
@@ -2848,7 +2849,7 @@ export function CafmConsole({
               inspections={records.inspections}
               saving={saving}
               submitIncident={(formData) =>
-                postRecord("/api/service-requests", formData, "Incident / case")
+                postRecord("/api/service-requests", formData, "Incident / case", true, true)
               }
               navigate={navigate}
             />
@@ -18210,11 +18211,13 @@ function IncidentCaseManagement({
   workOrders: any[];
   inspections: any[];
   saving: boolean;
-  submitIncident: (formData: FormData) => void;
+  submitIncident: (formData: FormData) => Promise<unknown>;
   navigate: (moduleId: string, menuKey: string, view?: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [mediaUploading, setMediaUploading] = useState(false);
+  const [incidentSaveError, setIncidentSaveError] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [tab, setTab] = useState<
     "record" | "comments" | "documents" | "tasks" | "eventLog"
@@ -18257,6 +18260,7 @@ function IncidentCaseManagement({
   const rows = [
     ...uploadedCases.map((inspection) => ({
       id: inspection.id,
+      mediaUrls: "",
       source: "Case",
       reference: inspection.code,
       title: inspection.title,
@@ -18292,6 +18296,7 @@ function IncidentCaseManagement({
     })),
     ...incidentRequests.map((request) => ({
       id: request.id,
+      mediaUrls: request.attachmentUrls || "",
       source: "Service Request",
       reference: request.ticketNo,
       title: request.title,
@@ -18323,6 +18328,7 @@ function IncidentCaseManagement({
     })),
     ...incidentWorkOrders.map((work) => ({
       id: work.id,
+      mediaUrls: work.request?.attachmentUrls || "",
       source: "Work Order",
       reference: work.woNo,
       title: work.title,
@@ -18417,6 +18423,7 @@ function IncidentCaseManagement({
           </div>
           <button
             type="button"
+            disabled={mediaUploading || saving}
             onClick={() => setCreateOpen((current) => !current)}
             className="rounded-lg bg-lagoon px-4 py-2 text-sm font-black text-white"
           >
@@ -18425,11 +18432,16 @@ function IncidentCaseManagement({
         </div>
         {createOpen && (
           <form
-            onSubmit={(event) => {
+            onSubmit={async (event) => {
               event.preventDefault();
-              submitIncident(new FormData(event.currentTarget));
-              event.currentTarget.reset();
-              setCreateOpen(false);
+              if (mediaUploading || saving) return;
+              setIncidentSaveError("");
+              try {
+                await submitIncident(new FormData(event.currentTarget));
+                setCreateOpen(false);
+              } catch (error) {
+                setIncidentSaveError(error instanceof Error ? error.message : "Unable to save incident. Please retry.");
+              }
             }}
             className="mb-4 grid gap-3 rounded-lg border border-lagoon/20 bg-lagoon/5 p-4"
           >
@@ -18490,10 +18502,12 @@ function IncidentCaseManagement({
               placeholder="Incident details / complaint description"
               className="min-h-24 rounded-lg border border-slate-200 bg-white p-3 text-sm font-bold outline-none focus:border-lagoon"
             />
+            <IncidentMediaUpload onUploading={setMediaUploading} />
+            {incidentSaveError && <p role="alert" className="text-sm text-coral">{incidentSaveError}</p>}
             <div className="flex justify-end">
               <button
                 type="submit"
-                disabled={saving}
+                disabled={saving || mediaUploading}
                 className="rounded-lg bg-ink px-5 py-2 text-sm font-black text-white disabled:bg-slate-300"
               >
                 Create Incident
@@ -18622,7 +18636,7 @@ function IncidentCaseManagement({
                 )}
                 {tab === "comments" && <CaseComments comments={comments} />}
                 {tab === "documents" && (
-                  <CaseEmptyTab
+                  selected.mediaUrls ? <div className="p-4"><IncidentMediaGallery urls={attachmentList(selected.mediaUrls)} /></div> : <CaseEmptyTab
                     title="Documents"
                     message="No case documents have been attached yet."
                   />

@@ -3,6 +3,9 @@ import path from "path";
 export const privateUploadRoot = path.join(process.cwd(), "storage", "uploads");
 
 const contentTypes: Record<string, string> = {
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
   ".csv": "text/csv",
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ".gif": "image/gif",
