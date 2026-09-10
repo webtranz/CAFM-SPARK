@@ -26387,7 +26387,12 @@ function HousingOperations({
             )}
             <HousingTable
               title="Accommodation & Booking Management"
-              rows={visibleBookings}
+              rows={visibleBookings.map((booking) => ({
+                ...booking,
+                bookingStatusLabel: booking.status === "CHECKED_IN"
+                  ? "In-house"
+                  : booking.status === "APPROVED" ? "Reserved" : booking.status,
+              }))}
               columns={[
                 ["bookingNo", "Booking"],
                 ["employeeId", "Badge No"],
@@ -26400,7 +26405,7 @@ function HousingOperations({
                 ["checkOut", "End Date"],
                 ["extensionStatus", "Extension"],
                 ["bookingType", "Type"],
-                ["status", "Checked-In Status"],
+                ["bookingStatusLabel", "Checked-In Status"],
               ]}
               onSelect={(record) => setSelected({ type: "booking", record })}
               reportType="housing-bookings"
@@ -26503,7 +26508,7 @@ function HousingOperations({
                         }}
                         className="rounded-lg bg-lagoon px-3 py-2 text-xs font-black text-white"
                       >
-                        Allocate
+                        Check in
                       </button>
                     )}
                     {["APPROVED", "CHECKED_IN", "PENDING_APPROVAL"].includes(
@@ -28198,7 +28203,11 @@ function HousingCellValue({
 }) {
   if (isCurrencyField(field)) return <CurrencyAmount value={value} />;
   if (typeof value === "string") {
-    const status = value.toUpperCase();
+    const status = field === "bookingStatusLabel" && value === "In-house"
+      ? "CHECKED_IN"
+      : field === "bookingStatusLabel" && value === "Reserved"
+        ? "APPROVED"
+        : value.toUpperCase();
     if (
       ["AVAILABLE", "APPROVED", "PASSED", "CHECKED_IN", "ACTIVE", "EXTENDED"].includes(
         status,
