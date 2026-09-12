@@ -8321,6 +8321,26 @@ function downloadPpmTodayReport(
   URL.revokeObjectURL(url);
 }
 
+const PPM_TODAY_COLUMNS: ExcelColumn[] = [
+  ["woNo", "WO No"], ["ppmCode", "PPM Code"], ["title", "Title"],
+  ["status", "Status"], ["departmentCode", "DPT"], ["asset", "Asset"],
+  ["location", "Location"], ["dueAt", "Due Date"],
+  ["assignedTeamCode", "Team"], ["checklist", "Checklist"],
+];
+
+function ppmTodayFilterValue(work: any, key: string) {
+  if (key === "ppmCode") return workOrderPpmCode(work) || "-";
+  if (key === "asset") {
+    const asset = ppmTodayAssetDetails(work, 500, 500);
+    return [asset.code, asset.description].filter(Boolean).join(" / ");
+  }
+  if (key === "location") return work.asset?.buildingCode || work.asset?.floor || work.location || "-";
+  if (key === "dueAt") return formatDateCell(work.dueAt);
+  if (key === "checklist") return ppmTodayChecklistItems(work).join("\n");
+  if (key === "departmentCode" || key === "assignedTeamCode") return work[key] || "-";
+  return work[key];
+}
+
 function PpmTodayWorkOrders({
   role,
   updateWorkStatus,
@@ -8352,6 +8372,8 @@ function PpmTodayWorkOrders({
   const [actionMessage, setActionMessage] = useState("");
   const [closingIds, setClosingIds] = useState<Set<string>>(new Set());
   const [reportStatusFilter, setReportStatusFilter] = useState("All");
+  const [columnFilters, setColumnFilters] = useState<ExcelFilterConfig>({});
+  const [columnSort, setColumnSort] = useState<ExcelSort>(null);
 
   const mergeUpdatedRow = (updated: any) => {
     if (!updated?.id) return;
@@ -8363,7 +8385,7 @@ function PpmTodayWorkOrders({
     );
   };
 
-  const visibleRows = useMemo(() => {
+  const searchedRows = useMemo(() => {
     const text = search.trim().toLowerCase();
     const source = liveWorkOrderSort(rows, role);
     if (!text) return source;
@@ -8392,6 +8414,11 @@ function PpmTodayWorkOrders({
     );
   }, [rows, role, search]);
 
+  const visibleRows = useMemo(
+    () => applyExcelTableFilters(searchedRows, PPM_TODAY_COLUMNS, columnFilters, columnSort, ppmTodayFilterValue),
+    [searchedRows, columnFilters, columnSort],
+  );
+
   const statusCounts = useMemo(() => ppmTodayStatusCounts(rows), [rows]);
   const exactStatusOptions = useMemo(
     () => sortedUniqueStrings(rows.map((work) => work.status)),
@@ -8407,8 +8434,8 @@ function PpmTodayWorkOrders({
     return [...PPM_TODAY_REPORT_STATUS_FILTERS, ...exactOptions];
   }, [exactStatusOptions]);
   const reportRows = useMemo(
-    () => rows.filter((work) => ppmTodayReportMatchesStatus(work, reportStatusFilter)),
-    [reportStatusFilter, rows],
+    () => visibleRows.filter((work) => ppmTodayReportMatchesStatus(work, reportStatusFilter)),
+    [reportStatusFilter, visibleRows],
   );
   const reportCountCards = [
     { label: "Selected Range", value: statusCounts.total, className: "text-ink" },
@@ -8708,7 +8735,7 @@ function PpmTodayWorkOrders({
           <div className="mr-auto min-w-[240px]">
             <p className="text-xs font-black uppercase text-slate-500">PPM Today Report</p>
             <p className="text-sm font-bold text-slate-600">
-              Download all preventive work orders for the selected date range or filter by status.
+              Download preventive work orders matching the table filters and selected report status.
             </p>
           </div>
           <label className="grid min-w-[220px] gap-1 text-xs font-black uppercase text-slate-500">
@@ -8731,7 +8758,7 @@ function PpmTodayWorkOrders({
           </div>
           <button
             type="button"
-            onClick={() => downloadPpmTodayReport(rows, reportFromDate, reportToDate, reportStatusFilter, monthlyTotal)}
+            onClick={() => downloadPpmTodayReport(visibleRows, reportFromDate, reportToDate, reportStatusFilter, monthlyTotal)}
             disabled={!reportRows.length}
             className="h-10 rounded-lg bg-leaf px-4 text-sm font-black text-white disabled:bg-slate-300"
           >
@@ -8739,8 +8766,8 @@ function PpmTodayWorkOrders({
           </button>
           <button
             type="button"
-            onClick={() => setReportStatusFilter("All")}
-            disabled={reportStatusFilter === "All"}
+            onClick={() => { setReportStatusFilter("All"); setSearch(""); setColumnFilters({}); setColumnSort(null); }}
+            disabled={reportStatusFilter === "All" && !search && !Object.values(columnFilters).some(Array.isArray) && !columnSort}
             className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon disabled:text-slate-300"
           >
             Whole Range
@@ -8763,6 +8790,11 @@ function PpmTodayWorkOrders({
             className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon disabled:text-slate-300"
           >
             {allVisibleSelected ? "Clear Visible" : "Select Visible"}
+          </button>
+          <button type="button" onClick={() => { setColumnFilters({}); setColumnSort(null); }}
+            disabled={!Object.values(columnFilters).some(Array.isArray) && !columnSort}
+            className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon disabled:text-slate-300">
+            Clear Column Filters
           </button>
           <button
             type="button"
@@ -8844,16 +8876,14 @@ function PpmTodayWorkOrders({
                   />
                 </th>
                 <th className="px-3 py-3 font-black">#</th>
-                <th className="px-3 py-3 font-black">WO No</th>
-                <th className="px-3 py-3 font-black">PPM Code</th>
-                <th className="px-3 py-3 font-black">Title</th>
-                <th className="px-3 py-3 font-black">Status</th>
-                <th className="px-3 py-3 font-black">DPT</th>
-                <th className="px-3 py-3 font-black">Asset</th>
-                <th className="px-3 py-3 font-black">Location</th>
-                <th className="px-3 py-3 font-black">Due Date</th>
-                <th className="px-3 py-3 font-black">Team</th>
-                <th className="px-3 py-3 font-black">Checklist</th>
+                {PPM_TODAY_COLUMNS.map(([key, label]) => (
+                  <th key={key} className="px-3 py-3 font-black">
+                    <ExcelFilterHeader label={label} columnKey={key} rows={searchedRows}
+                      filters={columnFilters} sort={columnSort} getValue={ppmTodayFilterValue}
+                      onFilterChange={(filterKey, values) => setColumnFilters((current) => ({ ...current, [filterKey]: values }))}
+                      onSortChange={setColumnSort} />
+                  </th>
+                ))}
                 <th className="px-3 py-3 font-black">Action</th>
               </tr>
             </thead>
