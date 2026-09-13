@@ -11,6 +11,7 @@ import {
 } from "react";
 import type { ReactNode, UIEvent } from "react";
 import Image from "next/image";
+import { checkInHousingBookings } from "@/lib/housing-check-in";
 import { IncidentMediaGallery, IncidentMediaUpload } from "./incident-media";
 import { HOUSING_DEPARTMENTS } from "@/lib/housing-departments";
 import {
@@ -25972,18 +25973,16 @@ function HousingOperations({
       setHousingNotice("No approved bookings were selected for check-in.");
       return;
     }
-    await Promise.all(
-      candidates.map((booking) =>
-        updateHousing("booking", booking.id, {
+    const notice = await checkInHousingBookings(candidates, (id) =>
+        updateHousing("booking", id, {
           status: "CHECKED_IN",
           checkIn: new Date().toISOString(),
           keyHandoverBy: "Reception Team",
           keyHandoverAt: new Date().toISOString(),
           notes,
         }),
-      ),
     );
-    setHousingNotice(`${candidates.length.toLocaleString()} booking(s) checked in.`);
+    setHousingNotice(notice);
   };
   const queueBulkCheckoutBookings = (records: any[]) => {
     const candidates = uniqueHousingBookings(records).filter(
@@ -26544,11 +26543,7 @@ function HousingOperations({
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          updateHousing("booking", record.id, {
-                            status: "CHECKED_IN",
-                            keyHandoverBy: "Reception Team",
-                            keyHandoverAt: new Date().toISOString(),
-                          });
+                          void bulkCheckInBookings([record], "");
                         }}
                         className="rounded-lg bg-lagoon px-3 py-2 text-xs font-black text-white"
                       >
@@ -27354,11 +27349,11 @@ function HousingOperations({
       )}
       {housingNotice && (
         <RequestModalShell
-          title="Housing Update Complete"
+          title="Housing Update Result"
           onClose={() => setHousingNotice("")}
         >
           <div className="grid gap-4 rounded-lg border border-white/80 bg-white p-5 shadow-lift">
-            <p className="text-sm font-bold text-slate-700">{housingNotice}</p>
+            <p className="whitespace-pre-wrap text-sm font-bold text-slate-700">{housingNotice}</p>
             <button
               type="button"
               onClick={() => setHousingNotice("")}
