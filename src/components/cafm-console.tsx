@@ -314,6 +314,12 @@ const moduleGroups: ModuleGroup[] = [
       },
       {
         id: "housing",
+        label: "Housekeeping",
+        icon: TicketCheck,
+        view: "housing-housekeeping",
+      },
+      {
+        id: "housing",
         label: "Housing Assets",
         icon: Building2,
         view: "housing-assets",
@@ -3051,6 +3057,7 @@ export function CafmConsole({
           {canViewActive && active === "housing" && (
             <HousingOperations
               housing={records.housing}
+              serviceRequests={records.requests}
               departments={records.departments}
               view={activeView}
               saving={saving}
@@ -3070,6 +3077,7 @@ export function CafmConsole({
                   "Housing record updated.",
                 );
               }}
+              updateServiceRequest={updateRequestRecord}
               deleteHousing={(type, id) =>
                 deleteRecord(
                   `/api/housing/${type}/${id}`,
@@ -25329,6 +25337,7 @@ function ResourceShiftsTable({ rows }: { rows: any[] }) {
 
 function HousingOperations({
   housing,
+  serviceRequests,
   departments,
   view,
   saving,
@@ -25340,10 +25349,12 @@ function HousingOperations({
   userRole,
   submitHousing,
   updateHousing,
+  updateServiceRequest,
   deleteHousing,
   refreshData,
 }: {
   housing: ConsoleData["housing"];
+  serviceRequests: any[];
   departments: any[];
   view: string;
   saving: boolean;
@@ -25359,6 +25370,7 @@ function HousingOperations({
     id: string,
     body: Record<string, unknown>,
   ) => Promise<{ ok: boolean; result: unknown } | void> | { ok: boolean; result: unknown } | void;
+  updateServiceRequest: (id: string, formData: FormData) => Promise<boolean> | boolean;
   deleteHousing: (type: string, id: string) => Promise<void> | void;
   refreshData: () => Promise<void>;
 }) {
@@ -25386,6 +25398,10 @@ function HousingOperations({
   const [editingResident, setEditingResident] = useState<any | null>(null);
   const [housingNotice, setHousingNotice] = useState("");
   const [runningAlerts, setRunningAlerts] = useState(false);
+  const [housekeepingRequestStatus, setHousekeepingRequestStatus] = useState("All");
+  const [housekeepingRequestRows, setHousekeepingRequestRows] = useState<any[]>(
+    serviceRequests ?? [],
+  );
   const rooms = housing?.rooms ?? [];
   const residents = housing?.residents ?? [];
   const residentLookup = useMemo(
@@ -25763,6 +25779,27 @@ function HousingOperations({
       `${item.sku} ${item.name} ${item.category} ${item.room?.roomNumber} ${item.qrCode}`.toLowerCase();
     return !search || haystack.includes(filterText);
   });
+  const visibleHousekeepingRequests = housekeepingRequestRows
+    .filter((request) => isHskHousekeepingReactiveTicket(request))
+    .filter((request) => {
+      const haystack =
+        `${request.ticketNo} ${request.title} ${request.status} ${request.priority} ${request.location} ${request.description} ${request.requester} ${request.departmentCode} ${request.serviceCode} ${request.assignedTeamCode}`.toLowerCase();
+      const matchesDate =
+        inDashboardDateRange(request.createdAt) ||
+        inDashboardDateRange(request.dueAt);
+      return (
+        (!search || haystack.includes(filterText)) &&
+        (housekeepingRequestStatus === "All" ||
+          request.status === housekeepingRequestStatus) &&
+        matchesDate
+      );
+    });
+  const openHousekeepingServiceRequests = visibleHousekeepingRequests.filter(
+    (request) =>
+      !["CLOSED", "REJECTED"].includes(
+        String(request.status || "").toUpperCase(),
+      ),
+  ).length;
   const visibleApprovals = approvals.filter((approval) => {
     const haystack =
       `${approval.entity} ${approval.level} ${approval.approver} ${approval.status} ${approval.remarks}`.toLowerCase();
@@ -25863,12 +25900,49 @@ function HousingOperations({
                     ? "inventory"
                     : view === "housing-approvals"
                       ? "approvals"
-                      : view === "housing-notifications"
-                        ? "notifications"
-                        : view === "housing-reports"
-                          ? "reports"
+                    : view === "housing-notifications"
+                      ? "notifications"
+                      : view === "housing-reports"
+                        ? "reports"
+                        : view === "housing-housekeeping"
+                          ? "housekeeping"
                           : "dashboard";
   const normalizedHousingRole = String(userRole || "").toLowerCase();
+  const canHandleHousekeepingRequests =
+    canManage ||
+    canOperateBookings ||
+    normalizedHousingRole.includes("housekeeping") ||
+    normalizedHousingRole.includes("hsk") ||
+    normalizedHousingRole.includes("helpdesk") ||
+      normalizedHousingRole.includes("help desk");
+  useEffect(() => {
+    setHousekeepingRequestRows(serviceRequests ?? []);
+  }, [serviceRequests]);
+  useEffect(() => {
+    if (activePanel !== "housekeeping") return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      page: "1",
+      pageSize: "all",
+      housekeepingOnly: "true",
+      status: housekeepingRequestStatus,
+    });
+    fetch(`/api/service-requests?${params.toString()}`, {
+      cache: "no-store",
+      credentials: "same-origin",
+      signal: controller.signal,
+    })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((result) => {
+        if (result?.requests) setHousekeepingRequestRows(result.requests);
+      })
+      .catch((error) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.error(error);
+        }
+      });
+    return () => controller.abort();
+  }, [activePanel, housekeepingRequestStatus]);
   const canReceptionAllocate =
     canOperateBookings &&
     (canManage ||
@@ -26067,8 +26141,9 @@ function HousingOperations({
           />
           <HousingKpi
             label="Housekeeping"
-            value={String(housekeepingOpen)}
-            detail="open housekeeping checks"
+            value={String(housekeepingOpen + openHousekeepingServiceRequests)}
+            detail="checks and service requests"
+            onClick={() => setHousekeepingRequestStatus("All")}
           />
           <HousingKpi
             label="Safety / Incidents"
@@ -27165,6 +27240,39 @@ function HousingOperations({
         </section>
       )}
 
+      {activePanel === "housekeeping" && (
+        <section className="grid gap-5">
+          <Panel title="Housekeeping Reports" icon={ClipboardCheck}>
+            <div className="flex flex-wrap gap-2">
+              <ReportButtons
+                type="housing-expected-arrivals"
+                label="Expected arrival list"
+              />
+              <ReportButtons
+                type="housing-expected-departures"
+                label="Expected departure list"
+              />
+              <ReportButtons
+                type="housing-checked-out-list"
+                label="Checked-out list"
+              />
+              <ReportButtons
+                type="housing-vacant-rooms"
+                label="Vacant room list"
+              />
+            </div>
+          </Panel>
+          <HousingHousekeepingRequests
+            requests={visibleHousekeepingRequests}
+            status={housekeepingRequestStatus}
+            onStatusChange={setHousekeepingRequestStatus}
+            saving={saving}
+            canHandle={canHandleHousekeepingRequests}
+            onUpdate={updateServiceRequest}
+          />
+        </section>
+      )}
+
       {activePanel === "reports" && (
         <HousingReportsWorkspace rooms={strictHousingRooms} bookings={bookings} />
       )}
@@ -27956,6 +28064,10 @@ function HousingReportsWorkspace({
     {
       group: "Housekeeping Reports",
       reports: [
+        ["housing-expected-arrivals", "Expected arrival list"],
+        ["housing-expected-departures", "Expected departure list"],
+        ["housing-checked-out-list", "Checked-out list"],
+        ["housing-vacant-rooms", "Vacant room list"],
         ["housing-cleaning-daily", "Daily cleaning report"],
         ["housing-deep-cleaning", "Deep cleaning report"],
         ["housing-inspection-report", "Inspection report"],
@@ -28230,6 +28342,213 @@ function HousingReportsWorkspace({
         </div>
       </Panel>
     </section>
+  );
+}
+
+function HousingHousekeepingRequests({
+  requests,
+  status,
+  onStatusChange,
+  saving,
+  canHandle,
+  onUpdate,
+}: {
+  requests: any[];
+  status: string;
+  onStatusChange: (status: string) => void;
+  saving: boolean;
+  canHandle: boolean;
+  onUpdate: (id: string, formData: FormData) => Promise<boolean> | boolean;
+}) {
+  const [actionKey, setActionKey] = useState("");
+  const statusOptions = [
+    "All",
+    "NEW",
+    "ACCEPTED",
+    "IN_PROGRESS",
+    "COMPLETED",
+    "CLOSED",
+  ];
+
+  async function updateStatus(request: any, nextStatus: string, note: string) {
+    const responseNote =
+      nextStatus === "IN_PROGRESS" || nextStatus === "CLOSED"
+        ? window.prompt(
+            nextStatus === "CLOSED"
+              ? "Close note"
+              : "Housekeeping response",
+            note,
+          )
+        : note;
+    if (responseNote === null) return;
+    const formData = requestFormData(request, nextStatus);
+    const existingDescription = String(request.description || "").trim();
+    const nextNote = String(responseNote || "").trim();
+    if (nextNote) {
+      formData.set(
+        "description",
+        [existingDescription, `Housekeeping update: ${nextNote}`]
+          .filter(Boolean)
+          .join("\n\n"),
+      );
+    }
+    setActionKey(`${request.id}:${nextStatus}`);
+    try {
+      await onUpdate(request.id, formData);
+    } finally {
+      setActionKey("");
+    }
+  }
+
+  return (
+    <Panel title="Housekeeping Service Requests" icon={TicketCheck}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm font-black text-slate-600">
+          Showing {requests.length.toLocaleString()} housekeeping request(s)
+        </p>
+        <select
+          value={status}
+          onChange={(event) => onStatusChange(event.target.value)}
+          className={HOUSING_FIELD_CLASS}
+        >
+          {statusOptions.map((option) => (
+            <option key={option}>{option}</option>
+          ))}
+        </select>
+      </div>
+      <div className="cafm-scroll-x max-h-[65vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin">
+        <table className="cafm-data-table min-w-[1200px] bg-white text-sm">
+          <thead className="sticky top-0 z-20 bg-slate-50 text-left text-xs uppercase text-slate-500 shadow-sm">
+            <tr>
+              {[
+                "#",
+                "Ticket",
+                "Status",
+                "Priority",
+                "Location",
+                "Due",
+                "Requester",
+                "Description",
+                "Actions",
+              ].map((label) => (
+                <th key={label} className="px-3 py-3 font-black">
+                  {label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {requests.map((request, index) => (
+              <tr key={request.id} className="border-t border-slate-100 align-top">
+                <td className="px-3 py-3 font-black text-slate-500">
+                  {index + 1}
+                </td>
+                <td className="max-w-[240px] px-3 py-3">
+                  <p className="font-black text-ink">{request.ticketNo}</p>
+                  <p className="mt-1 text-xs font-bold text-slate-500">
+                    {request.title}
+                  </p>
+                </td>
+                <td className="whitespace-nowrap px-3 py-3">
+                  <RequestStatusBadge status={request.status} />
+                </td>
+                <td className="whitespace-nowrap px-3 py-3">
+                  <RequestPriorityBadge priority={request.priority} />
+                </td>
+                <td className="max-w-[220px] px-3 py-3 text-slate-600">
+                  {request.location || "-"}
+                </td>
+                <td className="whitespace-nowrap px-3 py-3 text-slate-600">
+                  {formatDateCell(request.dueAt)}
+                </td>
+                <td className="whitespace-nowrap px-3 py-3">
+                  {request.requester || "-"}
+                </td>
+                <td className="max-w-[300px] px-3 py-3 text-slate-600">
+                  <div className="line-clamp-3">{request.description || "-"}</div>
+                </td>
+                <td className="px-3 py-3">
+                  {canHandle ? (
+                    <div className="flex min-w-[280px] flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={saving || actionKey === `${request.id}:ACCEPTED`}
+                        onClick={() =>
+                          updateStatus(
+                            request,
+                            "ACCEPTED",
+                            "Received by housekeeping.",
+                          )
+                        }
+                        className="rounded-lg bg-lagoon px-3 py-2 text-xs font-black text-white disabled:bg-slate-300"
+                      >
+                        Receive
+                      </button>
+                      <button
+                        type="button"
+                        disabled={saving || actionKey === `${request.id}:IN_PROGRESS`}
+                        onClick={() =>
+                          updateStatus(
+                            request,
+                            "IN_PROGRESS",
+                            "Housekeeping has responded and work is in progress.",
+                          )
+                        }
+                        className="rounded-lg bg-ink px-3 py-2 text-xs font-black text-white disabled:bg-slate-300"
+                      >
+                        Respond
+                      </button>
+                      <button
+                        type="button"
+                        disabled={saving || actionKey === `${request.id}:COMPLETED`}
+                        onClick={() =>
+                          updateStatus(
+                            request,
+                            "COMPLETED",
+                            "Housekeeping task completed.",
+                          )
+                        }
+                        className="rounded-lg bg-leaf px-3 py-2 text-xs font-black text-white disabled:bg-slate-300"
+                      >
+                        Complete
+                      </button>
+                      <button
+                        type="button"
+                        disabled={saving || actionKey === `${request.id}:CLOSED`}
+                        onClick={() =>
+                          updateStatus(
+                            request,
+                            "CLOSED",
+                            "Closed by housekeeping.",
+                          )
+                        }
+                        className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white disabled:bg-slate-300"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="text-xs font-black text-slate-400">
+                      View only
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {!requests.length && (
+              <tr>
+                <td
+                  colSpan={9}
+                  className="px-3 py-6 text-center font-bold text-slate-500"
+                >
+                  No housekeeping service requests found.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
   );
 }
 
@@ -31098,6 +31417,10 @@ function Reports() {
             <option value="housing-guests">Housing Guests</option>
             <option value="housing-bookings">Housing Bookings</option>
             <option value="housing-check-movements">Housing Check-In / Check-Out</option>
+            <option value="housing-expected-arrivals">Housing Expected Arrivals</option>
+            <option value="housing-expected-departures">Housing Expected Departures</option>
+            <option value="housing-checked-out-list">Housing Checked-Out List</option>
+            <option value="housing-vacant-rooms">Housing Vacant Rooms</option>
             <option value="housing-room-holds">Housing Room Holds</option>
             <option value="housing-inspections">Housing Inspections</option>
             <option value="housing-assets">Housing Assets</option>

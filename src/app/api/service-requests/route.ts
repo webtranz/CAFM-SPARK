@@ -2,8 +2,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { addHours } from "date-fns";
 import { auditAction } from "@/lib/audit";
-import { requirePermission } from "@/lib/api-auth";
+import { requirePermission, requireUser } from "@/lib/api-auth";
+import { isHousekeepingRole } from "@/lib/access-control";
 import { getCurrentUser } from "@/lib/auth";
+import { createHousingEventNotification } from "@/lib/housing-event-notifications";
+import {
+  housekeepingServiceRequestWhere,
+  isHskHousekeepingReactiveRequest,
+} from "@/lib/housekeeping-service-requests";
 import { prisma } from "@/lib/prisma";
 
 const booleanInput = z.preprocess((value) => {
@@ -71,9 +77,13 @@ function createErrorMessage(error: unknown) {
 
 export async function GET(request: Request) {
   try {
-    const { error } = await requirePermission("servicerequests.view");
-    if (error) return error;
+    const { error: userError, user } = await requireUser();
+    if (userError) return userError;
+    const { error: permissionError } = await requirePermission("servicerequests.view");
     const url = new URL(request.url);
+    const housekeepingOnly = url.searchParams.get("housekeepingOnly") === "true";
+    const canUseHousekeepingQueue = isHousekeepingRole(user);
+    if (permissionError && !canUseHousekeepingQueue) return permissionError;
     const query = url.searchParams.get("query")?.trim() || "";
     const status = url.searchParams.get("status")?.trim() || "All";
     const priority = url.searchParams.get("priority")?.trim() || "All";
@@ -90,8 +100,12 @@ export async function GET(request: Request) {
       ...(category !== "All" ? { category } : {}),
       ...(overdueOnly ? { dueAt: { lt: new Date() }, status: { notIn: ["CLOSED", "REJECTED"] } } : {}),
     };
+    const andFilters: any[] = [];
+    if (housekeepingOnly || (permissionError && canUseHousekeepingQueue)) {
+      andFilters.push(housekeepingServiceRequestWhere());
+    }
     if (query) {
-      where.OR = [
+      andFilters.push({ OR: [
         { ticketNo: { contains: query, mode: "insensitive" } },
         { title: { contains: query, mode: "insensitive" } },
         { description: { contains: query, mode: "insensitive" } },
@@ -100,10 +114,16 @@ export async function GET(request: Request) {
         { category: { contains: query, mode: "insensitive" } },
         { departmentCode: { contains: query, mode: "insensitive" } },
         { serviceCode: { contains: query, mode: "insensitive" } },
-      ];
+      ] });
     }
+    if (andFilters.length) where.AND = andFilters;
+    const forcedHousekeepingOnly = Boolean(permissionError && canUseHousekeepingQueue);
     const [allTotal, total, requests] = await Promise.all([
-      prisma.serviceRequest.count(),
+      prisma.serviceRequest.count({
+        where: forcedHousekeepingOnly
+          ? (housekeepingServiceRequestWhere() as any)
+          : undefined,
+      }),
       prisma.serviceRequest.count({ where }),
       prisma.serviceRequest.findMany({
         where,
@@ -176,6 +196,18 @@ export async function POST(request: Request) {
     });
 
     await auditAction({ user, action: "SERVICE_REQUEST_CREATE", entity: "service_request", entityId: created.id, details: { input, createdRecord: created } });
+    if (isHskHousekeepingReactiveRequest(created as any)) {
+      await createHousingEventNotification({
+        alertType: "SERVICE_REQUEST",
+        title: "New housekeeping service request",
+        message: `${created.ticketNo} / ${created.title} was submitted for ${created.location}.`,
+        recipient: created.assignedTeamCode || "Housekeeping",
+        role: "Housekeeping",
+        severity: created.priority,
+        entity: "service-request",
+        entityId: created.id,
+      });
+    }
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
     console.error("Unable to create service request", error);

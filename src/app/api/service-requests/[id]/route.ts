@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { addHours } from "date-fns";
 import { apiError } from "@/lib/api-response";
-import { isHelpdeskRole } from "@/lib/access-control";
+import { isHelpdeskRole, isHousekeepingRole } from "@/lib/access-control";
 import { requireAdmin, requirePermission, requireUser } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
+import { createHousingEventNotification } from "@/lib/housing-event-notifications";
+import { isHskHousekeepingReactiveRequest } from "@/lib/housekeeping-service-requests";
 import { prisma } from "@/lib/prisma";
 
 const booleanInput = z.preprocess((value) => {
@@ -53,33 +55,11 @@ const HELPDESK_HSK_REQUEST_STATUSES = new Set([
   "CLOSED",
 ]);
 
-function compactMatchText(...values: unknown[]) {
-  return values
-    .map((value) => String(value ?? ""))
-    .join(" ")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "");
-}
-
-function isHskHousekeepingReactiveRequest(record: Record<string, unknown>) {
-  const departmentText = compactMatchText(
-    record.departmentCode,
-    record.serviceCode,
-    record.assignedTeamCode,
-    record.category,
-    record.title,
-  );
-  const typeText = compactMatchText(record.category, record.title, record.description);
-  const isHousekeeping = departmentText.includes("hsk") || departmentText.includes("housekeeping");
-  const isPreventive = typeText.includes("ppm") || typeText.includes("preventive");
-  return isHousekeeping && !isPreventive;
-}
-
 function canHelpdeskChangeHskReactiveRequestStatus(user: any, record: Record<string, unknown>, status?: string) {
   return Boolean(
     status &&
       HELPDESK_HSK_REQUEST_STATUSES.has(status) &&
-      isHelpdeskRole(user) &&
+      (isHelpdeskRole(user) || isHousekeepingRole(user)) &&
       isHskHousekeepingReactiveRequest(record),
   );
 }
@@ -134,6 +114,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       },
     });
     await auditAction({ user, action: `SERVICE_REQUEST_${status}`, entity: "service_request", entityId: id, details: { before: current, input, after: updated } });
+    if (isHskHousekeepingReactiveRequest(updated as any)) {
+      await createHousingEventNotification({
+        alertType: "SERVICE_REQUEST",
+        title: "Housekeeping service request updated",
+        message: `${updated.ticketNo} / ${updated.title} is now ${updated.status}.`,
+        recipient: updated.assignedTeamCode || "Housekeeping",
+        role: "Housekeeping",
+        severity: updated.priority,
+        entity: "service-request",
+        entityId: updated.id,
+      });
+    }
 
     return NextResponse.json(updated);
   } catch (error) {

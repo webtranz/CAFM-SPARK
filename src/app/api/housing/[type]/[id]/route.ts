@@ -5,6 +5,10 @@ import { apiError } from "@/lib/api-response";
 import { requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth";
+import {
+  createHousingEventNotification,
+  housingBookingEventMessage,
+} from "@/lib/housing-event-notifications";
 import { convertExpiredUncheckedHousingBookingsToNoShow } from "@/lib/housing-no-show";
 import { syncHousingResidentToBookings } from "@/lib/housing-resident-sync";
 import { prisma } from "@/lib/prisma";
@@ -263,6 +267,43 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
           ? text(input.cancellationReason)
           : text(input.transferReason) || text(input.notes) || text(input.remarks) || "";
     await prisma.housingHistory.create({ data: { entity: "booking", entityId: id, bookingId: id, roomId: booking.roomId, actor, action: bookingAction, details: bookingDetails } });
+    if (isCheckInAction) {
+      await createHousingEventNotification({
+        alertType: "CHECK_IN",
+        title: "Housing check-in completed",
+        message: `${housingBookingEventMessage(booking)} checked in.`,
+        recipient: "Housekeeping",
+        role: "Housekeeping",
+        severity: booking.priority,
+        entity: "booking",
+        entityId: booking.id,
+        bookingId: booking.id,
+      });
+    } else if (status === "CHECKED_OUT") {
+      await createHousingEventNotification({
+        alertType: "CHECK_OUT",
+        title: "Housing check-out completed",
+        message: `${housingBookingEventMessage(booking)} checked out. Room is ready for housekeeping review.`,
+        recipient: "Housekeeping",
+        role: "Housekeeping",
+        severity: booking.priority,
+        entity: "booking",
+        entityId: booking.id,
+        bookingId: booking.id,
+      });
+    } else if (roomChanged) {
+      await createHousingEventNotification({
+        alertType: "ROOM_CHANGE",
+        title: "Housing room changed",
+        message: `${housingBookingEventMessage(booking)} moved to room ${booking.roomNumber || nextRoom.roomNumber}.`,
+        recipient: "Housekeeping",
+        role: "Housekeeping",
+        severity: booking.priority,
+        entity: "booking",
+        entityId: booking.id,
+        bookingId: booking.id,
+      });
+    }
     return booking;
   }
 

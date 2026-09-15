@@ -31,6 +31,11 @@ export function isHelpdeskRole(user: AccessUser | null) {
   return role.includes("helpdesk");
 }
 
+export function isHousekeepingRole(user: AccessUser | null) {
+  const text = comparable(`${user?.role ?? ""} ${user?.department ?? ""}`);
+  return text.includes("housekeeping") || text.includes("hsk");
+}
+
 export function sameDepartment(user: AccessUser | null, departmentCode?: string | null) {
   const recordDepartment = comparable(departmentCode);
   if (!recordDepartment) return false;

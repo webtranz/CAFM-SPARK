@@ -6,6 +6,10 @@ import { requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth";
 import { ensureHousingNotificationSettings } from "@/lib/housing-alerts";
+import {
+  createHousingEventNotification,
+  housingBookingEventMessage,
+} from "@/lib/housing-event-notifications";
 import { convertExpiredUncheckedHousingBookingsToNoShow } from "@/lib/housing-no-show";
 import { syncHousingResidentToBookings } from "@/lib/housing-resident-sync";
 import { prisma } from "@/lib/prisma";
@@ -886,6 +890,17 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
   }
   await refreshRoomOccupancy(room.id);
   await housingHistory("booking", booking.id, actor, "Booking created", booking.notes, { roomId: room.id, bookingId: booking.id });
+  await createHousingEventNotification({
+    alertType: "NEW_RESERVATION",
+    title: "New housing reservation",
+    message: `${housingBookingEventMessage(booking)} was created for ${bookingStart.toISOString().slice(0, 10)}.`,
+    recipient: "Housing Supervisor",
+    role: "Housing Supervisor",
+    severity: booking.priority,
+    entity: "booking",
+    entityId: booking.id,
+    bookingId: booking.id,
+  });
   return booking;
 }
 

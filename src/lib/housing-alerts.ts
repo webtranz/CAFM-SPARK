@@ -3,6 +3,11 @@ import { convertExpiredUncheckedHousingBookingsToNoShow } from "@/lib/housing-no
 
 export const HOUSING_ALERT_SETTINGS = [
   ["UPCOMING_CHECKOUT", "Upcoming check-out", "Residents scheduled to check out soon.", "Housing Supervisor,Reception Team", "SYSTEM,EMAIL"],
+  ["NEW_RESERVATION", "New reservation", "New housing reservations requiring review or room preparation.", "Housing Supervisor,Reception Team,Housekeeping", "SYSTEM,EMAIL"],
+  ["CHECK_IN", "Check-in completed", "Guests checked in and now in-house.", "Housing Supervisor,Reception Team,Housekeeping", "SYSTEM"],
+  ["CHECK_OUT", "Check-out completed", "Guests checked out and rooms may need housekeeping action.", "Housing Supervisor,Reception Team,Housekeeping", "SYSTEM"],
+  ["SERVICE_REQUEST", "Housekeeping service request", "New or updated housekeeping service requests.", "Housekeeping,Helpdesk,Housing Supervisor", "SYSTEM,EMAIL"],
+  ["ROOM_CHANGE", "Room swap or change", "Guest room swaps or room changes that need room follow-up.", "Housekeeping,Reception Team,Housing Supervisor", "SYSTEM"],
   ["OVERSTAY_OCCUPANT", "Overstay occupants", "Occupants past their planned check-out date.", "Housing Supervisor,Camp Manager", "SYSTEM,EMAIL,SMS"],
   ["VACANT_ROOM", "Vacant room availability", "Vacant rooms ready for allocation.", "Housing Coordinator,Reception Team", "SYSTEM"],
   ["MAINTENANCE_DUE", "Maintenance due date", "Housing inspections or maintenance tasks due soon.", "Housing Supervisor,Maintenance Team", "SYSTEM,EMAIL"],

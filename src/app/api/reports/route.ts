@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/api-auth";
 import { guestStayReportRows } from "@/lib/guest-stay-report";
+import {
+  checkedOutReportRows,
+  expectedArrivalReportRows,
+  expectedDepartureReportRows,
+} from "@/lib/housekeeping-reports";
 import { convertExpiredUncheckedHousingBookingsToNoShow } from "@/lib/housing-no-show";
 import { prisma } from "@/lib/prisma";
 import { workOrderKpis, workOrderMetrics } from "@/lib/work-order-analytics";
@@ -576,7 +581,7 @@ async function housingReportRows(type: string, filters: ReturnType<typeof report
     }));
     return applyHousingFilters([...metricRows, ...companyRows, ...buildingRows, ...categoryRows], filters);
   }
-  if (["housing-rooms", "housing-room-utilization", "housing-room-readiness"].includes(type)) {
+  if (["housing-rooms", "housing-room-utilization", "housing-room-readiness", "housing-vacant-rooms"].includes(type)) {
     const [rows, bookings, holds] = await Promise.all([
       prisma.housingRoom.findMany({ include: { property: true, block: true, beds: true }, orderBy: { roomNumber: "asc" } }),
       prisma.housingBooking.findMany({ select: { roomId: true, status: true, extensionStatus: true } }),
@@ -622,7 +627,13 @@ async function housingReportRows(type: string, filters: ReturnType<typeof report
         createdAt: dateValue(row.createdAt),
       };
     });
-    return applyHousingFilters(type === "housing-room-readiness" ? mapped.filter((row) => ["READY", "AVAILABLE", "MAINTENANCE", "BLOCKED", "HOLD"].includes(String(row.readiness))) : mapped, filters);
+    const narrowed =
+      type === "housing-room-readiness"
+        ? mapped.filter((row) => ["READY", "AVAILABLE", "MAINTENANCE", "BLOCKED", "HOLD"].includes(String(row.readiness)))
+        : type === "housing-vacant-rooms"
+          ? mapped.filter((row) => row.status === "AVAILABLE" && row.occupancy === 0)
+          : mapped;
+    return applyHousingFilters(narrowed, filters);
   }
   if (type === "housing-room-holds") {
     const rows = await prisma.housingRoomHold.findMany({ include: { room: { include: { property: true, block: true } } }, orderBy: [{ status: "asc" }, { startDate: "desc" }] });
@@ -647,6 +658,21 @@ async function housingReportRows(type: string, filters: ReturnType<typeof report
       { movement: "Check-In", guestId: row.employeeId ?? row.resident?.residentNo ?? "", guestName: row.residentName, department: row.departmentCode, departmentCode: row.departmentCode, bookingNo: row.bookingNo, roomNumber: row.roomNumber ?? row.room.roomNumber, roomType: row.room.roomType, checkInDate: dateValue(row.checkIn), checkOutDate: dateValue(row.checkOut), status: row.status },
       row.checkOut ? { movement: "Check-Out", guestId: row.employeeId ?? row.resident?.residentNo ?? "", guestName: row.residentName, department: row.departmentCode, departmentCode: row.departmentCode, bookingNo: row.bookingNo, roomNumber: row.roomNumber ?? row.room.roomNumber, roomType: row.room.roomType, checkInDate: dateValue(row.checkIn), checkOutDate: dateValue(row.checkOut), status: row.status } : null,
     ].filter(Boolean) as ReportRow[]), filters);
+  }
+  if (type === "housing-expected-arrivals") {
+    const rows = await prisma.housingBooking.findMany({ include: { room: { include: { property: true, block: true } }, bed: true, resident: true }, orderBy: [{ checkIn: "asc" }] });
+    return applyHousingFilters(expectedArrivalReportRows(rows), filters);
+  }
+  if (type === "housing-expected-departures") {
+    const rows = await prisma.housingBooking.findMany({ include: { room: { include: { property: true, block: true } }, bed: true, resident: true }, orderBy: [{ checkOut: "asc" }] });
+    return applyHousingFilters(expectedDepartureReportRows(rows), filters);
+  }
+  if (type === "housing-checked-out-list") {
+    const rows = await prisma.housingBooking.findMany({ include: { room: { include: { property: true, block: true } }, bed: true, resident: true }, orderBy: [{ checkOut: "desc" }] });
+    return applyHousingFilters(
+      checkedOutReportRows(rows, filters.dateFrom, filters.dateTo),
+      { ...filters, dateFrom: "", dateTo: "" },
+    );
   }
   if (type === "housing-guests") {
     const rows = await prisma.housingResident.findMany({ orderBy: { name: "asc" } });

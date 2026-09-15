@@ -13,7 +13,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "admin:reset-password": "tsx scripts/reset-admin-password.ts",
     "db:flush-dummy-data": "tsx scripts/flush-dummy-data.ts",
-    "test:housing": "tsx scripts/housing-rules.test.ts && tsx scripts/housing-departments.test.ts && tsx scripts/housing-check-in.test.ts",
+    "test:housing": "tsx scripts/housing-rules.test.ts && tsx scripts/housing-departments.test.ts && tsx scripts/housing-check-in.test.ts && tsx scripts/housekeeping-reports.test.ts",
     "test:incident-media": "tsx scripts/incident-media.test.ts",
     "dokploy:release": "prisma migrate deploy && node scripts/start-local.mjs"
   },
