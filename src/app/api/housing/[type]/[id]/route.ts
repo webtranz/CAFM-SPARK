@@ -1,4 +1,4 @@
-import { validateHousingDepartment } from "@/lib/housing-departments";
+import { cleanHousingDepartment, preservedHousingDepartment } from "@/lib/housing-departments";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api-response";
@@ -313,10 +313,8 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     const residentNo = text(input.residentNo);
     const name = text(input.name) || text(input.residentName);
     const departmentInput = text(input.departmentCode);
-    const nextDepartmentCode =
-      departmentInput
-        ? validateHousingDepartment(departmentInput, false, [current.departmentCode])
-        : current.departmentCode || "";
+    const linkedDepartmentCode = current.departmentCode || await findResidentDepartmentBackup(residentNo || current.residentNo, current.id);
+    const nextDepartmentCode = preservedHousingDepartment(departmentInput, linkedDepartmentCode);
     if (!residentNo) throw new HousingInputError("Guest ID / badge number is required.");
     if (!name) throw new HousingInputError("Guest name is required.");
     if (residentNo !== current.residentNo) {
@@ -353,9 +351,20 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
           entityId: id,
           actor,
           action: "Guest updated",
-          details: `${current.residentNo} / ${resident.name}. Synced ${sync.bookingsUpdated} booking(s).`,
+          details: `${current.residentNo} / ${resident.name}. Department ${current.departmentCode || "-"} -> ${resident.departmentCode || "-"}. Synced ${sync.bookingsUpdated} booking(s).`,
         },
       });
+      if (!cleanHousingDepartment(departmentInput) && cleanHousingDepartment(linkedDepartmentCode)) {
+        await tx.housingHistory.create({
+          data: {
+            entity: "resident",
+            entityId: id,
+            actor,
+            action: "Guest department backup kept",
+            details: `Incoming department was blank. Backup department retained: ${linkedDepartmentCode}`,
+          },
+        });
+      }
       return { ...resident, ...sync };
     });
     return result;
@@ -1001,6 +1010,23 @@ function bookingKeepsRoomUnavailable(booking: { status?: string | null; extensio
   if (closedBookingStatuses.includes(status)) return false;
   const extensionStatus = String(booking.extensionStatus || "").toUpperCase();
   return activeBookingStatuses.includes(status) || activeExtensionStatuses.includes(extensionStatus);
+}
+
+async function findResidentDepartmentBackup(residentNo?: string | null, residentId?: string | null) {
+  if (!residentNo && !residentId) return "";
+  const bookings = await prisma.housingBooking.findMany({
+    where: {
+      OR: [
+        ...(residentId ? [{ residentId }] : []),
+        ...(residentNo ? [{ employeeId: residentNo }] : []),
+      ],
+      departmentCode: { not: null },
+    },
+    orderBy: { updatedAt: "desc" },
+    take: 10,
+    select: { departmentCode: true },
+  });
+  return bookings.map((booking) => cleanHousingDepartment(booking.departmentCode)).find(Boolean) || "";
 }
 
 function activeHoldBlocksRoom(room: any, hold: any) {

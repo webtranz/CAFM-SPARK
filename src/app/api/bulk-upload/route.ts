@@ -1,4 +1,4 @@
-import { validateHousingDepartment } from "@/lib/housing-departments";
+import { cleanHousingDepartment, preservedHousingDepartment } from "@/lib/housing-departments";
 import { createHash } from "crypto";
 import { copyFile, mkdir, readFile, stat, writeFile } from "fs/promises";
 import path from "path";
@@ -932,6 +932,7 @@ async function importHousingGuest(row: Row, context: ImportContext = {}) {
   const existing = await prisma.housingResident.findUnique({ where: { residentNo } });
   if (existing && !shouldReplace(context)) return existingResult("housing_guest", existing, residentNo, existing.name);
   const submittedDepartment = value(row, "departmentCode", "Department Code", "department");
+  const linkedDepartmentCode = existing?.departmentCode || await findHousingResidentDepartmentBackup(residentNo, existing?.id);
   const payload = {
     name: value(row, "name", "guestName", "Guest Name", "residentName", "Resident Name") || residentNo,
     email: value(row, "email", "Email") || null,
@@ -940,9 +941,7 @@ async function importHousingGuest(row: Row, context: ImportContext = {}) {
     companyName: value(row, "companyName", "Company Name") || null,
     gender: value(row, "gender", "Gender") || null,
     nationality: value(row, "nationality", "Nationality") || null,
-    departmentCode: submittedDepartment
-      ? validateHousingDepartment(submittedDepartment, false, [existing?.departmentCode]) || null
-      : existing?.departmentCode || null,
+    departmentCode: preservedHousingDepartment(submittedDepartment, linkedDepartmentCode) || null,
     status: value(row, "status", "Status") || "ACTIVE",
   };
   const guest = await prisma.housingResident.upsert({
@@ -950,6 +949,17 @@ async function importHousingGuest(row: Row, context: ImportContext = {}) {
     update: payload,
     create: { residentNo, ...payload },
   });
+  if (existing && !cleanHousingDepartment(submittedDepartment) && cleanHousingDepartment(linkedDepartmentCode)) {
+    await prisma.housingHistory.create({
+      data: {
+        entity: "resident",
+        entityId: guest.id,
+        actor: "Bulk Upload",
+        action: "Guest department backup kept",
+        details: `Incoming bulk department was blank. Backup department retained: ${linkedDepartmentCode}`,
+      },
+    });
+  }
   return importResult("housing_guest", existing ? "UPDATE" : "CREATE", guest, residentNo, guest.name);
 }
 
@@ -965,13 +975,15 @@ async function importHousingOccupancy(row: Row, context: ImportContext = {}) {
   const checkOut = optionalDate(value(row, "checkOut", "Check-Out Date", "Departure Date", "departureDate")) || undefined;
   const status = housingBookingStatus(value(row, "bookingStatus", "occupancyStatus", "sourceStatus", "Status"));
   const residentName = value(row, "residentName", "guestName", "Guest Name", "Resident Name") || resident?.name || residentNo || "Guest";
+  const submittedDepartment = value(row, "departmentCode", "Department Code");
   const payload = {
     residentId: resident?.id,
     residentName,
-    departmentCode: validateHousingDepartment(
-      value(row, "departmentCode", "Department Code") || resident?.departmentCode || existing?.departmentCode,
+    departmentCode: preservedHousingDepartment(
+      submittedDepartment,
+      resident?.departmentCode,
+      existing?.departmentCode,
       value(row, "bookingType", "Booking Type").toUpperCase() === "PERMANENT",
-      [resident?.departmentCode, existing?.departmentCode],
     ) || null,
     employeeId: residentNo || null,
     companyName: value(row, "companyName", "Company Name") || resident?.companyName || null,
@@ -997,6 +1009,22 @@ async function importHousingOccupancy(row: Row, context: ImportContext = {}) {
     update: payload,
     create: { bookingNo, ...payload },
   });
+  if (resident?.id && payload.departmentCode && !cleanHousingDepartment(resident.departmentCode)) {
+    await prisma.housingResident.update({
+      where: { id: resident.id },
+      data: { departmentCode: payload.departmentCode },
+    });
+    await prisma.housingHistory.create({
+      data: {
+        entity: "resident",
+        entityId: resident.id,
+        bookingId: booking.id,
+        actor: "Bulk Upload",
+        action: "Guest department restored from booking",
+        details: `Backup recovered from booking ${booking.bookingNo}. Department: ${payload.departmentCode}`,
+      },
+    });
+  }
   await refreshHousingRoomFromBookings(room.id);
   await prisma.housingHistory.create({
     data: {
@@ -1045,6 +1073,23 @@ async function housingRoomForOccupancy(row: Row) {
   return room;
 }
 
+async function findHousingResidentDepartmentBackup(residentNo?: string | null, residentId?: string | null) {
+  if (!residentNo && !residentId) return "";
+  const bookings = await prisma.housingBooking.findMany({
+    where: {
+      OR: [
+        ...(residentId ? [{ residentId }] : []),
+        ...(residentNo ? [{ employeeId: residentNo }] : []),
+      ],
+      departmentCode: { not: null },
+    },
+    orderBy: { updatedAt: "desc" },
+    take: 10,
+    select: { departmentCode: true },
+  });
+  return bookings.map((booking) => cleanHousingDepartment(booking.departmentCode)).find(Boolean) || "";
+}
+
 async function findOrCreateHousingResident(row: Row, residentNo: string) {
   const existing = await prisma.housingResident.findUnique({ where: { residentNo } });
   if (existing) return existing;
@@ -1058,7 +1103,7 @@ async function findOrCreateHousingResident(row: Row, residentNo: string) {
       companyName: value(row, "companyName", "Company Name") || null,
       gender: value(row, "gender", "Gender") || null,
       nationality: value(row, "nationality", "Nationality") || null,
-      departmentCode: validateHousingDepartment(value(row, "departmentCode", "Department Code")) || null,
+      departmentCode: preservedHousingDepartment(value(row, "departmentCode", "Department Code")) || null,
       status: "ACTIVE",
     },
   });

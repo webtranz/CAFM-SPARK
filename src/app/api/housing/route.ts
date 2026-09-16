@@ -1,4 +1,4 @@
-import { validateHousingDepartment } from "@/lib/housing-departments";
+import { cleanHousingDepartment, preservedHousingDepartment, validateHousingDepartment } from "@/lib/housing-departments";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api-response";
@@ -432,11 +432,22 @@ async function createHousingRecord(input: z.infer<typeof housingSchema>, actor: 
     const count = await prisma.housingResident.count();
     const residentNo = input.residentNo || `RES-${String(count + 1).padStart(5, "0")}`;
     const existing = await prisma.housingResident.findUnique({ where: { residentNo } });
+    const linkedDepartmentCode = existing?.departmentCode || await findResidentDepartmentBackup(residentNo, existing?.id);
+    const submittedDepartmentCode = cleanHousingDepartment(input.departmentCode);
     const resident = await prisma.housingResident.upsert({
       where: { residentNo },
-      update: residentData(input, residentNo, existing?.departmentCode),
+      update: residentData(input, residentNo, linkedDepartmentCode),
       create: residentData(input, residentNo),
     });
+    if (existing && !submittedDepartmentCode && cleanHousingDepartment(linkedDepartmentCode)) {
+      await housingHistory(
+        "resident",
+        resident.id,
+        actor,
+        "Guest department preserved",
+        `Backup kept while incoming department was blank. Department: ${linkedDepartmentCode}`,
+      );
+    }
     await syncHousingResidentToBookings(prisma, resident, existing);
     return resident;
   }
@@ -727,7 +738,7 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
   if (unavailableRoomStatuses.includes(String(room.status || "").toUpperCase())) {
     throw new HousingInputError("Only available rooms can be allocated. Checked-in, approved, reserved, occupied, or held rooms are not available for booking.");
   }
-  const resident = await resolveResident(input);
+  const resident = await resolveResident(input, actor);
   const employeeId = input.employeeId || input.residentNo || resident?.residentNo || "";
   const employeeName = input.residentName || input.name || resident?.name || "";
   if (!employeeId.trim()) throw new HousingInputError("Employee ID is required for accommodation bookings.");
@@ -892,6 +903,20 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
       },
     });
   }
+  if (resident?.id && departmentCode && !cleanHousingDepartment(resident.departmentCode)) {
+    await prisma.housingResident.update({
+      where: { id: resident.id },
+      data: { departmentCode },
+    });
+    await housingHistory(
+      "resident",
+      resident.id,
+      actor,
+      "Guest department restored from booking",
+      `Backup recovered from booking ${booking.bookingNo}. Department: ${departmentCode}`,
+      { bookingId: booking.id },
+    );
+  }
   await refreshRoomOccupancy(room.id);
   await housingHistory("booking", booking.id, actor, "Booking created", booking.notes, { roomId: room.id, bookingId: booking.id });
   await createHousingEventNotification({
@@ -908,15 +933,36 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
   return booking;
 }
 
-async function resolveResident(input: z.infer<typeof housingSchema>) {
+async function resolveResident(input: z.infer<typeof housingSchema>, actor: string) {
   if (input.residentId) {
     const resident = await prisma.housingResident.findUnique({ where: { id: input.residentId } });
     const nextPhone = input.phone || input.contactNumber || "";
-    if (resident && nextPhone && resident.phone !== nextPhone) {
-      return prisma.housingResident.update({
+    const linkedDepartmentCode = resident
+      ? resident.departmentCode || await findResidentDepartmentBackup(resident.residentNo, resident.id)
+      : "";
+    const nextDepartmentCode = resident
+      ? preservedHousingDepartment(input.departmentCode, linkedDepartmentCode)
+      : "";
+    const shouldUpdatePhone = Boolean(resident && nextPhone && resident.phone !== nextPhone);
+    const shouldUpdateDepartment = Boolean(resident && nextDepartmentCode && nextDepartmentCode !== resident.departmentCode);
+    if (resident && (shouldUpdatePhone || shouldUpdateDepartment)) {
+      const updated = await prisma.housingResident.update({
         where: { id: resident.id },
-        data: { phone: nextPhone },
+        data: {
+          ...(shouldUpdatePhone ? { phone: nextPhone } : {}),
+          ...(shouldUpdateDepartment ? { departmentCode: nextDepartmentCode } : {}),
+        },
       });
+      if (shouldUpdateDepartment && !cleanHousingDepartment(input.departmentCode)) {
+        await housingHistory(
+          "resident",
+          resident.id,
+          actor,
+          "Guest department restored from booking",
+          `Backup recovered while selected guest department was blank. Department: ${nextDepartmentCode}`,
+        );
+      }
+      return updated;
     }
     if (resident) return resident;
   }
@@ -924,11 +970,22 @@ async function resolveResident(input: z.infer<typeof housingSchema>) {
   if (!employeeId && !(input.residentName || input.name)) return null;
   const residentNo = employeeId || `RES-${String((await prisma.housingResident.count()) + 1).padStart(5, "0")}`;
   const existing = await prisma.housingResident.findUnique({ where: { residentNo } });
-  return prisma.housingResident.upsert({
+  const linkedDepartmentCode = existing?.departmentCode || await findResidentDepartmentBackup(residentNo, existing?.id);
+  const resident = await prisma.housingResident.upsert({
     where: { residentNo },
-    update: residentData(input, residentNo, existing?.departmentCode),
+    update: residentData(input, residentNo, linkedDepartmentCode),
     create: residentData(input, residentNo),
   });
+  if (existing && !cleanHousingDepartment(input.departmentCode) && !cleanHousingDepartment(existing.departmentCode) && cleanHousingDepartment(linkedDepartmentCode)) {
+    await housingHistory(
+      "resident",
+      resident.id,
+      actor,
+      "Guest department restored from booking",
+      `Backup recovered while incoming guest department was blank. Department: ${linkedDepartmentCode}`,
+    );
+  }
+  return resident;
 }
 
 function residentData(
@@ -937,10 +994,7 @@ function residentData(
   existingDepartmentCode?: string | null,
 ) {
   const isBookingResident = input.type === "booking";
-  const submittedDepartment = String(input.departmentCode ?? "").trim();
-  const departmentCode = submittedDepartment
-    ? validateHousingDepartment(submittedDepartment, false, [existingDepartmentCode])
-    : existingDepartmentCode || "";
+  const departmentCode = preservedHousingDepartment(input.departmentCode, existingDepartmentCode);
   return {
     residentNo,
     name: input.name || input.residentName || residentNo,
@@ -953,6 +1007,24 @@ function residentData(
     departmentCode,
     status: input.type === "resident" ? input.status || "ACTIVE" : "ACTIVE",
   };
+}
+
+async function findResidentDepartmentBackup(residentNo?: string | null, residentId?: string | null) {
+  const keys = [residentNo, residentId].map((value) => String(value || "").trim()).filter(Boolean);
+  if (!keys.length) return "";
+  const bookings = await prisma.housingBooking.findMany({
+    where: {
+      OR: [
+        ...(residentId ? [{ residentId }] : []),
+        ...(residentNo ? [{ employeeId: residentNo }] : []),
+      ],
+      departmentCode: { not: null },
+    },
+    orderBy: { updatedAt: "desc" },
+    take: 10,
+    select: { departmentCode: true },
+  });
+  return bookings.map((booking) => cleanHousingDepartment(booking.departmentCode)).find(Boolean) || "";
 }
 
 function inventoryData(input: z.infer<typeof housingSchema>, sku: string, roomId: string | undefined, onHand: number, actor: string, movementType: string, movementQty: number) {

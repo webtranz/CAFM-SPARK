@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { HOUSING_DEPARTMENTS, validateHousingDepartment } from "../src/lib/housing-departments";
+import { HOUSING_DEPARTMENTS, preservedHousingDepartment, validateHousingDepartment } from "../src/lib/housing-departments";
 import { syncHousingResidentToBookings } from "../src/lib/housing-resident-sync";
 
 async function main() {
@@ -10,6 +10,11 @@ async function main() {
     assert.throws(() => validateHousingDepartment(invalid), (error: any) => error.status === 400);
   }
   assert.equal(validateHousingDepartment("Made up", false, ["Made up"]), "Made up");
+  assert.equal(preservedHousingDepartment("", "Fire Protection Dept."), "Fire Protection Dept.");
+  assert.equal(preservedHousingDepartment("", "", "Industrial Security"), "Industrial Security");
+  assert.equal(preservedHousingDepartment("kgpd", "Fire Protection Dept."), "KGPD");
+  assert.throws(() => preservedHousingDepartment("", "", "", true), (error: any) => error.status === 400);
+  assert.throws(() => preservedHousingDepartment("Injected", "Fire Protection Dept."), (error: any) => error.status === 400);
   for (const empty of [undefined, null, ""]) {
     assert.equal(validateHousingDepartment(empty), "");
     assert.throws(() => validateHousingDepartment(empty, true));

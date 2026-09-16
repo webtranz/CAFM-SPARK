@@ -33,3 +33,22 @@ export function validateHousingDepartment(
   }
   throw Object.assign(new Error("Select a department from the approved Saudi Aramco department list."), { status: 400 });
 }
+
+export function cleanHousingDepartment(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function preservedHousingDepartment(
+  submittedValue: unknown,
+  existingDepartmentCode?: unknown,
+  linkedDepartmentCode?: unknown,
+  required = false,
+): string {
+  const submitted = cleanHousingDepartment(submittedValue);
+  const existing = cleanHousingDepartment(existingDepartmentCode);
+  const linked = cleanHousingDepartment(linkedDepartmentCode);
+  if (submitted) return validateHousingDepartment(submitted, required, [existing, linked]);
+  if (existing) return validateHousingDepartment(existing, false, [existing]);
+  if (linked) return validateHousingDepartment(linked, false, [linked]);
+  return validateHousingDepartment("", required);
+}
