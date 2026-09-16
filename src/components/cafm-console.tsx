@@ -11133,7 +11133,7 @@ function standardHousingDepartmentValue(value: unknown) {
   const match = STANDARD_HOUSING_DEPARTMENT_OPTIONS.find(
     (department) => department.value.toLowerCase() === code.toLowerCase(),
   );
-  return match?.value || "";
+  return match?.value || code;
 }
 
 function mergeSearchableOptions(...optionGroups: SearchableOption[][]) {
@@ -25748,10 +25748,41 @@ function HousingOperations({
       (status === "All" || room.status === status)
     );
   });
-  const visibleResidents = residents.filter(
+  const residentDepartmentFallback = new Map<string, string>();
+  bookings.forEach((booking) => {
+    const department = String(booking.departmentCode || "").trim();
+    if (!department) return;
+    [
+      booking.residentId,
+      booking.employeeId,
+      booking.residentNo,
+      booking.guestId,
+      booking.resident?.id,
+      booking.resident?.residentNo,
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .forEach((key) => {
+        if (!residentDepartmentFallback.has(key)) {
+          residentDepartmentFallback.set(key, department);
+        }
+      });
+  });
+  const residentsWithVisibleDepartments = residents.map((resident: any) => {
+    const departmentCode =
+      resident.departmentCode ||
+      residentDepartmentFallback.get(String(resident.id || "").trim()) ||
+      residentDepartmentFallback.get(String(resident.residentNo || "").trim()) ||
+      residentDepartmentFallback.get(String(resident.employeeId || "").trim()) ||
+      "";
+    return departmentCode === resident.departmentCode
+      ? resident
+      : { ...resident, departmentCode };
+  });
+  const visibleResidents = residentsWithVisibleDepartments.filter(
     (resident: any) => {
       const haystack =
-        `${resident.residentNo} ${resident.name} ${resident.companyName} ${resident.companyId} ${resident.phone} ${resident.status}`.toLowerCase();
+        `${resident.residentNo} ${resident.name} ${resident.companyName} ${resident.companyId} ${resident.phone} ${resident.departmentCode} ${resident.status}`.toLowerCase();
       return (
         (!search || haystack.includes(filterText)) &&
         (status === "All" || resident.status === status)
@@ -29478,8 +29509,8 @@ function HousingDepartmentField({ value, onChange, required = false }: {
         onChange={(event) => { setLocalValue(event.target.value); onChange?.(event.target.value); }}
         className={HOUSING_FIELD_CLASS}>
         <option value="">Select department</option>
-        {selected && !options.some((item) => item === selected) && HOUSING_DEPARTMENTS.some((item) => item === selected)
-          ? <option value={selected}>{selected}</option> : null}
+        {selected && !options.some((item) => item === selected)
+          ? <option value={selected}>{selected} (existing)</option> : null}
         {options.map((item) => <option key={item} value={item}>{item}</option>)}
       </select>
       {!options.length ? <span className="text-sm text-slate-500">No matching departments</span> : null}

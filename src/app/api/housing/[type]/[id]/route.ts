@@ -37,7 +37,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ty
   try {
     const { type, id } = await params;
     const input = bodySchema.parse(await request.json());
-    if ((type === "booking" || type === "resident") && "departmentCode" in input) validateHousingDepartment(input.departmentCode);
     const permissionCode = type === "approval" ? "housing.approve" : "housing.edit";
     const { error: permissionError } = await requirePermission(permissionCode);
     if (permissionError) return permissionError;
@@ -313,6 +312,11 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
     if (!current) throw new HousingInputError("Guest not found.");
     const residentNo = text(input.residentNo);
     const name = text(input.name) || text(input.residentName);
+    const departmentInput = text(input.departmentCode);
+    const nextDepartmentCode =
+      departmentInput
+        ? validateHousingDepartment(departmentInput, false, [current.departmentCode])
+        : current.departmentCode || "";
     if (!residentNo) throw new HousingInputError("Guest ID / badge number is required.");
     if (!name) throw new HousingInputError("Guest name is required.");
     if (residentNo !== current.residentNo) {
@@ -338,7 +342,7 @@ async function updateHousingRecord(type: string, id: string, input: Record<strin
           companyName: text(input.companyName) || text(input.companyId),
           gender: text(input.gender),
           nationality: text(input.nationality),
-          departmentCode: validateHousingDepartment(input.departmentCode),
+          departmentCode: nextDepartmentCode,
           status: text(input.status) || current.status,
         },
       });

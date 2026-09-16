@@ -931,6 +931,7 @@ async function importHousingGuest(row: Row, context: ImportContext = {}) {
   const residentNo = required(row, "residentNo", "Resident No", "guestId", "Guest ID", "Budge No.", "Badge No.", "code");
   const existing = await prisma.housingResident.findUnique({ where: { residentNo } });
   if (existing && !shouldReplace(context)) return existingResult("housing_guest", existing, residentNo, existing.name);
+  const submittedDepartment = value(row, "departmentCode", "Department Code", "department");
   const payload = {
     name: value(row, "name", "guestName", "Guest Name", "residentName", "Resident Name") || residentNo,
     email: value(row, "email", "Email") || null,
@@ -939,7 +940,9 @@ async function importHousingGuest(row: Row, context: ImportContext = {}) {
     companyName: value(row, "companyName", "Company Name") || null,
     gender: value(row, "gender", "Gender") || null,
     nationality: value(row, "nationality", "Nationality") || null,
-    departmentCode: validateHousingDepartment(value(row, "departmentCode", "Department Code", "department")) || null,
+    departmentCode: submittedDepartment
+      ? validateHousingDepartment(submittedDepartment, false, [existing?.departmentCode]) || null
+      : existing?.departmentCode || null,
     status: value(row, "status", "Status") || "ACTIVE",
   };
   const guest = await prisma.housingResident.upsert({
@@ -955,7 +958,6 @@ async function importHousingOccupancy(row: Row, context: ImportContext = {}) {
   const existing = await prisma.housingBooking.findUnique({ where: { bookingNo } });
   if (existing && !shouldReplace(context)) return existingResult("housing_booking", existing, bookingNo, existing.residentName);
 
-  validateHousingDepartment(value(row, "departmentCode", "Department Code"));
   const room = await housingRoomForOccupancy(row);
   const residentNo = value(row, "residentNo", "Resident No", "guestId", "Guest ID", "Agreement/ Budge No.", "Budge No.", "Badge No.");
   const resident = residentNo ? await findOrCreateHousingResident(row, residentNo) : null;
@@ -966,7 +968,11 @@ async function importHousingOccupancy(row: Row, context: ImportContext = {}) {
   const payload = {
     residentId: resident?.id,
     residentName,
-    departmentCode: validateHousingDepartment(value(row, "departmentCode", "Department Code") || resident?.departmentCode, value(row, "bookingType", "Booking Type").toUpperCase() === "PERMANENT") || null,
+    departmentCode: validateHousingDepartment(
+      value(row, "departmentCode", "Department Code") || resident?.departmentCode || existing?.departmentCode,
+      value(row, "bookingType", "Booking Type").toUpperCase() === "PERMANENT",
+      [resident?.departmentCode, existing?.departmentCode],
+    ) || null,
     employeeId: residentNo || null,
     companyName: value(row, "companyName", "Company Name") || resident?.companyName || null,
     nationality: value(row, "nationality", "Nationality") || resident?.nationality || null,

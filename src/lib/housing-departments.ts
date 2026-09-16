@@ -6,11 +6,30 @@ export const HOUSING_DEPARTMENTS = [
   "Transport & Equip Servc Dept", "WGP",
 ] as const;
 
-export function validateHousingDepartment(value: unknown, required = false): string {
+export function validateHousingDepartment(
+  value: unknown,
+  required = false,
+  existingValues: unknown[] = [],
+): string {
   if (value === undefined || value === null || value === "") {
     if (!required) return "";
-  } else if (typeof value === "string" && HOUSING_DEPARTMENTS.some((item) => item === value)) {
-    return value;
+    throw Object.assign(new Error("Select a department from the approved Saudi Aramco department list."), { status: 400 });
+  }
+  if (typeof value !== "string") {
+    throw Object.assign(new Error("Select a department from the approved Saudi Aramco department list."), { status: 400 });
+  }
+  const department = value.trim();
+  if (!department) {
+    if (!required) return "";
+  } else {
+    const approved = HOUSING_DEPARTMENTS.find(
+      (item) => item.toLowerCase() === department.toLowerCase(),
+    );
+    if (approved) return approved;
+    const existing = existingValues
+      .map((item) => String(item ?? "").trim())
+      .find((item) => item && item.toLowerCase() === department.toLowerCase());
+    if (existing) return existing;
   }
   throw Object.assign(new Error("Select a department from the approved Saudi Aramco department list."), { status: 400 });
 }

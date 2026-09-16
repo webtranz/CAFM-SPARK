@@ -341,7 +341,6 @@ export async function POST(request: Request) {
     const { error } = await requirePermission("housing.create");
     if (error) return error;
     const input = housingSchema.parse(await request.json());
-    if (input.type === "booking" || input.type === "resident") validateHousingDepartment(input.departmentCode, input.type === "booking" && input.bookingType?.toUpperCase() === "PERMANENT");
     const user = await getCurrentUser();
     const actor = user?.name || user?.email || "System";
     const result = await createHousingRecord(input, actor);
@@ -435,7 +434,7 @@ async function createHousingRecord(input: z.infer<typeof housingSchema>, actor: 
     const existing = await prisma.housingResident.findUnique({ where: { residentNo } });
     const resident = await prisma.housingResident.upsert({
       where: { residentNo },
-      update: residentData(input, residentNo),
+      update: residentData(input, residentNo, existing?.departmentCode),
       create: residentData(input, residentNo),
     });
     await syncHousingResidentToBookings(prisma, resident, existing);
@@ -734,7 +733,12 @@ async function createBooking(input: z.infer<typeof housingSchema>, actor: string
   if (!employeeId.trim()) throw new HousingInputError("Employee ID is required for accommodation bookings.");
   if (!employeeName.trim()) throw new HousingInputError("Employee name is required for accommodation bookings.");
   const bookingType = (input.bookingType || "TEMPORARY").toUpperCase();
-  const departmentCode = validateHousingDepartment(input.departmentCode ?? resident?.departmentCode, bookingType === "PERMANENT");
+  const submittedDepartmentCode = String(input.departmentCode ?? "").trim();
+  const departmentCode = validateHousingDepartment(
+    submittedDepartmentCode || resident?.departmentCode,
+    bookingType === "PERMANENT",
+    [resident?.departmentCode],
+  );
   const companyName = input.companyName || resident?.companyName || input.companyId || defaultHousingCompanyName;
   const nationality = input.nationality || resident?.nationality || defaultHousingNationality;
   if (bookingType === "PERMANENT" && !departmentCode.trim()) {
@@ -919,15 +923,24 @@ async function resolveResident(input: z.infer<typeof housingSchema>) {
   const employeeId = input.employeeId || input.residentNo;
   if (!employeeId && !(input.residentName || input.name)) return null;
   const residentNo = employeeId || `RES-${String((await prisma.housingResident.count()) + 1).padStart(5, "0")}`;
+  const existing = await prisma.housingResident.findUnique({ where: { residentNo } });
   return prisma.housingResident.upsert({
     where: { residentNo },
-    update: residentData(input, residentNo),
+    update: residentData(input, residentNo, existing?.departmentCode),
     create: residentData(input, residentNo),
   });
 }
 
-function residentData(input: z.infer<typeof housingSchema>, residentNo: string) {
+function residentData(
+  input: z.infer<typeof housingSchema>,
+  residentNo: string,
+  existingDepartmentCode?: string | null,
+) {
   const isBookingResident = input.type === "booking";
+  const submittedDepartment = String(input.departmentCode ?? "").trim();
+  const departmentCode = submittedDepartment
+    ? validateHousingDepartment(submittedDepartment, false, [existingDepartmentCode])
+    : existingDepartmentCode || "";
   return {
     residentNo,
     name: input.name || input.residentName || residentNo,
@@ -937,7 +950,7 @@ function residentData(input: z.infer<typeof housingSchema>, residentNo: string) 
     companyName: input.companyName || input.companyId || (isBookingResident ? defaultHousingCompanyName : ""),
     gender: input.gender || (isBookingResident ? defaultHousingGender : ""),
     nationality: input.nationality || (isBookingResident ? defaultHousingNationality : ""),
-    departmentCode: validateHousingDepartment(input.departmentCode),
+    departmentCode,
     status: input.type === "resident" ? input.status || "ACTIVE" : "ACTIVE",
   };
 }
