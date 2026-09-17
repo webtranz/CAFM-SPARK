@@ -495,7 +495,6 @@ const moduleGroups: ModuleGroup[] = [
   {
     label: "Incident & Case Management",
     icon: AlertTriangle,
-    flat: true,
     items: [
       {
         id: "incidents",
