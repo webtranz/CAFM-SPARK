@@ -35,7 +35,7 @@ const INITIAL_REFERENCE_LIMIT = 150;
 
 
 export async function getTotalEntryCounts() {
-  const [assetRegistry, locationList, workOrdersHistory, ppmSchedules, ppmChecklistHistoryRows, omManuals, serviceRequestHistory, casesAndIncidents, commentHistoryRows, rooms, guestProfiles, guestStayOccupancy] = await Promise.all([
+  const [assetRegistry, locationList, workOrdersHistory, ppmSchedules, ppmChecklistHistoryRows, omManuals, serviceRequestHistory, casesAndIncidents, lostFoundCases, commentHistoryRows, rooms, guestProfiles, guestStayOccupancy] = await Promise.all([
     prisma.asset.count(),
     prisma.location.count(),
     prisma.workOrder.count(),
@@ -44,6 +44,7 @@ export async function getTotalEntryCounts() {
     prisma.documentUpload.count({ where: { category: "OM_MANUAL" } }),
     prisma.serviceRequest.count({ where: { isIncidentCase: false } }),
     prisma.serviceRequest.count({ where: { isIncidentCase: true } }),
+    prisma.lostFoundCase.count(),
     prisma.commentHistory.count(),
     prisma.housingRoom.count(),
     prisma.housingResident.count(),
@@ -59,6 +60,7 @@ export async function getTotalEntryCounts() {
     omManuals,
     serviceRequestHistory,
     casesAndIncidents,
+    lostFoundCases,
     commentHistory: commentHistoryRows,
     rooms,
     guestProfiles,
@@ -124,7 +126,7 @@ export async function getOperatingData(user: OperatingUser = null) {
         ? {}
         : { OR: [{ id: user?.id || "" }, ...departmentContainsWhere(departmentsForUser)] };
 
-    const [sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, securityLocations, securityGatePasses, securityDailyReports, securityFireDrills, securityChecklists, shifts, rotations, roster, housingProperties, housingBlocks, housingRooms, housingBeds, housingResidents, housingBookings, housingInspections, housingAssets, housingInventory, housingApprovals, housingNotifications, housingNotificationSettings, housingHistory, housingRoomHolds, totalEntries] = await Promise.all([
+    const [sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, lostFoundCases, securityLocations, securityGatePasses, securityDailyReports, securityFireDrills, securityChecklists, shifts, rotations, roster, housingProperties, housingBlocks, housingRooms, housingBeds, housingResidents, housingBookings, housingInspections, housingAssets, housingInventory, housingApprovals, housingNotifications, housingNotificationSettings, housingHistory, housingRoomHolds, totalEntries] = await Promise.all([
       prisma.site.findMany({ include: { buildings: { take: 10, orderBy: { code: "asc" } } }, orderBy: { name: "asc" }, take: INITIAL_REFERENCE_LIMIT }),
       prisma.building.findMany({ include: { site: true }, orderBy: { code: "asc" }, take: INITIAL_REFERENCE_LIMIT }),
       prisma.space.findMany({ include: { building: { include: { site: true } } }, orderBy: [{ building: { code: "asc" } }, { floor: "asc" }, { name: "asc" }], take: INITIAL_REFERENCE_LIMIT }),
@@ -177,6 +179,7 @@ export async function getOperatingData(user: OperatingUser = null) {
       prisma.auditLog.findMany({ orderBy: { createdAt: "desc" }, take: INITIAL_LOAD_LIMIT }),
       prisma.complianceCertificate.findMany({ orderBy: [{ expiryDate: "asc" }, { certificateNo: "asc" }], take: INITIAL_LOAD_LIMIT }),
       prisma.documentUpload.findMany({ orderBy: { createdAt: "desc" }, take: INITIAL_LOAD_LIMIT }),
+      prisma.lostFoundCase.findMany({ orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }], take: INITIAL_LOAD_LIMIT }),
       prisma.securityLocation.findMany({ orderBy: { code: "asc" }, take: INITIAL_REFERENCE_LIMIT }),
       prisma.securityGatePass.findMany({ orderBy: { createdAt: "desc" }, take: INITIAL_LOAD_LIMIT }),
       prisma.securityDailyReport.findMany({ orderBy: { reportDate: "desc" }, take: INITIAL_LOAD_LIMIT }),
@@ -230,7 +233,7 @@ export async function getOperatingData(user: OperatingUser = null) {
             holds: housingRoomHolds,
           };
 
-    return { sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms: scopedPpms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, security: { locations: securityLocations, gatePasses: securityGatePasses, dailyReports: securityDailyReports, fireDrills: securityFireDrills, checklists: securityChecklists }, totalEntries, shiftRotation: { shifts, rotations, roster }, housing, live: true };
+    return { sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms: scopedPpms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, lostFoundCases, security: { locations: securityLocations, gatePasses: securityGatePasses, dailyReports: securityDailyReports, fireDrills: securityFireDrills, checklists: securityChecklists }, totalEntries, shiftRotation: { shifts, rotations, roster }, housing, live: true };
   } catch {
     return { ...fallbackData, live: false };
   }

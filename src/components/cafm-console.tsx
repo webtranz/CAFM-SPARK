@@ -96,6 +96,7 @@ type ConsoleData = {
   auditLogs: any[];
   complianceCertificates: any[];
   documentUploads: any[];
+  lostFoundCases?: any[];
   security?: {
     locations: any[];
     gatePasses: any[];
@@ -501,6 +502,12 @@ const moduleGroups: ModuleGroup[] = [
         label: "Incident & Case Management",
         icon: AlertTriangle,
         view: "incidents",
+      },
+      {
+        id: "incidents",
+        label: "Lost & Found",
+        icon: Search,
+        view: "lost-found",
       },
     ],
   },
@@ -2850,16 +2857,30 @@ export function CafmConsole({
             />
           )}
           {canViewActive && active === "incidents" && (
-            <IncidentCaseManagement
-              requests={records.requests}
-              workOrders={records.workOrders}
-              inspections={records.inspections}
-              saving={saving}
-              submitIncident={(formData) =>
-                postRecord("/api/service-requests", formData, "Incident / case", true, true)
-              }
-              navigate={navigate}
-            />
+            activeView === "lost-found" ? (
+              <LostFoundModule
+                cases={records.lostFoundCases ?? []}
+                saving={saving}
+                submitCase={(formData) =>
+                  postRecord("/api/lost-found", formData, "Lost and found case", true, true)
+                }
+                updateCase={async (formData) => {
+                  const payload = Object.fromEntries(formData.entries()) as Record<string, unknown>;
+                  await patchRecord("/api/lost-found", payload, "Lost and found case updated.");
+                }}
+              />
+            ) : (
+              <IncidentCaseManagement
+                requests={records.requests}
+                workOrders={records.workOrders}
+                inspections={records.inspections}
+                saving={saving}
+                submitIncident={(formData) =>
+                  postRecord("/api/service-requests", formData, "Incident / case", true, true)
+                }
+                navigate={navigate}
+              />
+            )
           )}
           {canViewActive && active === "iot" && (
             <Iot
@@ -3499,6 +3520,11 @@ function totalEntryRows(data: ConsoleData) {
     },
     {
       no: 9,
+      module: "Lost & Found",
+      count: totals.lostFoundCases ?? data.lostFoundCases?.length ?? 0,
+    },
+    {
+      no: 10,
       module: "Comment History",
       count:
         totals.commentHistory ??
@@ -3506,17 +3532,17 @@ function totalEntryRows(data: ConsoleData) {
           .length,
     },
     {
-      no: 10,
+      no: 11,
       module: "Rooms",
       count: totals.rooms ?? data.housing.rooms.length,
     },
     {
-      no: 11,
+      no: 12,
       module: "Guest Profile",
       count: totals.guestProfiles ?? data.housing.residents.length,
     },
     {
-      no: 12,
+      no: 13,
       module: "Guest Stay Occupancy",
       count: totals.guestStayOccupancy ?? data.housing.bookings.length,
     },
@@ -18238,6 +18264,213 @@ function LinkedTicketsTable({
   );
 }
 
+function LostFoundModule({
+  cases,
+  saving,
+  submitCase,
+  updateCase,
+}: {
+  cases: any[];
+  saving: boolean;
+  submitCase: (formData: FormData) => Promise<unknown>;
+  updateCase: (formData: FormData) => Promise<void>;
+}) {
+  const [query, setQuery] = useState("");
+  const today = new Date().toISOString().slice(0, 10);
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredCases = cases.filter((item) =>
+    [
+      item.caseId,
+      item.caseType,
+      item.lostItems,
+      item.itemFound,
+      item.location,
+      item.guestName,
+      item.guestRoomBadge,
+      item.guestContact,
+      item.foundBy,
+      item.status,
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(normalizedQuery),
+  );
+  const lostCases = cases.filter((item) => item.caseType === "LOST");
+  const foundCases = cases.filter((item) => item.caseType === "FOUND");
+  const openCases = cases.filter((item) =>
+    ["Never Found", "In Custody"].includes(String(item.status || "")),
+  );
+  const settledCases = cases.filter((item) =>
+    ["Returned", "Destroyed"].includes(String(item.status || "")),
+  );
+  const columns: [string, string][] = [
+    ["caseId", "Case ID"],
+    ["caseType", "Section"],
+    ["itemSummary", "Item"],
+    ["location", "Location"],
+    ["guestSummary", "Guest / Claimant"],
+    ["foundBy", "Found By"],
+    ["eventDate", "Lost / Found Date"],
+    ["returnDate", "Return / Close Date"],
+    ["status", "Status"],
+  ];
+
+  const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await submitCase(new FormData(event.currentTarget));
+    event.currentTarget.reset();
+  };
+
+  const handleUpdate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await updateCase(new FormData(event.currentTarget));
+  };
+
+  return (
+    <section className="grid gap-5">
+      <Panel title="Lost & Found" icon={Search}>
+        <ReportButtons type="lost-found" label="Lost and found report" />
+        <div className="mb-4 grid gap-3 md:grid-cols-4">
+          <MetricCard label="Total Cases" value={cases.length} />
+          <MetricCard label="Lost Items" value={lostCases.length} />
+          <MetricCard label="Found Items" value={foundCases.length} />
+          <MetricCard label="Open / In Custody" value={openCases.length} tone="amber" />
+        </div>
+        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-sm font-bold text-slate-600">
+            Track missing and recovered property with server-generated case IDs,
+            automatic found timestamps, and automatic return/closure timestamps.
+          </p>
+          <p className="mt-1 text-xs font-bold text-slate-500">
+            Settled cases: {settledCases.length}
+          </p>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <form onSubmit={handleCreate} className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <input type="hidden" name="caseType" value="LOST" />
+            <div>
+              <p className="text-sm font-black uppercase text-lagoon">Lost Items Section</p>
+              <p className="text-xs font-bold text-slate-500">Create a missing-property case.</p>
+            </div>
+            <textarea name="lostItems" required placeholder="Lost items / item description and details" className={`${TICKET_PLAN_TEXTAREA_CLASS} min-h-24`} />
+            <div className="grid gap-3 md:grid-cols-2">
+              <input name="lostDate" type="date" defaultValue={today} required className={TICKET_PLAN_FIELD_CLASS} />
+              <input name="location" required placeholder="Building / area where item was lost" className={TICKET_PLAN_FIELD_CLASS} />
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <input name="guestName" placeholder="Guest full name" className={TICKET_PLAN_FIELD_CLASS} />
+              <input name="guestRoomBadge" placeholder="Room / badge number" className={TICKET_PLAN_FIELD_CLASS} />
+              <input name="guestContact" placeholder="Contact details" className={TICKET_PLAN_FIELD_CLASS} />
+            </div>
+            <select name="status" defaultValue="Never Found" className={TICKET_PLAN_FIELD_CLASS}>
+              <option>Never Found</option>
+              <option>Returned</option>
+            </select>
+            <button type="submit" disabled={saving} className="rounded-lg bg-lagoon px-4 py-3 text-sm font-black text-white disabled:opacity-50">
+              Create Lost Item Case
+            </button>
+          </form>
+
+          <form onSubmit={handleCreate} className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <input type="hidden" name="caseType" value="FOUND" />
+            <div>
+              <p className="text-sm font-black uppercase text-lagoon">Found Items Section</p>
+              <p className="text-xs font-bold text-slate-500">Found date and time is generated at save.</p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <input name="foundBy" required placeholder="Found by: name / ID" className={TICKET_PLAN_FIELD_CLASS} />
+              <input name="location" required placeholder="Specific retrieval location" className={TICKET_PLAN_FIELD_CLASS} />
+            </div>
+            <textarea name="itemFound" required placeholder="Item found: description and condition" className={`${TICKET_PLAN_TEXTAREA_CLASS} min-h-24`} />
+            <div className="grid gap-3 md:grid-cols-3">
+              <input name="guestName" placeholder="Claimant name, if settled now" className={TICKET_PLAN_FIELD_CLASS} />
+              <input name="guestRoomBadge" placeholder="Claimant ID / room" className={TICKET_PLAN_FIELD_CLASS} />
+              <input name="guestContact" placeholder="Claimant contact number" className={TICKET_PLAN_FIELD_CLASS} />
+            </div>
+            <button type="submit" disabled={saving} className="rounded-lg bg-lagoon px-4 py-3 text-sm font-black text-white disabled:opacity-50">
+              Create Found Item Case
+            </button>
+          </form>
+        </div>
+
+        <div className="mt-5 grid gap-3">
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search case ID, item, location, guest, claimant, status..."
+            className={TICKET_PLAN_FIELD_CLASS}
+          />
+          <DataTable
+            rows={filteredCases.map((item) => ({
+              ...item,
+              itemSummary: item.caseType === "LOST" ? item.lostItems : item.itemFound,
+              guestSummary: [item.guestName, item.guestRoomBadge, item.guestContact].filter(Boolean).join(" / ") || "-",
+              eventDate: item.caseType === "LOST" ? item.lostDate : item.foundAt,
+            }))}
+            columns={columns}
+            renderCell={(row, key) => {
+              if (key === "status") return <LostFoundStatusBadge status={row.status} />;
+              if (key === "caseType") return row.caseType === "LOST" ? "Lost Items" : "Found Items";
+              if (key === "eventDate" || key === "returnDate") return formatDateCell(row[key]);
+              return undefined;
+            }}
+            actions={(row) => (
+              <form onSubmit={handleUpdate} className="grid min-w-64 gap-2">
+                <input type="hidden" name="id" value={row.id} />
+                <div className="grid gap-2 md:grid-cols-3">
+                  <input name="guestName" defaultValue={row.guestName || ""} placeholder="Guest / claimant" className={TICKET_PLAN_FIELD_CLASS} />
+                  <input name="guestRoomBadge" defaultValue={row.guestRoomBadge || ""} placeholder="ID / room" className={TICKET_PLAN_FIELD_CLASS} />
+                  <input name="guestContact" defaultValue={row.guestContact || ""} placeholder="Contact" className={TICKET_PLAN_FIELD_CLASS} />
+                </div>
+                <select name="status" defaultValue={row.status} className={TICKET_PLAN_FIELD_CLASS}>
+                  {row.caseType === "LOST" ? (
+                    <>
+                      <option>Never Found</option>
+                      <option>Returned</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="In Custody" disabled>In Custody (open)</option>
+                      <option>Returned</option>
+                      <option>Destroyed</option>
+                    </>
+                  )}
+                </select>
+                <button type="submit" disabled={saving} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">
+                  Update / Settle
+                </button>
+              </form>
+            )}
+          />
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function MetricCard({ label, value, tone = "lagoon" }: { label: string; value: number; tone?: "lagoon" | "amber" }) {
+  const toneClass = tone === "amber" ? "text-amber-600" : "text-lagoon";
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-xs font-black uppercase text-slate-500">{label}</p>
+      <p className={`mt-2 text-3xl font-black ${toneClass}`}>{value}</p>
+    </div>
+  );
+}
+
+function LostFoundStatusBadge({ status }: { status: string }) {
+  const tone =
+    status === "Returned"
+      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+      : status === "Destroyed"
+        ? "bg-rose-50 text-rose-700 border-rose-200"
+        : status === "In Custody"
+          ? "bg-cyan-50 text-cyan-700 border-cyan-200"
+          : "bg-amber-50 text-amber-700 border-amber-200";
+  return <span className={`rounded-full border px-2 py-1 text-xs font-black ${tone}`}>{status || "-"}</span>;
+}
+
 function IncidentCaseManagement({
   requests,
   workOrders,
@@ -31416,6 +31649,7 @@ function Reports() {
             <option value="work-orders">Work Orders</option>
             <option value="requests">Service Requests</option>
             <option value="incident-cases">Incident & Cases</option>
+            <option value="lost-found">Lost & Found</option>
             <option value="ppm">PPM Planner</option>
             <option value="ppm-checklist-history">PPM Checklist History</option>
             <option value="ppm-due-date-history">PPM Due Date History</option>

@@ -226,6 +226,27 @@ async function reportRows(type: string, filters: ReturnType<typeof reportFilters
     const rows = await prisma.serviceRequest.findMany({ where: { isIncidentCase: true }, orderBy: { createdAt: "desc" } });
     return rows.map((row) => ({ ticketNo: row.ticketNo, title: row.title, category: row.category, departmentCode: row.departmentCode, serviceCode: row.serviceCode, requester: row.requester, priority: row.priority, status: row.status, location: row.location, dueAt: dateValue(row.dueAt), createdAt: dateValue(row.createdAt), description: row.description }));
   }
+  if (type === "lost-found") {
+    const rows = await prisma.lostFoundCase.findMany({ orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }] });
+    return rows.map((row) => ({
+      caseId: row.caseId,
+      section: row.caseType === "LOST" ? "Lost Items" : "Found Items",
+      item: row.caseType === "LOST" ? row.lostItems : row.itemFound,
+      lostDate: dateValue(row.lostDate),
+      foundDateTime: dateValue(row.foundAt),
+      foundBy: row.foundBy ?? "",
+      location: row.location,
+      guestName: row.guestName ?? "",
+      roomBadgeOrId: row.guestRoomBadge ?? "",
+      contact: row.guestContact ?? "",
+      returnDate: dateValue(row.returnDate),
+      status: row.status,
+      createdBy: row.createdBy,
+      updatedBy: row.updatedBy ?? "",
+      createdAt: dateValue(row.createdAt),
+      updatedAt: dateValue(row.updatedAt),
+    }));
+  }
   if (type === "hse-incidents") {
     const rows = await prisma.hseIncident.findMany({ orderBy: { reportedAt: "desc" } });
     return rows.map((row) => ({ refNo: row.refNo, title: row.title, area: row.area, severity: row.severity, status: row.status, reportedAt: dateValue(row.reportedAt), correctiveAction: row.correctiveAction }));

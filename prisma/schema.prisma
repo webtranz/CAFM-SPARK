@@ -748,6 +748,31 @@ model HseIncident {
   correctiveAction String
 }
 
+model LostFoundCase {
+  id             String    @id @default(cuid())
+  caseId         String    @unique
+  caseType       String
+  lostItems      String?
+  lostDate       DateTime?
+  foundAt        DateTime?
+  foundBy        String?
+  itemFound      String?
+  location       String
+  guestName      String?
+  guestRoomBadge String?
+  guestContact   String?
+  returnDate     DateTime?
+  status         String
+  createdBy      String
+  updatedBy      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([caseType, status])
+  @@index([createdAt])
+  @@index([returnDate])
+}
+
 model Meter {
   id      String   @id @default(cuid())
   name    String
