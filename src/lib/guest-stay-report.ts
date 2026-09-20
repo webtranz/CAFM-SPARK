@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { normalizeHousingDepartmentValue } from "@/lib/housing-departments";
 
 type ReportRow = Record<string, string | number | boolean | null>;
 
@@ -16,7 +17,7 @@ export async function guestStayReportRows(): Promise<ReportRow[]> {
       ID: row.employeeId ?? row.resident?.residentNo ?? row.bookingNo,
       Name: row.residentName,
       Room: row.roomNumber ?? row.room.roomNumber,
-      Department: row.departmentCode ?? "",
+      Department: normalizeHousingDepartmentValue(row.departmentCode),
       "Start date": reportDateValue(row.checkIn),
       "End date": reportDateValue(row.checkOut),
       "Guest stay status": guestStayStatus(row.status),

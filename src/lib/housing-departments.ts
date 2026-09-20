@@ -1,10 +1,54 @@
 // Sources: Saudi Aramco Departments.xlsx and approved guest department update workbook values.
 export const HOUSING_DEPARTMENTS = [
-  "COMMUNITY SERVICES", "Emergency", "FGP", "FrPD", "Industrial Security",
-  "Information Technology", "KGPD", "KPOD", "Loss Prevention", "Materials",
-  "MEDICAL", "NA Well", "NAGO", "NAGPD", "Others", "POD", "SECURITY", "TRANSIENT",
+  "COMMUNITY SERVICES", "Emergency", "FGP", "FrPD", "Information Technology",
+  "KGPD", "KPOD", "Loss Prevention", "Materials", "MEDICAL", "NA Well",
+  "NAGO", "NAGPD", "Others", "POD", "SECURITY", "TRANSIENT",
   "Transport & Equip Servc Dept", "WGP",
 ] as const;
+
+const HOUSING_DEPARTMENT_ALIASES = new Map(
+  [
+    ["Community Services Proj. Support", "COMMUNITY SERVICES"],
+    ["Fadhili Gas Plant", "FGP"],
+    ["Fire Protection Dept.", "FrPD"],
+    ["Industrial Security", "SECURITY"],
+    ["Khursaniyah Gas Plant Dept", "KGPD"],
+    ["Khursaniyah Producing", "KPOD"],
+    ["NAGO Admin Area", "NAGO"],
+    ["Northern Area Gas Prod Dept", "NAGPD"],
+    ["Power Operation Dept.", "POD"],
+    ["Transient", "TRANSIENT"],
+    ["Wasit Gas Plant", "WGP"],
+  ].map(([source, target]) => [source.toLowerCase(), target] as const),
+);
+
+export function normalizeHousingDepartmentValue(value: unknown): string {
+  const department = cleanHousingDepartment(value);
+  if (!department) return "";
+  const aliased = HOUSING_DEPARTMENT_ALIASES.get(department.toLowerCase());
+  if (aliased) return aliased;
+  return (
+    HOUSING_DEPARTMENTS.find(
+      (item) => item.toLowerCase() === department.toLowerCase(),
+    ) || department
+  );
+}
+
+export function normalizeHousingDepartmentRecord<T extends { departmentCode?: unknown; resident?: any }>(record: T): T {
+  const departmentCode = normalizeHousingDepartmentValue(record.departmentCode);
+  const resident = record.resident
+    ? normalizeHousingDepartmentRecord(record.resident)
+    : record.resident;
+  return {
+    ...record,
+    ...(departmentCode || record.departmentCode !== undefined ? { departmentCode } : {}),
+    ...(resident ? { resident } : {}),
+  };
+}
+
+export function normalizeHousingDepartmentRows<T extends { departmentCode?: unknown; resident?: any }>(rows: T[]): T[] {
+  return rows.map((row) => normalizeHousingDepartmentRecord(row));
+}
 
 export function validateHousingDepartment(
   value: unknown,
@@ -18,7 +62,7 @@ export function validateHousingDepartment(
   if (typeof value !== "string") {
     throw Object.assign(new Error("Select a department from the approved Saudi Aramco department list."), { status: 400 });
   }
-  const department = value.trim();
+  const department = normalizeHousingDepartmentValue(value);
   if (!department) {
     if (!required) return "";
   } else {

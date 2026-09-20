@@ -1,3 +1,5 @@
+import { normalizeHousingDepartmentValue } from "@/lib/housing-departments";
+
 type BookingLike = {
   id?: string | null;
   bookingNo?: string | null;
@@ -139,7 +141,7 @@ function movementRow(
     ),
     guestName: String(booking.residentName || ""),
     company: String(booking.companyName || booking.resident?.companyName || ""),
-    department: String(booking.departmentCode || ""),
+    department: normalizeHousingDepartmentValue(booking.departmentCode),
     contactNumber: String(
       booking.contactNumber || booking.resident?.phone || "",
     ),
