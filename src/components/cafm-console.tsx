@@ -13,7 +13,7 @@ import type { ReactNode, UIEvent } from "react";
 import Image from "next/image";
 import { checkInHousingBookings } from "@/lib/housing-check-in";
 import { IncidentMediaGallery, IncidentMediaUpload } from "./incident-media";
-import { HOUSING_DEPARTMENTS, normalizeHousingDepartmentValue } from "@/lib/housing-departments";
+import { HOUSING_DEPARTMENTS } from "@/lib/housing-departments";
 import {
   Activity,
   AlertTriangle,
@@ -11153,7 +11153,7 @@ type SearchableOption = { value: string; label: string };
 const STANDARD_HOUSING_DEPARTMENT_OPTIONS: SearchableOption[] = HOUSING_DEPARTMENTS.map((value) => ({ value, label: value }));
 
 function standardHousingDepartmentValue(value: unknown) {
-  const code = normalizeHousingDepartmentValue(value);
+  const code = String(value || "").trim();
   if (!code) return "";
   const match = STANDARD_HOUSING_DEPARTMENT_OPTIONS.find(
     (department) => department.value.toLowerCase() === code.toLowerCase(),
@@ -25982,7 +25982,7 @@ function HousingOperations({
   });
   const residentDepartmentFallback = new Map<string, string>();
   bookings.forEach((booking) => {
-    const department = normalizeHousingDepartmentValue(booking.departmentCode);
+    const department = String(booking.departmentCode || "").trim();
     if (!department) return;
     [
       booking.residentId,
@@ -26002,7 +26002,7 @@ function HousingOperations({
   });
   const residentsWithVisibleDepartments = residents.map((resident: any) => {
     const departmentCode =
-      normalizeHousingDepartmentValue(resident.departmentCode) ||
+      resident.departmentCode ||
       residentDepartmentFallback.get(String(resident.id || "").trim()) ||
       residentDepartmentFallback.get(String(resident.residentNo || "").trim()) ||
       residentDepartmentFallback.get(String(resident.employeeId || "").trim()) ||

@@ -1,4 +1,4 @@
-import { cleanHousingDepartment, normalizeHousingDepartmentRows, preservedHousingDepartment, validateHousingDepartment } from "@/lib/housing-departments";
+import { cleanHousingDepartment, preservedHousingDepartment, validateHousingDepartment } from "@/lib/housing-departments";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { apiError } from "@/lib/api-response";
@@ -284,22 +284,7 @@ export async function GET() {
     ),
   );
 
-  return NextResponse.json({
-    properties,
-    blocks,
-    rooms: normalizedRooms,
-    beds,
-    residents: normalizeHousingDepartmentRows(residents),
-    bookings: normalizeHousingDepartmentRows(bookings),
-    inspections,
-    assets,
-    inventory,
-    approvals,
-    notifications,
-    notificationSettings,
-    history,
-    holds,
-  });
+  return NextResponse.json({ properties, blocks, rooms: normalizedRooms, beds, residents, bookings, inspections, assets, inventory, approvals, notifications, notificationSettings, history, holds });
 }
 
 function addIndexedHousingRow<T>(index: Map<string, T[]>, key: unknown, row: T) {

@@ -1,5 +1,3 @@
-import { normalizeHousingDepartmentValue } from "./housing-departments";
-
 type HousingResidentSnapshot = {
   id: string;
   residentNo: string;
@@ -24,7 +22,7 @@ export async function syncHousingResidentToBookings(
   previous?: Partial<HousingResidentSnapshot> | null,
 ) {
   const badgeNumbers = uniqueText([resident.residentNo, previous?.residentNo]);
-  const departmentCode = normalizeHousingDepartmentValue(resident.departmentCode);
+  const departmentCode = String(resident.departmentCode || "").trim();
   const bookingOr = [
     { residentId: resident.id },
     ...badgeNumbers.map((employeeId) => ({ employeeId })),

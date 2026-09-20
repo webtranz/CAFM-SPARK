@@ -1,7 +1,6 @@
 import { accessRole } from "@/lib/access-control";
 import { prisma } from "@/lib/prisma";
 import { fallbackData } from "@/lib/demo-data";
-import { normalizeHousingDepartmentRows, normalizeHousingDepartmentValue } from "@/lib/housing-departments";
 import { convertExpiredUncheckedHousingBookingsToNoShow } from "@/lib/housing-no-show";
 import { ensureDefaultRbacOnce } from "@/lib/rbac-runtime";
 
@@ -19,7 +18,7 @@ function departmentValues(user: OperatingUser) {
     new Set(
       String(user?.department ?? "")
         .split(/[;,|]/)
-        .map((department) => normalizeHousingDepartmentValue(department))
+        .map((department) => department.trim())
         .filter(Boolean),
     ),
   );
@@ -213,19 +212,17 @@ export async function getOperatingData(user: OperatingUser = null) {
     const visibleAssetTags = new Set(assets.map((asset) => asset.tag));
     const visibleLocationCodes = new Set(locations.map((location) => location.code));
     const scopedPpms = kind === "admin" ? ppms : ppms.filter((ppm) => visibleAssetTags.has(ppm.assetTag) || visibleLocationCodes.has(ppm.locationCode));
-    const normalizedHousingResidents = normalizeHousingDepartmentRows(housingResidents);
-    const normalizedHousingBookings = normalizeHousingDepartmentRows(housingBookings);
 
     const housing =
       kind === "admin" || kind === "readonly"
-        ? { properties: housingProperties, blocks: housingBlocks, rooms: housingRooms, beds: housingBeds, residents: normalizedHousingResidents, bookings: normalizedHousingBookings, inspections: housingInspections, assets: housingAssets, inventory: housingInventory, approvals: housingApprovals, notifications: housingNotifications, notificationSettings: housingNotificationSettings, history: housingHistory, holds: housingRoomHolds }
+        ? { properties: housingProperties, blocks: housingBlocks, rooms: housingRooms, beds: housingBeds, residents: housingResidents, bookings: housingBookings, inspections: housingInspections, assets: housingAssets, inventory: housingInventory, approvals: housingApprovals, notifications: housingNotifications, notificationSettings: housingNotificationSettings, history: housingHistory, holds: housingRoomHolds }
         : {
             properties: housingProperties,
             blocks: housingBlocks,
             rooms: housingRooms,
             beds: housingBeds,
-            residents: normalizedHousingResidents.filter((resident) => !resident.departmentCode || departmentsForUser.includes(resident.departmentCode)),
-            bookings: normalizedHousingBookings.filter((booking) => !booking.departmentCode || departmentsForUser.includes(booking.departmentCode) || booking.requestedBy === user?.name || booking.requestedBy === user?.email),
+            residents: housingResidents.filter((resident) => !resident.departmentCode || departmentsForUser.includes(resident.departmentCode)),
+            bookings: housingBookings.filter((booking) => !booking.departmentCode || departmentsForUser.includes(booking.departmentCode) || booking.requestedBy === user?.name || booking.requestedBy === user?.email),
             inspections: housingInspections,
             assets: housingAssets,
             inventory: housingInventory,
