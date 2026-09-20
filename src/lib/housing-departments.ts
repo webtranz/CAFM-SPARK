@@ -1,8 +1,8 @@
-// Source: Saudi Aramco Departments.xlsx, Sheet1!A2:A20.
+// Sources: Saudi Aramco Departments.xlsx and approved guest department update workbook values.
 export const HOUSING_DEPARTMENTS = [
   "COMMUNITY SERVICES", "Emergency", "FGP", "FrPD", "Industrial Security",
   "Information Technology", "KGPD", "KPOD", "Loss Prevention", "Materials",
-  "MEDICAL", "NA Well", "NAGO", "NAGPD", "Others", "POD", "TRANSIENT",
+  "MEDICAL", "NA Well", "NAGO", "NAGPD", "Others", "POD", "SECURITY", "TRANSIENT",
   "Transport & Equip Servc Dept", "WGP",
 ] as const;
 

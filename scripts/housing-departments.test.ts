@@ -6,9 +6,10 @@ async function main() {
   for (const department of HOUSING_DEPARTMENTS) {
     assert.equal(validateHousingDepartment(department, true), department);
   }
-  for (const invalid of ["SECURITY", "IT", "OTHER", "Made up", "<script>", 123, {}, ["KGPD"]]) {
+  for (const invalid of ["IT", "OTHER", "Made up", "<script>", 123, {}, ["KGPD"]]) {
     assert.throws(() => validateHousingDepartment(invalid), (error: any) => error.status === 400);
   }
+  assert.equal(validateHousingDepartment("security", true), "SECURITY");
   assert.equal(validateHousingDepartment("Made up", false, ["Made up"]), "Made up");
   assert.equal(preservedHousingDepartment("", "Fire Protection Dept."), "Fire Protection Dept.");
   assert.equal(preservedHousingDepartment("", "", "Industrial Security"), "Industrial Security");
