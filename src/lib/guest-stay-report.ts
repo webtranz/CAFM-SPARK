@@ -10,9 +10,7 @@ export async function guestStayReportRows(): Promise<ReportRow[]> {
     orderBy: { createdAt: "desc" },
   });
 
-  return rows
-    .filter((row) => ["CHECKED_IN", "APPROVED"].includes(String(row.status || "").toUpperCase()))
-    .map((row) => ({
+  return rows.map((row) => ({
       ID: row.employeeId ?? row.resident?.residentNo ?? row.bookingNo,
       Name: row.residentName,
       Room: row.roomNumber ?? row.room.roomNumber,
@@ -45,5 +43,12 @@ function reportDateValue(value: Date | null | undefined) {
 }
 
 function guestStayStatus(status: string) {
-  return String(status).toUpperCase() === "CHECKED_IN" ? "Checked in" : "Approved";
+  const normalized = String(status || "").toUpperCase();
+  if (normalized === "CHECKED_IN") return "In-house";
+  if (normalized === "APPROVED" || normalized === "RESERVED") return "Reserved";
+  if (normalized === "CHECKED_OUT") return "Checked out";
+  if (normalized === "PENDING_APPROVAL") return "Pending approval";
+  if (normalized === "REQUESTED") return "Requested";
+  if (normalized === "NO_SHOW") return "No show";
+  return normalized ? normalized.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase()) : "";
 }

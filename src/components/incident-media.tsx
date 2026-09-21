@@ -16,8 +16,8 @@ export function IncidentMediaGallery({ urls, onRemove }: { urls: string[]; onRem
   </div>;
 }
 
-export function IncidentMediaUpload({ onUploading }: { onUploading: (busy: boolean) => void }) {
-  const [urls, setUrls] = useState<string[]>([]);
+export function IncidentMediaUpload({ onUploading, initialUrls = [] }: { onUploading: (busy: boolean) => void; initialUrls?: string[] }) {
+  const [urls, setUrls] = useState<string[]>(initialUrls);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const input = useRef<HTMLInputElement>(null);

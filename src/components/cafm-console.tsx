@@ -2877,6 +2877,7 @@ export function CafmConsole({
                 submitIncident={(formData) =>
                   postRecord("/api/service-requests", formData, "Incident / case", true, true)
                 }
+                updateIncident={updateRequestRecord}
                 navigate={navigate}
               />
             )
@@ -18476,6 +18477,7 @@ function IncidentCaseManagement({
   inspections,
   saving,
   submitIncident,
+  updateIncident,
   navigate,
 }: {
   requests: any[];
@@ -18483,10 +18485,12 @@ function IncidentCaseManagement({
   inspections: any[];
   saving: boolean;
   submitIncident: (formData: FormData) => Promise<unknown>;
+  updateIncident: (id: string, formData: FormData) => Promise<boolean> | boolean;
   navigate: (moduleId: string, menuKey: string, view?: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [editingIncident, setEditingIncident] = useState<any | null>(null);
   const [mediaUploading, setMediaUploading] = useState(false);
   const [incidentSaveError, setIncidentSaveError] = useState("");
   const [selectedId, setSelectedId] = useState("");
@@ -18528,6 +18532,11 @@ function IncidentCaseManagement({
       return "Closed";
     return displayValue(status);
   };
+  const statusOptionLabel = (status: string) =>
+    String(status || "")
+      .replaceAll("_", " ")
+      .toLowerCase()
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
   const rows = [
     ...uploadedCases.map((inspection) => ({
       id: inspection.id,
@@ -18577,6 +18586,9 @@ function IncidentCaseManagement({
       equipmentDescription: request.location,
       department: request.departmentCode || "",
       departmentDescription: request.departmentCode || "",
+      description: request.description || "",
+      serviceCode: request.serviceCode || "",
+      requester: request.requester || "",
       priority: request.priority,
       risk:
         request.priority === "CRITICAL"
@@ -18695,21 +18707,32 @@ function IncidentCaseManagement({
           <button
             type="button"
             disabled={mediaUploading || saving}
-            onClick={() => setCreateOpen((current) => !current)}
+            onClick={() => {
+              setEditingIncident(null);
+              setIncidentSaveError("");
+              setCreateOpen((current) => !current);
+            }}
             className="rounded-lg bg-lagoon px-4 py-2 text-sm font-black text-white"
           >
             {createOpen ? "Close" : "+ Create New Incident"}
           </button>
         </div>
-        {createOpen && (
+        {(createOpen || editingIncident) && (
           <form
+            key={editingIncident?.id || "new-incident"}
             onSubmit={async (event) => {
               event.preventDefault();
               if (mediaUploading || saving) return;
               setIncidentSaveError("");
               try {
-                await submitIncident(new FormData(event.currentTarget));
-                setCreateOpen(false);
+                const formData = new FormData(event.currentTarget);
+                if (editingIncident) {
+                  const updated = await updateIncident(editingIncident.id, formData);
+                  if (updated) setEditingIncident(null);
+                } else {
+                  await submitIncident(formData);
+                  setCreateOpen(false);
+                }
               } catch (error) {
                 setIncidentSaveError(error instanceof Error ? error.message : "Unable to save incident. Please retry.");
               }
@@ -18722,11 +18745,12 @@ function IncidentCaseManagement({
                 name="title"
                 required
                 placeholder="Incident / case title"
+                defaultValue={editingIncident?.title || ""}
                 className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-lagoon xl:col-span-2"
               />
               <select
                 name="category"
-                defaultValue="Customer Complaint"
+                defaultValue={editingIncident?.caseType || "Customer Complaint"}
                 className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-lagoon"
               >
                 {caseTypeOptions.map((option) => (
@@ -18737,7 +18761,7 @@ function IncidentCaseManagement({
               </select>
               <select
                 name="priority"
-                defaultValue="MEDIUM"
+                defaultValue={editingIncident?.priority || "MEDIUM"}
                 className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-lagoon"
               >
                 <option value="LOW">Low</option>
@@ -18750,38 +18774,64 @@ function IncidentCaseManagement({
               <input
                 name="location"
                 placeholder="Location / room / area"
+                defaultValue={editingIncident?.location || ""}
                 className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-lagoon"
               />
               <input
                 name="departmentCode"
                 placeholder="Department code"
+                defaultValue={editingIncident?.department || ""}
                 className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-lagoon"
               />
               <input
                 name="requester"
                 placeholder="Reported by"
+                defaultValue={editingIncident?.requester || ""}
                 className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-lagoon"
               />
               <input
                 name="serviceCode"
                 placeholder="Service code"
+                defaultValue={editingIncident?.serviceCode || ""}
                 className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-lagoon"
               />
             </div>
+            {editingIncident && (
+              <select
+                name="status"
+                defaultValue={editingIncident.status || "NEW"}
+                className="h-11 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-lagoon"
+              >
+                {["NEW", "OPEN", "TRIAGED", "APPROVED", "PENDING_ASSIGNMENT", "ASSIGNED", "ACCEPTED", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "VERIFIED", "REOPENED", "CLOSED", "REJECTED"].map((status) => (
+                  <option key={status} value={status}>{statusOptionLabel(status)}</option>
+                ))}
+              </select>
+            )}
             <textarea
               name="description"
               placeholder="Incident details / complaint description"
+              defaultValue={editingIncident?.description || ""}
               className="min-h-24 rounded-lg border border-slate-200 bg-white p-3 text-sm font-bold outline-none focus:border-lagoon"
             />
-            <IncidentMediaUpload onUploading={setMediaUploading} />
+            <IncidentMediaUpload onUploading={setMediaUploading} initialUrls={editingIncident ? attachmentList(editingIncident.mediaUrls) : []} />
             {incidentSaveError && <p role="alert" className="text-sm text-coral">{incidentSaveError}</p>}
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              {editingIncident && (
+                <button
+                  type="button"
+                  disabled={saving || mediaUploading}
+                  onClick={() => setEditingIncident(null)}
+                  className="rounded-lg border border-slate-200 bg-white px-5 py-2 text-sm font-black text-slate-700 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              )}
               <button
                 type="submit"
                 disabled={saving || mediaUploading}
                 className="rounded-lg bg-ink px-5 py-2 text-sm font-black text-white disabled:bg-slate-300"
               >
-                Create Incident
+                {editingIncident ? "Save Changes" : "Create Incident"}
               </button>
             </div>
           </form>
@@ -18872,12 +18922,20 @@ function IncidentCaseManagement({
                       >
                         Open Source
                       </button>
-                      <button
-                        type="button"
-                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600"
-                      >
-                        More
-                      </button>
+                      {selected.source === "Service Request" && (
+                        <button
+                          type="button"
+                          disabled={saving || mediaUploading}
+                          onClick={() => {
+                            setCreateOpen(false);
+                            setIncidentSaveError("");
+                            setEditingIncident(selected);
+                          }}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 disabled:opacity-50"
+                        >
+                          Edit
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

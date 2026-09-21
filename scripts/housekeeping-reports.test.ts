@@ -84,6 +84,10 @@ assert.deepEqual(
     ["HBK-TODAY-ARRIVAL", "ARRIVING_TODAY"],
   ],
 );
+assert.deepEqual(
+  expectedArrivalReportRows(bookings, now).map((row) => row.checkIn),
+  ["Sep 14, 2026", "Sep 15, 2026"],
+);
 
 assert.deepEqual(
   expectedDepartureReportRows(bookings, now).map((row) => [
@@ -96,6 +100,10 @@ assert.deepEqual(
     ["HBK-IN-HOUSE", "DEPARTING_TODAY"],
     ["HBK-TODAY-CHECKOUT", "DEPARTING_TODAY"],
   ],
+);
+assert.deepEqual(
+  expectedDepartureReportRows(bookings, now).map((row) => row.checkOut),
+  ["Sep 14, 2026", "Sep 14, 2026", "Sep 15, 2026", "Sep 15, 2026"],
 );
 
 assert.deepEqual(

@@ -148,19 +148,19 @@ function movementRow(
     bedNumber: String(booking.bedNumber || booking.bed?.label || ""),
     roomType: String(booking.room?.roomType || ""),
     bookingType: String(booking.bookingType || ""),
-    checkIn: isoValue(booking.checkIn),
-    checkOut: isoValue(booking.checkOut),
+    checkIn: monthDateValue(booking.checkIn),
+    checkOut: monthDateValue(booking.checkOut),
     status: String(booking.status || ""),
     priority: String(booking.priority || ""),
   };
 }
 
 function sortByCheckIn(left: HousekeepingMovementRow, right: HousekeepingMovementRow) {
-  return left.checkIn.localeCompare(right.checkIn);
+  return dateTime(left.checkIn) - dateTime(right.checkIn);
 }
 
 function sortByCheckOut(left: HousekeepingMovementRow, right: HousekeepingMovementRow) {
-  return left.checkOut.localeCompare(right.checkOut);
+  return dateTime(left.checkOut) - dateTime(right.checkOut);
 }
 
 function normalizedStatus(value: unknown) {
