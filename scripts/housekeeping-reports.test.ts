@@ -33,6 +33,14 @@ const bookings = [
     roomId: "room-3",
   },
   {
+    bookingNo: "HBK-PENDING-ARRIVAL",
+    residentName: "Pending Arrival",
+    status: "PENDING_APPROVAL",
+    checkIn: new Date("2026-09-15T08:00:00.000Z"),
+    checkOut: new Date("2026-09-20T08:00:00.000Z"),
+    roomId: "room-8",
+  },
+  {
     bookingNo: "HBK-IN-HOUSE",
     residentName: "In House",
     status: "CHECKED_IN",
@@ -84,7 +92,9 @@ assert.deepEqual(
   ]),
   [
     ["HBK-OVERDUE-DEPARTURE", "OVERDUE_DEPARTURE"],
+    ["HBK-YESTERDAY-CHECKOUT", "OVERDUE_DEPARTURE"],
     ["HBK-IN-HOUSE", "DEPARTING_TODAY"],
+    ["HBK-TODAY-CHECKOUT", "DEPARTING_TODAY"],
   ],
 );
 
@@ -93,6 +103,13 @@ assert.deepEqual(
     (row) => row.bookingNo,
   ),
   ["HBK-YESTERDAY-CHECKOUT"],
+);
+assert.deepEqual(
+  checkedOutReportRows(bookings, "2026-09-14", "2026-09-14").map((row) => [
+    row.checkIn,
+    row.checkOut,
+  ]),
+  [["Sep 10, 2026", "Sep 14, 2026"]],
 );
 
 console.log("housekeeping report rules passed");

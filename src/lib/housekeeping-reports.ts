@@ -50,19 +50,10 @@ export type HousekeepingMovementRow = {
   priority: string;
 };
 
-const arrivalPendingStatuses = new Set([
-  "REQUESTED",
-  "PENDING_APPROVAL",
-  "APPROVED",
-  "RESERVED",
-  "NO_SHOW",
-]);
-const departurePendingClosedStatuses = new Set([
+const reservedArrivalStatuses = new Set(["APPROVED", "RESERVED"]);
+const departureReportStatuses = new Set(["CHECKED_IN", "CHECKED_OUT"]);
+const checkedOutStatuses = new Set([
   "CHECKED_OUT",
-  "CANCELLED",
-  "CANCELED",
-  "REJECTED",
-  "TRANSFERRED",
 ]);
 
 export function expectedArrivalReportRows(
@@ -75,7 +66,7 @@ export function expectedArrivalReportRows(
     .filter((booking) => {
       const start = dateTime(booking.checkIn);
       if (!Number.isFinite(start) || start > todayEnd) return false;
-      return arrivalPendingStatuses.has(normalizedStatus(booking.status));
+      return reservedArrivalStatuses.has(normalizedStatus(booking.status));
     })
     .map((booking) =>
       movementRow(
@@ -97,7 +88,7 @@ export function expectedDepartureReportRows(
     .filter((booking) => {
       const end = dateTime(booking.checkOut);
       if (!Number.isFinite(end) || end > todayEnd) return false;
-      return !departurePendingClosedStatuses.has(normalizedStatus(booking.status));
+      return departureReportStatuses.has(normalizedStatus(booking.status));
     })
     .map((booking) =>
       movementRow(
@@ -118,10 +109,17 @@ export function checkedOutReportRows(
 ) {
   return bookings
     .filter((booking) => {
-      if (normalizedStatus(booking.status) !== "CHECKED_OUT") return false;
+      if (!checkedOutStatuses.has(normalizedStatus(booking.status))) return false;
       return dateInRange(booking.checkOut, dateFrom, dateTo);
     })
-    .map((booking) => movementRow(booking, "Checked Out", "CHECKED_OUT"))
+    .map((booking) => {
+      const row = movementRow(booking, "Checked Out", "CHECKED_OUT");
+      return {
+        ...row,
+        checkIn: monthDateValue(booking.checkIn),
+        checkOut: monthDateValue(booking.checkOut),
+      };
+    })
     .sort(sortByCheckOut);
 }
 
@@ -179,6 +177,18 @@ function isoValue(value: unknown) {
   if (!value) return "";
   const date = value instanceof Date ? value : new Date(String(value));
   return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
+function monthDateValue(value: unknown) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-US", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Riyadh",
+  });
 }
 
 function dayKey(value: unknown) {
