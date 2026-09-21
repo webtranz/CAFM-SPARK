@@ -320,6 +320,12 @@ const moduleGroups: ModuleGroup[] = [
         view: "housing-housekeeping",
       },
       {
+        id: "incidents",
+        label: "Lost & Found",
+        icon: Search,
+        view: "lost-found",
+      },
+      {
         id: "housing",
         label: "Housing Assets",
         icon: Building2,
@@ -501,12 +507,6 @@ const moduleGroups: ModuleGroup[] = [
         label: "Incident & Case Management",
         icon: AlertTriangle,
         view: "incidents",
-      },
-      {
-        id: "incidents",
-        label: "Lost & Found",
-        icon: Search,
-        view: "lost-found",
       },
     ],
   },
@@ -2878,6 +2878,7 @@ export function CafmConsole({
                   postRecord("/api/service-requests", formData, "Incident / case", true, true)
                 }
                 updateIncident={updateRequestRecord}
+                canEditIncidents={isAdmin}
                 navigate={navigate}
               />
             )
@@ -13642,14 +13643,20 @@ function WorkOrderSupervisorReviewModal({
             </label>
           </>
         ) : (
-          <label className="grid gap-2 text-sm font-black text-slate-600">
-            Final Remarks
-            <textarea
-              name="supervisorDecision"
-              placeholder="Final verification remarks. Closing time and supervisor are captured automatically."
-              className="min-h-28 rounded-lg border border-slate-200 p-3 outline-none focus:border-lagoon"
-            />
-          </label>
+          <>
+            <label className="grid gap-2 text-sm font-black text-slate-600">
+              Final Remarks
+              <textarea
+                name="supervisorDecision"
+                placeholder="Final verification remarks. Closing time and supervisor are captured automatically."
+                className="min-h-28 rounded-lg border border-slate-200 p-3 outline-none focus:border-lagoon"
+              />
+            </label>
+            <div className="grid gap-2 text-sm font-black text-slate-600">
+              Final photos / PDF attachment
+              <ImageUploadField name="photoUrls" defaultValue={work.photoUrls ?? ""} />
+            </div>
+          </>
         )}
         <button
           disabled={saving}
@@ -13688,13 +13695,17 @@ function attachmentList(value: unknown) {
     .filter(Boolean);
 }
 
+function attachmentPath(value: string) {
+  return value.split("?")[0].split("#")[0];
+}
+
+function isPdfUrl(value: string) {
+  return /\.pdf$/i.test(attachmentPath(value));
+}
+
 function isImageUrl(value: string) {
-  const pathOnly = value.split("?")[0];
-  return (
-    /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(pathOnly) ||
-    value.startsWith("/uploads/") ||
-    value.startsWith("/api/files/")
-  );
+  const pathOnly = attachmentPath(value);
+  return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(pathOnly);
 }
 
 function isInvalidChecklistValue(value: unknown) {
@@ -13933,6 +13944,7 @@ function ImageUploadField({
 }) {
   const [value, setValue] = useState(defaultValue);
   const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
   const urls = value
     .split(/\s+/)
     .map((item) => item.trim())
@@ -13943,14 +13955,21 @@ function ImageUploadField({
     const formData = new FormData();
     Array.from(files).forEach((file) => formData.append("files", file));
     setUploading(true);
-    const response = await fetch("/api/uploads", {
-      method: "POST",
-      body: formData,
-    });
-    const result = await response.json();
-    const next = [...urls, ...(result.urls ?? [])].join("\n");
-    setValue(next);
-    setUploading(false);
+    setError("");
+    try {
+      const response = await fetch("/api/uploads", {
+        method: "POST",
+        body: formData,
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || "Unable to upload file.");
+      const next = [...urls, ...(result.urls ?? [])].join("\n");
+      setValue(next);
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Unable to upload file.");
+    } finally {
+      setUploading(false);
+    }
   }
 
   return (
@@ -13958,33 +13977,112 @@ function ImageUploadField({
       <input type="hidden" name={name} value={value} />
       <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg bg-white p-4 text-center text-sm font-bold text-slate-600">
         <Upload size={18} className="text-lagoon" />
-        {uploading ? "Uploading..." : "Upload images"}
+        {uploading ? "Uploading..." : "Upload images or PDF"}
         <input
           type="file"
-          accept="image/*"
+          accept="image/*,.pdf,application/pdf"
           multiple
           className="hidden"
-          onChange={(event) => upload(event.target.files)}
+          onChange={(event) => {
+            upload(event.target.files);
+            event.currentTarget.value = "";
+          }}
         />
       </label>
+      {error && <p role="alert" className="text-xs font-bold text-coral">{error}</p>}
       <textarea
         value={value}
         onChange={(event) => setValue(event.target.value)}
-        placeholder="Uploaded image URLs"
+        placeholder="Uploaded image or PDF URLs"
         className="min-h-20 rounded-lg border border-slate-200 p-3 text-sm outline-none focus:border-lagoon"
       />
       {urls.length > 0 && (
         <div className="grid grid-cols-3 gap-2">
-          {urls.slice(0, 6).map((url) => (
-            <img
-              key={url}
-              src={url}
-              alt="Uploaded proof"
-              className="h-20 w-full rounded-lg object-cover"
-            />
-          ))}
+          {urls.slice(0, 6).map((url) =>
+            isImageUrl(url) ? (
+              <img
+                key={url}
+                src={url}
+                alt="Uploaded proof"
+                className="h-20 w-full rounded-lg object-cover"
+              />
+            ) : (
+              <a
+                key={url}
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                className="grid h-20 place-items-center rounded-lg border border-slate-200 bg-white p-2 text-center text-xs font-black text-lagoon"
+              >
+                <FileText size={18} />
+                {isPdfUrl(url) ? "Open PDF" : "Open file"}
+              </a>
+            ),
+          )}
         </div>
       )}
+    </div>
+  );
+}
+
+function WorkflowAttachmentField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const urls = value
+    .split(/\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  async function upload(files: FileList | null) {
+    if (!files?.length) return;
+    const formData = new FormData();
+    Array.from(files).forEach((file) => formData.append("files", file));
+    setUploading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/uploads", {
+        method: "POST",
+        body: formData,
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || "Unable to upload file.");
+      onChange([...urls, ...(result.urls ?? [])].join("\n"));
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Unable to upload file.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="grid gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 md:col-span-2">
+      <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg bg-white p-4 text-center text-sm font-bold text-slate-600">
+        <Upload size={18} className="text-lagoon" />
+        {uploading ? "Uploading..." : "Upload PPM photos or PDF"}
+        <input
+          type="file"
+          accept="image/*,.pdf,application/pdf"
+          multiple
+          className="hidden"
+          onChange={(event) => {
+            upload(event.target.files);
+            event.currentTarget.value = "";
+          }}
+        />
+      </label>
+      {error && <p role="alert" className="text-xs font-bold text-coral">{error}</p>}
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Photo or PDF URLs"
+        className={`${TICKET_PLAN_TEXTAREA_CLASS} min-h-20`}
+      />
     </div>
   );
 }
@@ -16912,11 +17010,9 @@ function PmPreviewModal({
               placeholder="Remarks / supervisor decision / rework reason"
               className={`${TICKET_PLAN_TEXTAREA_CLASS} min-h-20`}
             />
-            <textarea
+            <WorkflowAttachmentField
               value={workflowPhotos}
-              onChange={(event) => setWorkflowPhotos(event.target.value)}
-              placeholder="Photo URLs"
-              className={`${TICKET_PLAN_TEXTAREA_CLASS} min-h-20`}
+              onChange={setWorkflowPhotos}
             />
             <textarea
               value={workflowLabor}
@@ -18478,6 +18574,7 @@ function IncidentCaseManagement({
   saving,
   submitIncident,
   updateIncident,
+  canEditIncidents,
   navigate,
 }: {
   requests: any[];
@@ -18486,6 +18583,7 @@ function IncidentCaseManagement({
   saving: boolean;
   submitIncident: (formData: FormData) => Promise<unknown>;
   updateIncident: (id: string, formData: FormData) => Promise<boolean> | boolean;
+  canEditIncidents: boolean;
   navigate: (moduleId: string, menuKey: string, view?: string) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -18922,7 +19020,7 @@ function IncidentCaseManagement({
                       >
                         Open Source
                       </button>
-                      {selected.source === "Service Request" && (
+                      {canEditIncidents && selected.source === "Service Request" && (
                         <button
                           type="button"
                           disabled={saving || mediaUploading}

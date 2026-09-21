@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const files = form.getAll("files");
     if (!files.length || files.length > 10 || files.some((file) => !(file instanceof File))) {
-      return NextResponse.json({ message: "Select between 1 and 10 photos or videos." }, { status: 400 });
+      return NextResponse.json({ message: "Select between 1 and 10 photos, videos or PDFs." }, { status: 400 });
     }
     const selected = files as File[];
     if (selected.reduce((size, file) => size + file.size, 0) > 100 * 1024 * 1024) {

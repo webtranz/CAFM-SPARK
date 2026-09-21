@@ -1484,6 +1484,7 @@ export async function POST(request: Request) {
       workUpdate.status = "CLOSED";
       workUpdate.finishedAt = new Date();
       workUpdate.verifiedAt = workOrder?.verifiedAt || new Date();
+      workUpdate.photoUrls = input.photoUrls || workOrder?.photoUrls;
       ppmUpdate.lastCompletedAt = new Date();
 
     }
