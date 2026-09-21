@@ -20,22 +20,23 @@ export async function GET(request: Request) {
   const type = url.searchParams.get("type") || "assets";
   const format = url.searchParams.get("format") || "preview";
   const filters = reportFilters(url);
-  const rows = await reportRows(type, filters);
+  const columns = reportColumns(type);
+  const rows = applyReportColumns(await reportRows(type, filters), columns);
   const kpis = reportKpis(type, rows);
 
   if (format === "csv") {
-    return file(csv(rows), "text/csv", `${type}.csv`);
+    return file(csv(rows, columns), "text/csv", `${type}.csv`);
   }
   if (format === "excel") {
-    return file(excel(rows, type, kpis), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", `${type}.xlsx`);
+    return file(excel(rows, type, kpis, columns), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", `${type}.xlsx`);
   }
   if (format === "pdf") {
-    return file(pdf(rows, type, kpis, filters), "application/pdf", `${type}.pdf`);
+    return file(pdf(rows, type, kpis, filters, columns), "application/pdf", `${type}.pdf`);
   }
   if (format === "html") {
-    return html(htmlPreview(rows, type, kpis, filters));
+    return html(htmlPreview(rows, type, kpis, filters, columns));
   }
-  return NextResponse.json({ type, rows, kpis, filters });
+  return NextResponse.json({ type, rows, columns, kpis, filters });
 }
 
 function reportFilters(url: URL) {
@@ -78,6 +79,52 @@ function reportKpis(type: string, rows: ReportRow[]) {
     };
   }
   return null;
+}
+
+function reportColumns(type: string) {
+  const columns: Record<string, string[]> = {
+    "housing-expected-arrivals": [
+      "reportType",
+      "guestId",
+      "guestName",
+      "department",
+      "roomNumber",
+      "contactNumber",
+      "checkIn",
+      "checkOut",
+      "status",
+    ],
+    "housing-expected-departures": [
+      "reportType",
+      "guestId",
+      "guestName",
+      "department",
+      "contactNumber",
+      "checkIn",
+      "checkOut",
+      "status",
+    ],
+    "housing-checked-out-list": [
+      "reportType",
+      "guestId",
+      "guestName",
+      "department",
+      "contactNumber",
+      "roomNumber",
+      "checkIn",
+      "checkOut",
+      "status",
+    ],
+    "housing-vacant-rooms": ["room", "status", "readiness"],
+  };
+  return columns[type] || null;
+}
+
+function applyReportColumns(rows: ReportRow[], columns: string[] | null) {
+  if (!columns) return rows;
+  return rows.map((row) =>
+    Object.fromEntries(columns.map((column) => [column, row[column] ?? ""])),
+  ) as ReportRow[];
 }
 
 async function reportRows(type: string, filters: ReturnType<typeof reportFilters>): Promise<ReportRow[]> {
@@ -1062,14 +1109,14 @@ function locationPart(location: string, index: number) {
   return String(location || "").split("/").map((part) => part.trim())[index] || "";
 }
 
-function csv(rows: ReportRow[]) {
-  if (!rows.length) return "";
-  const headers = Object.keys(rows[0]);
+function csv(rows: ReportRow[], columns: string[] | null = null) {
+  const headers = columns?.length ? columns : rows[0] ? Object.keys(rows[0]) : [];
+  if (!headers.length) return "";
   return [headers.join(","), ...rows.map((row) => headers.map((header) => quote(row[header])).join(","))].join("\n");
 }
 
-function excel(rows: ReportRow[], title: string, kpis: Record<string, unknown> | null) {
-  const sheets: WorkbookSheet[] = [{ name: prettyTitle(title).slice(0, 31) || "Report", rows }];
+function excel(rows: ReportRow[], title: string, kpis: Record<string, unknown> | null, columns: string[] | null = null) {
+  const sheets: WorkbookSheet[] = [{ name: prettyTitle(title).slice(0, 31) || "Report", rows, columns: columns || undefined }];
   if (kpis) {
     sheets.unshift({
       name: "KPI Summary",
@@ -1237,12 +1284,12 @@ function crc32(bytes: Uint8Array) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-function htmlPreview(rows: ReportRow[], title: string, kpis: Record<string, unknown> | null, filters: ReturnType<typeof reportFilters>) {
-  const headers = rows[0] ? Object.keys(rows[0]) : [];
+function htmlPreview(rows: ReportRow[], title: string, kpis: Record<string, unknown> | null, filters: ReturnType<typeof reportFilters>, columns: string[] | null = null) {
+  const headers = columns?.length ? columns : rows[0] ? Object.keys(rows[0]) : [];
   const filterText = `Date: ${filters.dateFrom || "-"} to ${filters.dateTo || "-"} | Company: ${filters.company || "all"} | Building: ${filters.building || "all"} | Floor: ${filters.floor || "all"} | Room: ${filters.room || "all"} | Status: ${filters.status || "all"} | Response > ${filters.responseGreaterThan ?? "-"} mins | Resolution > ${filters.resolutionGreaterThan ?? "-"} mins | SLA: ${filters.slaBreach ?? "all"} | Delayed: ${filters.delayedOnly ? "yes" : "no"}`;
   const filterQuery = reportFilterQuery(title, filters);
-  const table = rows.length
-    ? `<div class="table-wrap"><table><thead><tr><th>#</th>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${rows.map((row, index) => `<tr><td>${index + 1}</td>${headers.map((header) => `<td>${escapeHtml(row[header] ?? "")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`
+  const table = headers.length
+    ? `<div class="table-wrap"><table><thead><tr><th>#</th>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${rows.map((row, index) => `<tr><td>${index + 1}</td>${headers.map((header) => `<td>${escapeHtml(row[header] ?? "")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>${rows.length ? "" : `<div class="empty">No records found for this report.</div>`}`
     : `<div class="empty">No records found for this report.</div>`;
 
   return `<!doctype html>
@@ -1300,10 +1347,11 @@ function htmlPreview(rows: ReportRow[], title: string, kpis: Record<string, unkn
 </html>`;
 }
 
-function pdf(rows: ReportRow[], title: string, kpis: Record<string, unknown> | null, filters: ReturnType<typeof reportFilters>) {
+function pdf(rows: ReportRow[], title: string, kpis: Record<string, unknown> | null, filters: ReturnType<typeof reportFilters>, columns: string[] | null = null) {
   const kpiLines = kpis ? Object.entries(kpis).map(([key, value]) => `${key}: ${value ?? "-"}`) : [];
   const filterLines = [`Filters: date=${filters.dateFrom || "-"} to ${filters.dateTo || "-"}, company=${filters.company || "all"}, building=${filters.building || "all"}, floor=${filters.floor || "all"}, room=${filters.room || "all"}, status=${filters.status || "all"}, response>${filters.responseGreaterThan ?? "-"} mins, resolution>${filters.resolutionGreaterThan ?? "-"} mins, sla=${filters.slaBreach ?? "all"}, delayed=${filters.delayedOnly ? "yes" : "no"}`];
-  const lines = [`Tamimi Global CAFM Report: ${title}`, `Generated: ${new Date().toISOString()}`, ...filterLines, ...kpiLines, "", ...rows.slice(0, 35).map((row) => Object.values(row).join(" | "))];
+  const headers = columns?.length ? columns : rows[0] ? Object.keys(rows[0]) : [];
+  const lines = [`Tamimi Global CAFM Report: ${title}`, `Generated: ${new Date().toISOString()}`, ...filterLines, ...kpiLines, "", headers.join(" | "), ...rows.slice(0, 35).map((row) => headers.map((header) => row[header] ?? "").join(" | "))];
   const text = lines.join("\\n").replace(/[()\\]/g, "");
   return `%PDF-1.4
 1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
