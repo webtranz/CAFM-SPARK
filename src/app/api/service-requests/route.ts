@@ -89,6 +89,7 @@ export async function GET(request: Request) {
     const priority = url.searchParams.get("priority")?.trim() || "All";
     const category = url.searchParams.get("category")?.trim() || "All";
     const overdueOnly = url.searchParams.get("overdueOnly") === "true";
+    const correctiveRemainingOnly = url.searchParams.get("correctiveRemainingOnly") === "true";
     const pageInput = Number(url.searchParams.get("page") || 1);
     const pageSizeParam = url.searchParams.get("pageSize") || "100";
     const pageSizeInput = pageSizeParam === "all" ? Number.MAX_SAFE_INTEGER : Number(pageSizeParam);
@@ -101,6 +102,22 @@ export async function GET(request: Request) {
       ...(overdueOnly ? { dueAt: { lt: new Date() }, status: { notIn: ["CLOSED", "REJECTED"] } } : {}),
     };
     const andFilters: any[] = [];
+    if (correctiveRemainingOnly) {
+      andFilters.push(
+        { status: { notIn: ["CLOSED", "REJECTED"] } },
+        {
+          OR: [
+            { category: { contains: "Corrective", mode: "insensitive" } },
+            { title: { contains: "Corrective", mode: "insensitive" } },
+            { description: { contains: "Corrective", mode: "insensitive" } },
+            { serviceCode: { equals: "CM", mode: "insensitive" } },
+            { serviceCode: { contains: "Corrective", mode: "insensitive" } },
+            { workOrder: { is: { type: { contains: "Corrective", mode: "insensitive" } } } },
+            { workOrder: { is: { title: { contains: "Corrective", mode: "insensitive" } } } },
+          ],
+        },
+      );
+    }
     if (housekeepingOnly || (permissionError && canUseHousekeepingQueue)) {
       andFilters.push(housekeepingServiceRequestWhere());
     }
@@ -127,10 +144,12 @@ export async function GET(request: Request) {
       prisma.serviceRequest.count({ where }),
       prisma.serviceRequest.findMany({
         where,
-        orderBy: { createdAt: "desc" },
+        orderBy: correctiveRemainingOnly
+          ? [{ dueAt: "asc" }, { createdAt: "asc" }]
+          : { createdAt: "desc" },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: { workOrder: { select: { id: true, woNo: true, status: true } } },
+        include: { workOrder: { select: { id: true, woNo: true, status: true, type: true } } },
       }),
     ]);
     return NextResponse.json({ requests, allTotal, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });

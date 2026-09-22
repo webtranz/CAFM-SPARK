@@ -175,7 +175,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!isSupervisorOrAdmin && !isAssignedTechnician) {
       return apiError(new Error("You do not have permission for this work order."), "Access denied", 403);
     }
-    if (current.status === "CLOSED") {
+    if (current.status === "CLOSED" && status !== "REOPENED") {
       return apiError(new Error("Closed work orders are read-only."), "Closed work order is read-only", 403);
     }
     const nextStatus = status === "COMPLETED" ? "PENDING_SUPERVISOR_REVIEW" as any : status;
@@ -223,7 +223,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           cost: input.cost,
           responseAt: input.responseAt ? new Date(input.responseAt) : status === "IN_PROGRESS" && !current.responseAt ? new Date() : undefined,
           resolutionAt: input.resolutionAt ? new Date(input.resolutionAt) : (status === "COMPLETED" || status === "PENDING_SUPERVISOR_REVIEW") ? new Date() : undefined,
-          finishedAt: input.finishedAt ? new Date(input.finishedAt) : status === "CLOSED" ? new Date() : undefined,
+          finishedAt: status === "REOPENED" ? null : input.finishedAt ? new Date(input.finishedAt) : status === "CLOSED" ? new Date() : undefined,
           photoUrls: input.photoUrls,
           assetsUsed: input.assetsUsed,
           inventoryUsed: input.inventoryUsed,
@@ -234,7 +234,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           supervisorDecision: status === "CLOSED"
             ? `${input.supervisorDecision?.trim() || "Closed after supervisor verification."}\nClosed by: ${user?.name || user?.email || "Supervisor"}`
             : input.supervisorDecision,
-          verifiedAt: status === "VERIFIED" || status === "CLOSED" ? new Date() : undefined,
+          verifiedAt: status === "REOPENED" ? null : status === "VERIFIED" || status === "CLOSED" ? new Date() : undefined,
           isIncidentCase: input.isIncidentCase,
           actualHours: status && ["COMPLETED", "PENDING_SUPERVISOR_REVIEW", "VERIFIED", "CLOSED"].includes(status) ? 4 : undefined,
         };
@@ -284,6 +284,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     if (updated.requestId && status === "CLOSED") {
       await prisma.serviceRequest.update({ where: { id: updated.requestId }, data: { status: "CLOSED" } });
+    }
+    if (updated.requestId && status === "REOPENED") {
+      await prisma.serviceRequest.update({ where: { id: updated.requestId }, data: { status: "REOPENED" } });
+    }
+    if (updated.ppmId && status === "REOPENED") {
+      await prisma.preventiveMaintenance.update({ where: { id: updated.ppmId }, data: { workflowStatus: "REWORK" } });
     }
     await auditAction({ user, action: `WORK_ORDER_${nextStatus || "UPDATE"}`, entity: "work_order", entityId: id, details: { before: current, input, after: updated } });
 

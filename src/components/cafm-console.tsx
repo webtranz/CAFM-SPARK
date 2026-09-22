@@ -7867,6 +7867,21 @@ function WorkOrders({
                                 Reopen
                               </button>
                             )}
+                          {(canFinalReview || canHelpdeskManageHskWork(work)) &&
+                            work.status === "CLOSED" && (
+                              <button
+                                type="button"
+                                disabled={workAction === `${work.id}:reopen`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setSelectedWorkId(work.id);
+                                  setReviewWork({ work, action: "reopen" });
+                                }}
+                                className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-black text-white disabled:bg-slate-400"
+                              >
+                                Reopen Closed
+                              </button>
+                            )}
                           {isAdmin && work.status !== "CLOSED" && (
                             <button
                               type="button"
@@ -8003,7 +8018,7 @@ function WorkOrders({
           }
           onReopenWork={
             (canFinalReview || canHelpdeskManageHskWork(previewWork)) &&
-            ["PENDING_SUPERVISOR_REVIEW", "COMPLETED"].includes(
+            ["PENDING_SUPERVISOR_REVIEW", "COMPLETED", "CLOSED"].includes(
               previewWork.status,
             )
               ? () => {
@@ -8215,6 +8230,32 @@ const PPM_TODAY_REPORT_STATUS_FILTERS = [
   "Closed",
 ] as const;
 
+const TODAY_PPM_DEPARTMENT_FILTERS = [
+  "Pest control",
+  "Housekeeping",
+  "Sand Removal",
+] as const;
+
+function comparableDepartment(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function ppmTodayDepartmentMatches(work: any, filter: string) {
+  if (!filter || filter === "All") return true;
+  const department = comparableDepartment(work.departmentCode);
+  const filterKey = comparableDepartment(filter);
+  const aliases: Record<string, string[]> = {
+    [comparableDepartment("Pest control")]: ["pestcontrol"],
+    [comparableDepartment("Housekeeping")]: ["housekeeping", "hsk"],
+    [comparableDepartment("Sand Removal")]: ["sandremoval"],
+  };
+  const candidates = aliases[filterKey] ?? [filterKey];
+  return candidates.some((candidate) => department === candidate || department.includes(candidate));
+}
+
 function ppmTodayStatusBucket(work: any) {
   const status = workOrderStatus(work);
   if (["CLOSED", "VERIFIED"].includes(status)) return "Closed";
@@ -8408,6 +8449,7 @@ function PpmTodayWorkOrders({
   const [actionMessage, setActionMessage] = useState("");
   const [closingIds, setClosingIds] = useState<Set<string>>(new Set());
   const [reportStatusFilter, setReportStatusFilter] = useState("All");
+  const [todayPpmDepartmentFilter, setTodayPpmDepartmentFilter] = useState("All");
   const [columnFilters, setColumnFilters] = useState<ExcelFilterConfig>({});
   const [columnSort, setColumnSort] = useState<ExcelSort>(null);
 
@@ -8421,9 +8463,19 @@ function PpmTodayWorkOrders({
     );
   };
 
+  const todayPpmDepartmentOptions = useMemo(
+    () => ["All", ...sortedUniqueStrings([...TODAY_PPM_DEPARTMENT_FILTERS], rows.map((work) => work.departmentCode))],
+    [rows],
+  );
+
+  const departmentFilteredRows = useMemo(
+    () => rows.filter((work) => ppmTodayDepartmentMatches(work, todayPpmDepartmentFilter)),
+    [rows, todayPpmDepartmentFilter],
+  );
+
   const searchedRows = useMemo(() => {
     const text = search.trim().toLowerCase();
-    const source = liveWorkOrderSort(rows, role);
+    const source = liveWorkOrderSort(departmentFilteredRows, role);
     if (!text) return source;
     return source.filter((work) =>
       [
@@ -8448,14 +8500,14 @@ function PpmTodayWorkOrders({
         .toLowerCase()
         .includes(text),
     );
-  }, [rows, role, search]);
+  }, [departmentFilteredRows, role, search]);
 
   const visibleRows = useMemo(
     () => applyExcelTableFilters(searchedRows, PPM_TODAY_COLUMNS, columnFilters, columnSort, ppmTodayFilterValue),
     [searchedRows, columnFilters, columnSort],
   );
 
-  const statusCounts = useMemo(() => ppmTodayStatusCounts(rows), [rows]);
+  const statusCounts = useMemo(() => ppmTodayStatusCounts(departmentFilteredRows), [departmentFilteredRows]);
   const exactStatusOptions = useMemo(
     () => sortedUniqueStrings(rows.map((work) => work.status)),
     [rows],
@@ -8491,6 +8543,9 @@ function PpmTodayWorkOrders({
   const selectedInProgressRows = selectedRows.filter(isInProgressWorkOrder);
   const selectedReviewRows = selectedRows.filter(isReviewReadyWorkOrder);
   const closeableSelectedRows = selectedReviewRows;
+  const selectedClosedRows = selectedRows.filter(
+    (work) => workOrderStatus(work) === "CLOSED",
+  );
   const rowsForPrint = selectedRows.length ? selectedRows : visibleRows;
   const allVisibleSelected = Boolean(visibleRows.length) && visibleRows.every((work) => selectedIds.has(work.id));
 
@@ -8635,6 +8690,67 @@ function PpmTodayWorkOrders({
     window.setTimeout(() => setBulkProgress(null), 2200);
   };
 
+  const reopenPpmTodayRows = async (targetRows: any[]) => {
+    const eligible = targetRows.filter(
+      (work) => work?.id && workOrderStatus(work) === "CLOSED",
+    );
+    if (!eligible.length) {
+      window.alert("Select closed PPM work orders before reopening.");
+      return;
+    }
+    const remarks = window.prompt(
+      `Enter reopen reason for ${eligible.length.toLocaleString()} closed PPM work order${eligible.length === 1 ? "" : "s"}:`,
+    );
+    if (remarks === null) return;
+    if (!remarks.trim()) {
+      window.alert("Reopen reason is required.");
+      return;
+    }
+    if (!window.confirm(`Reopen ${eligible.length.toLocaleString()} closed PPM work order${eligible.length === 1 ? "" : "s"}?`)) return;
+
+    const remarkText = remarks.trim();
+    setActionMessage("");
+    setBulkProgress({ total: eligible.length, done: 0, label: "Reopening PPM work orders" });
+    setClosingIds(new Set(eligible.map((work) => work.id)));
+    let success = 0;
+    const failedIds: string[] = [];
+
+    for (const work of eligible) {
+      try {
+        const updated = await updateWorkStatus(work.id, "REOPENED", {
+          rejectionReason: remarkText,
+          supervisorDecision: remarkText,
+        });
+        if (updated?.id) {
+          mergeUpdatedRow(updated);
+          success += 1;
+        } else {
+          failedIds.push(work.id);
+        }
+      } catch (error) {
+        console.error(error);
+        failedIds.push(work.id);
+      }
+      setBulkProgress({ total: eligible.length, done: success + failedIds.length, label: "Reopening PPM work orders" });
+    }
+
+    setClosingIds(new Set());
+    setSelectedIds(new Set(failedIds));
+    setBulkProgress({
+      total: eligible.length,
+      done: success,
+      label: failedIds.length
+        ? `${success.toLocaleString()} reopened, ${failedIds.length.toLocaleString()} failed`
+        : "PPM work orders reopened",
+    });
+    setActionMessage(
+      failedIds.length
+        ? `${success.toLocaleString()} PPM work orders reopened. ${failedIds.length.toLocaleString()} need review.`
+        : `${success.toLocaleString()} PPM work orders reopened successfully.`,
+    );
+    window.setTimeout(() => setBulkProgress(null), 2200);
+  };
+
   useEffect(() => {
     const controller = new AbortController();
     async function loadTodayPpmWorkOrders() {
@@ -8670,16 +8786,20 @@ function PpmTodayWorkOrders({
           dueTo: monthTo,
         });
         setMonthlyLoading(true);
-        const response = await fetch(`/api/work-orders?${params.toString()}`, {
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        const monthResponse = await fetch(`/api/work-orders?${monthParams.toString()}`, {
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        const result = await response.json().catch(() => ({}));
-        const monthResult = await monthResponse.json().catch(() => ({}));
+        const [response, monthResponse] = await Promise.all([
+          fetch(`/api/work-orders?${params.toString()}`, {
+            cache: "no-store",
+            signal: controller.signal,
+          }),
+          fetch(`/api/work-orders?${monthParams.toString()}`, {
+            cache: "no-store",
+            signal: controller.signal,
+          }),
+        ]);
+        const [result, monthResult] = await Promise.all([
+          response.json().catch(() => ({})),
+          monthResponse.json().catch(() => ({})),
+        ]);
         if (!response.ok) {
           throw new Error(result.message || "Unable to load PPM work orders.");
         }
@@ -8802,8 +8922,8 @@ function PpmTodayWorkOrders({
           </button>
           <button
             type="button"
-            onClick={() => { setReportStatusFilter("All"); setSearch(""); setColumnFilters({}); setColumnSort(null); }}
-            disabled={reportStatusFilter === "All" && !search && !Object.values(columnFilters).some(Array.isArray) && !columnSort}
+            onClick={() => { setReportStatusFilter("All"); setSearch(""); setTodayPpmDepartmentFilter("All"); setColumnFilters({}); setColumnSort(null); }}
+            disabled={reportStatusFilter === "All" && !search && todayPpmDepartmentFilter === "All" && !Object.values(columnFilters).some(Array.isArray) && !columnSort}
             className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon disabled:text-slate-300"
           >
             Whole Range
@@ -8819,6 +8939,17 @@ function PpmTodayWorkOrders({
               className="h-11 w-full text-sm outline-none"
             />
           </div>
+          <select
+            value={todayPpmDepartmentFilter}
+            onChange={(event) => setTodayPpmDepartmentFilter(event.target.value)}
+            className="h-10 min-w-[180px] rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-ink"
+          >
+            {todayPpmDepartmentOptions.map((department) => (
+              <option key={department} value={department}>
+                {department === "All" ? "All Departments" : department}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
             onClick={toggleVisibleSelection}
@@ -8827,10 +8958,10 @@ function PpmTodayWorkOrders({
           >
             {allVisibleSelected ? "Clear Visible" : "Select Visible"}
           </button>
-          <button type="button" onClick={() => { setColumnFilters({}); setColumnSort(null); }}
-            disabled={!Object.values(columnFilters).some(Array.isArray) && !columnSort}
+          <button type="button" onClick={() => { setColumnFilters({}); setColumnSort(null); setTodayPpmDepartmentFilter("All"); }}
+            disabled={!Object.values(columnFilters).some(Array.isArray) && !columnSort && todayPpmDepartmentFilter === "All"}
             className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-lagoon disabled:text-slate-300">
-            Clear Column Filters
+            Clear Filters
           </button>
           <button
             type="button"
@@ -8867,6 +8998,14 @@ function PpmTodayWorkOrders({
             className="h-10 rounded-lg bg-ink px-4 text-sm font-black text-white disabled:bg-slate-300"
           >
             Close Review ({closeableSelectedRows.length.toLocaleString()})
+          </button>
+          <button
+            type="button"
+            onClick={() => reopenPpmTodayRows(selectedRows)}
+            disabled={!canCloseReview || !selectedClosedRows.length || Boolean(bulkProgress)}
+            className="h-10 rounded-lg bg-amber-600 px-4 text-sm font-black text-white disabled:bg-slate-300"
+          >
+            Reopen Closed ({selectedClosedRows.length.toLocaleString()})
           </button>
         </div>
         {bulkProgress && (
@@ -8974,14 +9113,25 @@ function PpmTodayWorkOrders({
                       </ul>
                     </td>
                     <td className="whitespace-nowrap px-3 py-3">
-                      <button
-                        type="button"
-                        onClick={() => closePpmTodayRows([work])}
-                        disabled={!canCloseReview || isClosed || !isReviewReady || isClosing || Boolean(bulkProgress)}
-                        className="rounded-lg bg-lagoon px-3 py-1.5 text-xs font-black text-white disabled:bg-slate-300"
-                      >
-                        {isClosing ? "Updating" : isClosed ? "Closed" : isReviewReady ? "Close Review" : "Review Needed"}
-                      </button>
+                      {isClosed ? (
+                        <button
+                          type="button"
+                          onClick={() => reopenPpmTodayRows([work])}
+                          disabled={!canCloseReview || isClosing || Boolean(bulkProgress)}
+                          className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-black text-white disabled:bg-slate-300"
+                        >
+                          {isClosing ? "Updating" : "Reopen"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => closePpmTodayRows([work])}
+                          disabled={!canCloseReview || !isReviewReady || isClosing || Boolean(bulkProgress)}
+                          className="rounded-lg bg-lagoon px-3 py-1.5 text-xs font-black text-white disabled:bg-slate-300"
+                        >
+                          {isClosing ? "Updating" : isReviewReady ? "Close Review" : "Review Needed"}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -9406,6 +9556,7 @@ function Helpdesk({
   const [priorityFilter, setPriorityFilter] = useState("All");
   const [categoryFilter, setCategoryFilter] = useState("All");
   const [overdueOnly, setOverdueOnly] = useState(false);
+  const [correctiveRemainingOnly, setCorrectiveRemainingOnly] = useState(false);
   const roleKind = roleKindLabel(role);
   const isSupervisorView = roleKind === "admin" || roleKind === "supervisor";
   const isHelpdeskView = roleKind === "helpdesk";
@@ -9501,7 +9652,7 @@ function Helpdesk({
   useEffect(() => {
     setRequestPage(1);
     requestScrollRef.current?.scrollTo({ top: 0 });
-  }, [search, statusFilter, priorityFilter, categoryFilter, overdueOnly]);
+  }, [search, statusFilter, priorityFilter, categoryFilter, overdueOnly, correctiveRemainingOnly]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -9516,6 +9667,7 @@ function Helpdesk({
           priority: priorityFilter,
           category: categoryFilter,
           overdueOnly: overdueOnly ? "true" : "false",
+          correctiveRemainingOnly: correctiveRemainingOnly ? "true" : "false",
         });
         const response = await fetch(
           `/api/service-requests?${params.toString()}`,
@@ -9555,6 +9707,7 @@ function Helpdesk({
     priorityFilter,
     categoryFilter,
     overdueOnly,
+    correctiveRemainingOnly,
   ]);
 
   useEffect(() => {
@@ -9610,6 +9763,7 @@ function Helpdesk({
           priority: priorityFilter,
           category: categoryFilter,
           overdueOnly: overdueOnly ? "true" : "false",
+          correctiveRemainingOnly: correctiveRemainingOnly ? "true" : "false",
         });
         const response = await fetch(
           `/api/service-requests?${params.toString()}`,
@@ -9692,6 +9846,7 @@ function Helpdesk({
         priority: priorityFilter,
         category: categoryFilter,
         overdueOnly: overdueOnly ? "true" : "false",
+        correctiveRemainingOnly: correctiveRemainingOnly ? "true" : "false",
       });
       const response = await fetch(
         `/api/service-requests?${params.toString()}`,
@@ -9817,6 +9972,13 @@ function Helpdesk({
               className={`h-11 rounded-lg px-3 text-sm font-black ${overdueOnly ? "bg-coral text-white" : "border border-slate-200 bg-white text-slate-600"}`}
             >
               Overdue & Due Today
+            </button>
+            <button
+              type="button"
+              onClick={() => setCorrectiveRemainingOnly((current) => !current)}
+              className={`h-11 rounded-lg px-3 text-sm font-black ${correctiveRemainingOnly ? "bg-amber-600 text-white" : "border border-slate-200 bg-white text-slate-600"}`}
+            >
+              Old CM Remaining
             </button>
           </div>
           <div className="flex flex-wrap items-center gap-2">
