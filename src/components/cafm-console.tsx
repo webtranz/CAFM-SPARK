@@ -4402,12 +4402,24 @@ function ReportButtons({
   label?: string;
   query?: Record<string, string | number | boolean | null | undefined>;
 }) {
+  const [dateFrom, setDateFrom] = useState(String(query?.dateFrom ?? ""));
+  const [dateTo, setDateTo] = useState(String(query?.dateTo ?? ""));
+
+  useEffect(() => {
+    setDateFrom(String(query?.dateFrom ?? ""));
+    setDateTo(String(query?.dateTo ?? ""));
+  }, [query?.dateFrom, query?.dateTo]);
+
   const href = (format: string) => {
     const params = new URLSearchParams({ type, format });
     Object.entries(query ?? {}).forEach(([key, value]) => {
       if (value === undefined || value === null || String(value) === "") return;
       params.set(key, String(value));
     });
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    else params.delete("dateFrom");
+    if (dateTo) params.set("dateTo", dateTo);
+    else params.delete("dateTo");
     return `/api/reports?${params.toString()}`;
   };
 
@@ -4416,6 +4428,38 @@ function ReportButtons({
       <span className="rounded-lg bg-white px-3 py-2 text-xs font-black uppercase text-slate-500 shadow-sm">
         {label}
       </span>
+      <label className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-[11px] font-black uppercase text-slate-500 shadow-sm">
+        From
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={(event) => setDateFrom(event.target.value)}
+          max={dateTo || undefined}
+          className="h-8 rounded-md border border-slate-200 px-2 text-xs font-bold text-ink outline-none focus:border-lagoon"
+        />
+      </label>
+      <label className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-[11px] font-black uppercase text-slate-500 shadow-sm">
+        To
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(event) => setDateTo(event.target.value)}
+          min={dateFrom || undefined}
+          className="h-8 rounded-md border border-slate-200 px-2 text-xs font-bold text-ink outline-none focus:border-lagoon"
+        />
+      </label>
+      {(dateFrom || dateTo) && (
+        <button
+          type="button"
+          onClick={() => {
+            setDateFrom("");
+            setDateTo("");
+          }}
+          className="rounded-lg bg-white px-3 py-2 text-xs font-black text-slate-500 shadow-sm hover:text-coral"
+        >
+          Clear Dates
+        </button>
+      )}
       <a
         className="rounded-lg bg-white px-3 py-2 text-xs font-black text-ink shadow-sm hover:text-lagoon"
         href={href("html")}
@@ -33684,4 +33728,3 @@ function actionFieldLabel(field: string) {
   };
   return labels[field] || field.replace(/([A-Z])/g, " $1");
 }
-

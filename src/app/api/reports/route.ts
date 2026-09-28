@@ -21,7 +21,10 @@ export async function GET(request: Request) {
   const format = url.searchParams.get("format") || "preview";
   const filters = reportFilters(url);
   const columns = reportColumns(type);
-  const rows = applyReportColumns(await reportRows(type, filters), columns);
+  const rows = applyReportColumns(
+    applyDateRangeToReportRows(type, await reportRows(type, filters), filters),
+    columns,
+  );
   const kpis = reportKpis(type, rows);
 
   if (format === "csv") {
@@ -516,6 +519,18 @@ function dateRangeFilter(dateFrom: string, dateTo: string) {
     if (!Number.isNaN(to.getTime())) range.lte = to;
   }
   return Object.keys(range).length ? range : null;
+}
+
+function applyDateRangeToReportRows(
+  type: string,
+  rows: ReportRow[],
+  filters: ReturnType<typeof reportFilters>,
+) {
+  if (!filters.dateFrom && !filters.dateTo) return rows;
+  if (type === "work-order-generated-summary") return rows;
+  return rows.filter((row) =>
+    rowMatchesDateOrHasNoDate(row, filters.dateFrom, filters.dateTo),
+  );
 }
 
 function generatedWorkOrderType(row: { type: string; title: string; jobPlan: string; ppmId?: string | null }) {
@@ -1073,9 +1088,56 @@ function includesValue(row: ReportRow, keys: string[], expected: string) {
   return keys.some((key) => String(row[key] ?? "").toLowerCase().includes(target));
 }
 
+const REPORT_DATE_KEYS = [
+  "createdAt",
+  "updatedAt",
+  "created_time",
+  "time",
+  "uploadedAt",
+  "checkIn",
+  "checkOut",
+  "Start Date",
+  "End Date",
+  "startDate",
+  "endDate",
+  "validFrom",
+  "validTo",
+  "dueAt",
+  "dueDate",
+  "plannedStart",
+  "completedAt",
+  "purchaseDate",
+  "warrantyExpiry",
+  "issueDate",
+  "expiryDate",
+  "transferredAt",
+  "nextPmDue",
+  "nextDue",
+  "closedAt",
+  "sentAt",
+  "queuedAt",
+  "detectedAt",
+  "foundDateTime",
+  "lostDate",
+  "returnDate",
+  "reportedAt",
+  "commentedAt",
+  "previousDueDate",
+  "newDueDate",
+  "generatedAt",
+  "startedAt",
+  "issuedAt",
+  "readAt",
+  "date",
+  "reportDate",
+  "drillDate",
+  "checklistDate",
+  "COMMISSIONDATE",
+  "ENDOFUSEFULLIFE",
+];
+
 function rowMatchesDate(row: ReportRow, dateFrom: string, dateTo: string) {
-  const keys = ["createdAt", "updatedAt", "checkIn", "checkOut", "Start Date", "End Date", "dueAt", "completedAt", "purchaseDate", "warrantyExpiry", "transferredAt", "nextPmDue", "closedAt", "sentAt", "queuedAt"];
-  return keys.some((key) => {
+  return REPORT_DATE_KEYS.some((key) => {
     const value = row[key];
     if (!value) return false;
     const time = reportDateTime(String(value));
@@ -1084,6 +1146,16 @@ function rowMatchesDate(row: ReportRow, dateFrom: string, dateTo: string) {
     if (dateTo && time > new Date(`${dateTo}T23:59:59`).getTime()) return false;
     return true;
   });
+}
+
+function rowMatchesDateOrHasNoDate(row: ReportRow, dateFrom: string, dateTo: string) {
+  const hasDateValue = REPORT_DATE_KEYS.some((key) => {
+    const value = row[key];
+    if (!value) return false;
+    return !Number.isNaN(reportDateTime(String(value)));
+  });
+  if (!hasDateValue) return true;
+  return rowMatchesDate(row, dateFrom, dateTo);
 }
 
 function reportDateTime(value: string) {
@@ -1424,6 +1496,3 @@ function html(body: string) {
     },
   });
 }
-
-
-
