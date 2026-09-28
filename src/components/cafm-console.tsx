@@ -2543,9 +2543,11 @@ export function CafmConsole({
           {active !== "command" && (
             <section className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-5">
               {liveModuleStats.map((stat) => (
-                <div
+                <button
                   key={stat.label}
-                  className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+                  type="button"
+                  onClick={() => navigate(stat.moduleId, stat.menuKey, stat.view)}
+                  className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-lagoon/40 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-lagoon/30"
                 >
                   <p className="text-sm font-medium text-slate-500">
                     {stat.label}
@@ -2558,14 +2560,14 @@ export function CafmConsole({
                   >
                     {stat.delta}
                   </p>
-                </div>
+                </button>
               ))}
             </section>
           )}
 
           {!canViewActive && <AccessDenied moduleId={active} />}
           {canViewActive && active === "command" && (
-            <CommandCenter data={records} />
+            <CommandCenter data={records} onOpenDetails={navigate} />
           )}
           {canViewActive && active === "totalEntries" && (
             <TotalEntries data={records} />
@@ -3570,12 +3572,18 @@ function buildDashboardSummaryStats(data: ConsoleData) {
         totalWorkOrders.toLocaleString() +
         " total",
       tone: "coral",
+      moduleId: "work",
+      menuKey: "Tickets-Work Orders",
+      view: "work",
     },
     {
       label: "PM Due",
       value: duePpms.toLocaleString(),
       delta: ppmTotal.toLocaleString() + " schedules tracked",
       tone: "sun",
+      moduleId: "ppm",
+      menuKey: "Tickets-PPM Planner",
+      view: "ppm",
     },
     {
       label: "Service Requests",
@@ -3586,6 +3594,9 @@ function buildDashboardSummaryStats(data: ConsoleData) {
         incidents.toLocaleString() +
         " incidents",
       tone: "lagoon",
+      moduleId: "helpdesk",
+      menuKey: "Tickets-Service Requests",
+      view: "helpdesk",
     },
     {
       label: "Housing Occupancy",
@@ -3598,6 +3609,9 @@ function buildDashboardSummaryStats(data: ConsoleData) {
         vacantRooms.toLocaleString() +
         " vacant rooms",
       tone: "leaf",
+      moduleId: "housing",
+      menuKey: "Housing Operations-Accommodation & Bookings",
+      view: "housing-bookings",
     },
     {
       label: "Assets Online",
@@ -3608,6 +3622,9 @@ function buildDashboardSummaryStats(data: ConsoleData) {
         totalAssets.toLocaleString() +
         " assets",
       tone: "lagoon",
+      moduleId: "assets",
+      menuKey: "Assets Management-Assets Management",
+      view: "assets-register",
     },
   ];
 }
@@ -3795,7 +3812,13 @@ function TotalEntries({ data }: { data: ConsoleData }) {
     </section>
   );
 }
-function CommandCenter({ data }: { data: ConsoleData }) {
+function CommandCenter({
+  data,
+  onOpenDetails,
+}: {
+  data: ConsoleData;
+  onOpenDetails: (moduleId: string, menuKey: string, view?: string) => void;
+}) {
   const [fromValue, setFromValue] = useState("");
   const [toValue, setToValue] = useState("");
   const [moduleFilter, setModuleFilter] = useState("All");
@@ -3973,6 +3996,9 @@ function CommandCenter({ data }: { data: ConsoleData }) {
       detail: "Open",
       sideValue: completedWorkOrders,
       sideLabel: "Completed",
+      moduleId: "work",
+      menuKey: "Tickets-Work Orders",
+      view: "work",
     },
     {
       label: "Booking & Reservations",
@@ -3982,6 +4008,9 @@ function CommandCenter({ data }: { data: ConsoleData }) {
       detail: "Total bookings",
       sideValue: currentGuests,
       sideLabel: "Current guests",
+      moduleId: "housing",
+      menuKey: "Housing Operations-Accommodation & Bookings",
+      view: "housing-bookings",
     },
     {
       label: "Asset Inventory",
@@ -3991,6 +4020,9 @@ function CommandCenter({ data }: { data: ConsoleData }) {
       detail: "Total assets",
       sideValue: compactNumber(inventoryOnHand),
       sideLabel: "Inventory units",
+      moduleId: "assets",
+      menuKey: "Assets Management-Assets Management",
+      view: "assets-register",
     },
     {
       label: "Planned Maintenance",
@@ -4000,6 +4032,9 @@ function CommandCenter({ data }: { data: ConsoleData }) {
       detail: "Due PM assets",
       sideValue: totalPpms,
       sideLabel: "Scheduled",
+      moduleId: "ppm",
+      menuKey: "Tickets-PPM Planner",
+      view: "ppm",
     },
     {
       label: "Recent Progress",
@@ -4009,6 +4044,9 @@ function CommandCenter({ data }: { data: ConsoleData }) {
       detail: "Overall progress",
       sideValue: activeStatuses,
       sideLabel: "Active statuses",
+      moduleId: "totalEntries",
+      menuKey: "Dashboard-Total Entries",
+      view: "totalEntries",
     },
   ];
   const progressData = [
@@ -4103,9 +4141,11 @@ function CommandCenter({ data }: { data: ConsoleData }) {
         {topCards.map((card) => {
           const Icon = card.icon;
           return (
-            <div
+            <button
               key={card.label}
-              className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+              type="button"
+              onClick={() => onOpenDetails(card.moduleId, card.menuKey, card.view)}
+              className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-lagoon/40 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-lagoon/30"
             >
               <div className="flex items-start justify-between gap-3">
                 <div
@@ -4131,7 +4171,7 @@ function CommandCenter({ data }: { data: ConsoleData }) {
                   </div>
                 </div>
               </div>
-            </div>
+            </button>
           );
         })}
       </section>
@@ -4599,16 +4639,19 @@ function ReportButtons({
     setDateTo(String(query?.dateTo ?? ""));
   }, [query?.dateFrom, query?.dateTo]);
 
-  const href = (format: string) => {
+  const href = (format: string, includeDates = true) => {
     const params = new URLSearchParams({ type, format });
     Object.entries(query ?? {}).forEach(([key, value]) => {
       if (value === undefined || value === null || String(value) === "") return;
+      if (!includeDates && (key === "dateFrom" || key === "dateTo")) return;
       params.set(key, String(value));
     });
-    if (dateFrom) params.set("dateFrom", dateFrom);
-    else params.delete("dateFrom");
-    if (dateTo) params.set("dateTo", dateTo);
-    else params.delete("dateTo");
+    if (includeDates) {
+      if (dateFrom) params.set("dateFrom", dateFrom);
+      else params.delete("dateFrom");
+      if (dateTo) params.set("dateTo", dateTo);
+      else params.delete("dateTo");
+    }
     return `/api/reports?${params.toString()}`;
   };
 
@@ -4651,7 +4694,7 @@ function ReportButtons({
       )}
       <a
         className="rounded-lg bg-white px-3 py-2 text-xs font-black text-ink shadow-sm hover:text-lagoon"
-        href={href("html")}
+        href={href("html", false)}
         target="_blank"
         rel="noreferrer"
       >
