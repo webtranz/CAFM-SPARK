@@ -1,4 +1,12 @@
 import { accessRole } from "@/lib/access-control";
+import {
+  AssetStatus,
+  HousingBookingStatus,
+  HousingOccupancyStatus,
+  PpmWorkflowStatus,
+  Priority,
+  WorkStatus,
+} from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { fallbackData } from "@/lib/demo-data";
 import { convertExpiredUncheckedHousingBookingsToNoShow } from "@/lib/housing-no-show";
@@ -33,6 +41,169 @@ function departmentContainsWhere(departments: string[]) {
 const INITIAL_LOAD_LIMIT = 50;
 const INITIAL_REFERENCE_LIMIT = 150;
 
+const CLOSED_WORK_STATUSES = [
+  WorkStatus.CLOSED,
+  WorkStatus.COMPLETED,
+  WorkStatus.VERIFIED,
+  WorkStatus.REJECTED,
+];
+
+const IN_PROGRESS_WORK_STATUSES = [
+  WorkStatus.IN_PROGRESS,
+  WorkStatus.ASSIGNED,
+  WorkStatus.ACCEPTED,
+  WorkStatus.PENDING_ASSIGNMENT,
+  WorkStatus.REOPENED,
+];
+
+function withScope(scope: Record<string, unknown>, condition: Record<string, unknown>) {
+  return Object.keys(scope).length ? { AND: [scope, condition] } : condition;
+}
+
+export async function getDashboardStats(workScope: Record<string, unknown> = {}) {
+  const now = new Date();
+  const [
+    workOrdersTotal,
+    openWorkOrders,
+    inProgressWorkOrders,
+    completedWorkOrders,
+    serviceRequestsTotal,
+    openServiceRequests,
+    incidentsTotal,
+    assetsTotal,
+    activeAssets,
+    criticalAssets,
+    inventoryItemsTotal,
+    inventoryOnHand,
+    ppmsTotal,
+    activePpms,
+    duePpms,
+    housingBookingsTotal,
+    currentGuests,
+    reservedBookings,
+    checkedOutBookings,
+    roomsTotal,
+    vacantRooms,
+    occupiedRooms,
+    complianceTotal,
+    documentsTotal,
+    lostFoundTotal,
+    securityGatePassesTotal,
+    securityReportsTotal,
+  ] = await Promise.all([
+    prisma.workOrder.count({ where: workScope }),
+    prisma.workOrder.count({
+      where: withScope(workScope, { status: { notIn: CLOSED_WORK_STATUSES } }),
+    }),
+    prisma.workOrder.count({
+      where: withScope(workScope, { status: { in: IN_PROGRESS_WORK_STATUSES } }),
+    }),
+    prisma.workOrder.count({
+      where: withScope(workScope, {
+        status: { in: [WorkStatus.CLOSED, WorkStatus.COMPLETED, WorkStatus.VERIFIED] },
+      }),
+    }),
+    prisma.serviceRequest.count({ where: { isIncidentCase: false } }),
+    prisma.serviceRequest.count({
+      where: {
+        isIncidentCase: false,
+        status: { notIn: CLOSED_WORK_STATUSES },
+      },
+    }),
+    prisma.serviceRequest.count({ where: { isIncidentCase: true } }),
+    prisma.asset.count(),
+    prisma.asset.count({ where: { status: AssetStatus.ACTIVE } }),
+    prisma.asset.count({ where: { criticality: { in: [Priority.CRITICAL, Priority.HIGH] } } }),
+    prisma.inventoryItem.count(),
+    prisma.inventoryItem.aggregate({ _sum: { onHand: true } }),
+    prisma.preventiveMaintenance.count(),
+    prisma.preventiveMaintenance.count({ where: { active: true } }),
+    prisma.preventiveMaintenance.count({
+      where: {
+        active: true,
+        nextDue: { lte: now },
+        workflowStatus: {
+          notIn: [
+            PpmWorkflowStatus.CLOSED,
+            PpmWorkflowStatus.COMPLETED,
+            PpmWorkflowStatus.CANCELLED,
+          ],
+        },
+      },
+    }),
+    prisma.housingBooking.count(),
+    prisma.housingBooking.count({ where: { status: HousingBookingStatus.CHECKED_IN } }),
+    prisma.housingBooking.count({
+      where: {
+        status: {
+          in: [
+            HousingBookingStatus.REQUESTED,
+            HousingBookingStatus.PENDING_APPROVAL,
+            HousingBookingStatus.APPROVED,
+          ],
+        },
+      },
+    }),
+    prisma.housingBooking.count({ where: { status: HousingBookingStatus.CHECKED_OUT } }),
+    prisma.housingRoom.count(),
+    prisma.housingRoom.count({ where: { status: HousingOccupancyStatus.AVAILABLE } }),
+    prisma.housingRoom.count({ where: { status: HousingOccupancyStatus.OCCUPIED } }),
+    prisma.complianceCertificate.count(),
+    prisma.documentUpload.count(),
+    prisma.lostFoundCase.count(),
+    prisma.securityGatePass.count(),
+    Promise.all([
+      prisma.securityDailyReport.count(),
+      prisma.securityFireDrillReport.count(),
+      prisma.securityChecklistReport.count(),
+    ]).then((counts) => counts.reduce((total, count) => total + count, 0)),
+  ]);
+
+  return {
+    workOrders: {
+      total: workOrdersTotal,
+      open: openWorkOrders,
+      inProgress: inProgressWorkOrders,
+      completed: completedWorkOrders,
+    },
+    serviceRequests: {
+      total: serviceRequestsTotal,
+      open: openServiceRequests,
+    },
+    incidents: { total: incidentsTotal },
+    assets: {
+      total: assetsTotal,
+      active: activeAssets,
+      criticalHigh: criticalAssets,
+    },
+    inventory: {
+      totalItems: inventoryItemsTotal,
+      onHandUnits: Number(inventoryOnHand._sum.onHand ?? 0),
+    },
+    ppm: {
+      total: ppmsTotal,
+      active: activePpms,
+      due: duePpms,
+    },
+    housing: {
+      bookingsTotal: housingBookingsTotal,
+      currentGuests,
+      reserved: reservedBookings,
+      checkedOut: checkedOutBookings,
+      roomsTotal,
+      vacantRooms,
+      occupiedRooms,
+    },
+    compliance: { total: complianceTotal },
+    documents: { total: documentsTotal },
+    lostFound: { total: lostFoundTotal },
+    security: {
+      gatePasses: securityGatePassesTotal,
+      reports: securityReportsTotal,
+      total: securityGatePassesTotal + securityReportsTotal,
+    },
+  };
+}
 
 export async function getTotalEntryCounts() {
   const [assetRegistry, locationList, workOrdersHistory, ppmSchedules, ppmChecklistHistoryRows, omManuals, serviceRequestHistory, casesAndIncidents, lostFoundCases, commentHistoryRows, rooms, guestProfiles, guestStayOccupancy] = await Promise.all([
@@ -126,7 +297,7 @@ export async function getOperatingData(user: OperatingUser = null) {
         ? {}
         : { OR: [{ id: user?.id || "" }, ...departmentContainsWhere(departmentsForUser)] };
 
-    const [sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, lostFoundCases, securityLocations, securityGatePasses, securityDailyReports, securityFireDrills, securityChecklists, shifts, rotations, roster, housingProperties, housingBlocks, housingRooms, housingBeds, housingResidents, housingBookings, housingInspections, housingAssets, housingInventory, housingApprovals, housingNotifications, housingNotificationSettings, housingHistory, housingRoomHolds, totalEntries] = await Promise.all([
+    const [sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, lostFoundCases, securityLocations, securityGatePasses, securityDailyReports, securityFireDrills, securityChecklists, shifts, rotations, roster, housingProperties, housingBlocks, housingRooms, housingBeds, housingResidents, housingBookings, housingInspections, housingAssets, housingInventory, housingApprovals, housingNotifications, housingNotificationSettings, housingHistory, housingRoomHolds, totalEntries, dashboardStats] = await Promise.all([
       prisma.site.findMany({ include: { buildings: { take: 10, orderBy: { code: "asc" } } }, orderBy: { name: "asc" }, take: INITIAL_REFERENCE_LIMIT }),
       prisma.building.findMany({ include: { site: true }, orderBy: { code: "asc" }, take: INITIAL_REFERENCE_LIMIT }),
       prisma.space.findMany({ include: { building: { include: { site: true } } }, orderBy: [{ building: { code: "asc" } }, { floor: "asc" }, { name: "asc" }], take: INITIAL_REFERENCE_LIMIT }),
@@ -207,6 +378,7 @@ export async function getOperatingData(user: OperatingUser = null) {
       prisma.housingHistory.findMany({ orderBy: { createdAt: "desc" }, take: INITIAL_LOAD_LIMIT }),
       prisma.housingRoomHold.findMany({ include: { room: { include: { property: true, block: true } } }, orderBy: [{ status: "asc" }, { startDate: "desc" }], take: INITIAL_LOAD_LIMIT }),
       getTotalEntryCounts(),
+      getDashboardStats(visibleWorkWhere),
     ]);
 
     const visibleAssetTags = new Set(assets.map((asset) => asset.tag));
@@ -233,7 +405,7 @@ export async function getOperatingData(user: OperatingUser = null) {
             holds: housingRoomHolds,
           };
 
-    return { sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms: scopedPpms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, lostFoundCases, security: { locations: securityLocations, gatePasses: securityGatePasses, dailyReports: securityDailyReports, fireDrills: securityFireDrills, checklists: securityChecklists }, totalEntries, shiftRotation: { shifts, rotations, roster }, housing, live: true };
+    return { sites, buildings, spaces, assets, requests, workOrders, workOrdersTotal, inventory, inspections, alerts, teams, services, categories, ppms: scopedPpms, ppmsTotal, users, permissions, departments, employees, rolePermissions, locations, jobPlans, jobPlansTotal, roles, auditLogs, complianceCertificates, documentUploads, lostFoundCases, security: { locations: securityLocations, gatePasses: securityGatePasses, dailyReports: securityDailyReports, fireDrills: securityFireDrills, checklists: securityChecklists }, totalEntries, dashboardStats, shiftRotation: { shifts, rotations, roster }, housing, live: true };
   } catch {
     return { ...fallbackData, live: false };
   }

@@ -57,7 +57,6 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { moduleStats } from "@/lib/demo-data";
 import {
   ACTION_PERMISSION_SEED,
   DEFAULT_ROLE_NAMES,
@@ -105,6 +104,7 @@ type ConsoleData = {
     checklists: any[];
   };
   totalEntries?: Record<string, number>;
+  dashboardStats?: Record<string, any>;
   shiftRotation?: {
     shifts: any[];
     rotations: any[];
@@ -1602,6 +1602,10 @@ export function CafmConsole({
     executeWork: can("work.execute"),
     verifyWork: can("work.verify"),
   };
+  const liveModuleStats = useMemo(
+    () => buildDashboardSummaryStats(records),
+    [records],
+  );
 
   function navigate(moduleId: string, menuKey: string, view = moduleId) {
     if (!canOpenModule(moduleId)) {
@@ -2537,8 +2541,8 @@ export function CafmConsole({
           )}
 
           {active !== "command" && (
-            <section className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {moduleStats.map((stat) => (
+            <section className="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-5">
+              {liveModuleStats.map((stat) => (
                 <div
                   key={stat.label}
                   className="min-w-0 rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
@@ -2547,11 +2551,7 @@ export function CafmConsole({
                     {stat.label}
                   </p>
                   <p className="mt-2 text-3xl font-bold text-slate-900">
-                    {stat.currency ? (
-                      <CurrencyAmount value={stat.value} />
-                    ) : (
-                      stat.value
-                    )}
+                    {stat.value}
                   </p>
                   <p
                     className={`mt-1 text-sm font-medium ${statToneClasses[stat.tone]}`}
@@ -3465,6 +3465,153 @@ function compactNumber(value: number) {
   }).format(value);
 }
 
+function numberValue(value: unknown, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function arrayCount(items: unknown[] | undefined) {
+  return Array.isArray(items) ? items.length : 0;
+}
+
+function buildDashboardSummaryStats(data: ConsoleData) {
+  const stats = data.dashboardStats ?? {};
+  const totals = data.totalEntries ?? {};
+  const workStats = (stats.workOrders ?? {}) as Record<string, unknown>;
+  const requestStats = (stats.serviceRequests ?? {}) as Record<string, unknown>;
+  const incidentStats = (stats.incidents ?? {}) as Record<string, unknown>;
+  const assetStats = (stats.assets ?? {}) as Record<string, unknown>;
+  const housingStats = (stats.housing ?? {}) as Record<string, unknown>;
+  const ppmStats = (stats.ppm ?? {}) as Record<string, unknown>;
+
+  const totalWorkOrders = numberValue(
+    workStats.total,
+    data.workOrdersTotal ?? totals.workOrdersHistory ?? arrayCount(data.workOrders),
+  );
+  const openWorkOrders = numberValue(
+    workStats.open,
+    data.workOrders.filter(
+      (work) =>
+        !["CLOSED", "COMPLETED", "VERIFIED", "REJECTED", "CANCELLED"].includes(
+          String(work.status || "").toUpperCase(),
+        ),
+    ).length,
+  );
+  const completedWorkOrders = numberValue(
+    workStats.completed,
+    data.workOrders.filter((work) =>
+      ["CLOSED", "COMPLETED", "VERIFIED"].includes(
+        String(work.status || "").toUpperCase(),
+      ),
+    ).length,
+  );
+  const ppmTotal = numberValue(
+    ppmStats.total,
+    data.ppmsTotal ?? totals.ppmSchedules ?? arrayCount(data.ppms),
+  );
+  const duePpms = numberValue(
+    ppmStats.due,
+    data.ppms.filter(
+      (ppm) => ppm.nextDue && new Date(ppm.nextDue).getTime() <= Date.now(),
+    ).length,
+  );
+  const requestTotal = numberValue(
+    requestStats.total,
+    totals.serviceRequestHistory ??
+      data.requests.filter((request) => !request.isIncidentCase).length,
+  );
+  const openRequests = numberValue(requestStats.open, requestTotal);
+  const incidents = numberValue(
+    incidentStats.total,
+    totals.casesAndIncidents ??
+      data.requests.filter((request) => request.isIncidentCase).length,
+  );
+  const bookingsTotal = numberValue(
+    housingStats.bookingsTotal,
+    totals.guestStayOccupancy ?? arrayCount(data.housing.bookings),
+  );
+  const currentGuests = numberValue(
+    housingStats.currentGuests,
+    data.housing.bookings.filter(
+      (booking) => String(booking.status || "").toUpperCase() === "CHECKED_IN",
+    ).length,
+  );
+  const reservedBookings = numberValue(housingStats.reserved, 0);
+  const vacantRooms = numberValue(
+    housingStats.vacantRooms,
+    data.housing.rooms.filter(
+      (room) => String(room.status || "").toUpperCase() === "AVAILABLE",
+    ).length,
+  );
+  const totalAssets = numberValue(
+    assetStats.total,
+    totals.assetRegistry ?? arrayCount(data.assets),
+  );
+  const activeAssets = numberValue(
+    assetStats.active,
+    data.assets.filter(
+      (asset) => String(asset.status || "").toUpperCase() === "ACTIVE",
+    ).length,
+  );
+  const criticalAssets = numberValue(
+    assetStats.criticalHigh,
+    data.assets.filter((asset) =>
+      ["CRITICAL", "HIGH"].includes(String(asset.criticality || "").toUpperCase()),
+    ).length,
+  );
+
+  return [
+    {
+      label: "Open Work Orders",
+      value: openWorkOrders.toLocaleString(),
+      delta:
+        completedWorkOrders.toLocaleString() +
+        " completed / " +
+        totalWorkOrders.toLocaleString() +
+        " total",
+      tone: "coral",
+    },
+    {
+      label: "PM Due",
+      value: duePpms.toLocaleString(),
+      delta: ppmTotal.toLocaleString() + " schedules tracked",
+      tone: "sun",
+    },
+    {
+      label: "Service Requests",
+      value: requestTotal.toLocaleString(),
+      delta:
+        openRequests.toLocaleString() +
+        " open / " +
+        incidents.toLocaleString() +
+        " incidents",
+      tone: "lagoon",
+    },
+    {
+      label: "Housing Occupancy",
+      value: currentGuests.toLocaleString(),
+      delta:
+        bookingsTotal.toLocaleString() +
+        " bookings / " +
+        reservedBookings.toLocaleString() +
+        " reserved / " +
+        vacantRooms.toLocaleString() +
+        " vacant rooms",
+      tone: "leaf",
+    },
+    {
+      label: "Assets Online",
+      value: totalAssets ? percent(activeAssets, totalAssets) + "%" : "0%",
+      delta:
+        criticalAssets.toLocaleString() +
+        " critical-high / " +
+        totalAssets.toLocaleString() +
+        " assets",
+      tone: "lagoon",
+    },
+  ];
+}
+
 function totalEntryRows(data: ConsoleData) {
   const totals = data.totalEntries ?? {};
   return [
@@ -3688,66 +3835,108 @@ function CommandCenter({ data }: { data: ConsoleData }) {
   const hourlyRows = hourlyActivity(filteredEvents);
   const busiestModule = moduleBreakdown[0]?.name ?? "-";
   const activeStatuses = statusBreakdown.length;
+  const dashboardStats = data.dashboardStats ?? {};
+  const workStats = (dashboardStats.workOrders ?? {}) as Record<string, unknown>;
+  const requestStats = (dashboardStats.serviceRequests ?? {}) as Record<string, unknown>;
+  const housingStats = (dashboardStats.housing ?? {}) as Record<string, unknown>;
+  const assetStats = (dashboardStats.assets ?? {}) as Record<string, unknown>;
+  const inventoryStats = (dashboardStats.inventory ?? {}) as Record<string, unknown>;
+  const ppmStats = (dashboardStats.ppm ?? {}) as Record<string, unknown>;
+  const totals = data.totalEntries ?? {};
   const workOrders = data.workOrders;
   const requests = data.requests;
   const housingBookings = data.housing.bookings;
   const assets = data.assets;
   const ppms = data.ppms;
-  const inventory = data.inventory;
-  const openWorkOrders = workOrders.filter(
-    (work) =>
-      !["CLOSED", "COMPLETED", "VERIFIED", "REJECTED", "CANCELLED"].includes(
+  const totalWorkOrders = numberValue(
+    workStats.total,
+    data.workOrdersTotal ?? totals.workOrdersHistory ?? workOrders.length,
+  );
+  const openWorkOrders = numberValue(
+    workStats.open,
+    workOrders.filter(
+      (work) =>
+        !["CLOSED", "COMPLETED", "VERIFIED", "REJECTED", "CANCELLED"].includes(
+          String(work.status || "").toUpperCase(),
+        ),
+    ).length,
+  );
+  const inProgressWorkOrders = numberValue(
+    workStats.inProgress,
+    workOrders.filter((work) =>
+      ["IN_PROGRESS", "ASSIGNED", "ACCEPTED", "PENDING_ASSIGNMENT", "REOPENED"].includes(
         String(work.status || "").toUpperCase(),
       ),
-  ).length;
-  const inProgressWorkOrders = workOrders.filter((work) =>
-    ["IN_PROGRESS", "ASSIGNED", "ACCEPTED"].includes(
-      String(work.status || "").toUpperCase(),
-    ),
-  ).length;
-  const completedWorkOrders = workOrders.filter((work) =>
-    ["CLOSED", "COMPLETED", "VERIFIED"].includes(
-      String(work.status || "").toUpperCase(),
-    ),
-  ).length;
-  const currentGuests = housingBookings.filter((booking) =>
-    ["CHECKED_IN", "APPROVED"].includes(
-      String(booking.status || "").toUpperCase(),
-    ),
-  ).length;
-  const duePpms = ppms.filter(
-    (ppm) => ppm.nextDue && new Date(ppm.nextDue).getTime() <= toDate.getTime(),
-  ).length;
-  const criticalAssets = assets.filter((asset) =>
-    ["CRITICAL", "HIGH"].includes(
-      String(asset.criticality || "").toUpperCase(),
-    ),
-  ).length;
-  const inventoryOnHand = inventory.reduce(
-    (total, item) => total + Number(item.onHand || 0),
-    0,
+    ).length,
   );
-  const overallProgress = percent(
-    completedWorkOrders +
-      currentGuests +
-      ppms.filter((ppm) => ppm.active).length,
-    Math.max(1, workOrders.length + housingBookings.length + ppms.length),
+  const completedWorkOrders = numberValue(
+    workStats.completed,
+    workOrders.filter((work) =>
+      ["CLOSED", "COMPLETED", "VERIFIED"].includes(
+        String(work.status || "").toUpperCase(),
+      ),
+    ).length,
   );
-  const openWorkPercent = percent(
-    openWorkOrders,
-    Math.max(1, workOrders.length),
+  const totalBookings = numberValue(
+    housingStats.bookingsTotal,
+    totals.guestStayOccupancy ?? housingBookings.length,
   );
-  const inProgressPercent = percent(
-    inProgressWorkOrders,
-    Math.max(1, workOrders.length),
+  const currentGuests = numberValue(
+    housingStats.currentGuests,
+    housingBookings.filter(
+      (booking) => String(booking.status || "").toUpperCase() === "CHECKED_IN",
+    ).length,
   );
-  const ppmDuePercent = percent(duePpms, Math.max(1, ppms.length));
-  const assetActivePercent = percent(
+  const totalAssets = numberValue(
+    assetStats.total,
+    totals.assetRegistry ?? assets.length,
+  );
+  const activeAssets = numberValue(
+    assetStats.active,
     assets.filter(
       (asset) => String(asset.status || "").toUpperCase() === "ACTIVE",
     ).length,
-    Math.max(1, assets.length),
   );
+  const criticalAssets = numberValue(
+    assetStats.criticalHigh,
+    assets.filter((asset) =>
+      ["CRITICAL", "HIGH"].includes(String(asset.criticality || "").toUpperCase()),
+    ).length,
+  );
+  const inventoryOnHand = numberValue(
+    inventoryStats.onHandUnits,
+    data.inventory.reduce((total, item) => total + Number(item.onHand || 0), 0),
+  );
+  const totalPpms = numberValue(
+    ppmStats.total,
+    data.ppmsTotal ?? totals.ppmSchedules ?? ppms.length,
+  );
+  const activePpms = numberValue(
+    ppmStats.active,
+    ppms.filter((ppm) => ppm.active).length,
+  );
+  const duePpms = numberValue(
+    ppmStats.due,
+    ppms.filter(
+      (ppm) => ppm.nextDue && new Date(ppm.nextDue).getTime() <= Date.now(),
+    ).length,
+  );
+  const totalRequests = numberValue(
+    requestStats.total,
+    totals.serviceRequestHistory ??
+      requests.filter((request) => !request.isIncidentCase).length,
+  );
+  const overallProgress = percent(
+    completedWorkOrders + currentGuests + activePpms,
+    Math.max(1, totalWorkOrders + totalBookings + totalPpms),
+  );
+  const openWorkPercent = percent(openWorkOrders, Math.max(1, totalWorkOrders));
+  const inProgressPercent = percent(
+    inProgressWorkOrders,
+    Math.max(1, totalWorkOrders),
+  );
+  const ppmDuePercent = percent(duePpms, Math.max(1, totalPpms));
+  const assetActivePercent = percent(activeAssets, Math.max(1, totalAssets));
   const hourlyChart = hourlyRows.map((row) => ({
     ...row,
     work: filteredEvents.filter(
@@ -3789,7 +3978,7 @@ function CommandCenter({ data }: { data: ConsoleData }) {
       label: "Booking & Reservations",
       icon: CalendarCheck,
       tone: "bg-emerald-600 text-white",
-      value: housingBookings.length,
+      value: totalBookings,
       detail: "Total bookings",
       sideValue: currentGuests,
       sideLabel: "Current guests",
@@ -3798,7 +3987,7 @@ function CommandCenter({ data }: { data: ConsoleData }) {
       label: "Asset Inventory",
       icon: Building2,
       tone: "bg-coral text-white",
-      value: assets.length,
+      value: totalAssets,
       detail: "Total assets",
       sideValue: compactNumber(inventoryOnHand),
       sideLabel: "Inventory units",
@@ -3809,7 +3998,7 @@ function CommandCenter({ data }: { data: ConsoleData }) {
       tone: "bg-amber-500 text-white",
       value: duePpms,
       detail: "Due PM assets",
-      sideValue: ppms.length,
+      sideValue: totalPpms,
       sideLabel: "Scheduled",
     },
     {
@@ -3826,7 +4015,7 @@ function CommandCenter({ data }: { data: ConsoleData }) {
     { name: "Completed", value: completedWorkOrders },
     { name: "In Progress", value: inProgressWorkOrders },
     { name: "PPM Due", value: duePpms },
-    { name: "Requests", value: requests.length },
+    { name: "Requests", value: totalRequests },
   ];
   const workOverview = [
     { name: "Open", value: openWorkOrders },
@@ -3835,9 +4024,9 @@ function CommandCenter({ data }: { data: ConsoleData }) {
     { name: "Pending PPM", value: duePpms },
   ];
   const bookingBars = [
-    { name: "Bookings", value: housingBookings.length },
+    { name: "Bookings", value: totalBookings },
     { name: "Guests", value: currentGuests },
-    { name: "Requests", value: requests.length },
+    { name: "Requests", value: totalRequests },
     {
       name: "This Range",
       value: filteredEvents.filter(
@@ -4122,7 +4311,7 @@ function CommandCenter({ data }: { data: ConsoleData }) {
                 [
                   "Completed",
                   completedWorkOrders,
-                  percent(completedWorkOrders, Math.max(1, workOrders.length)),
+                  percent(completedWorkOrders, Math.max(1, totalWorkOrders)),
                   "bg-slate-700",
                 ],
                 ["Pending PPM", duePpms, ppmDuePercent, "bg-amber-500"],
@@ -4158,7 +4347,7 @@ function CommandCenter({ data }: { data: ConsoleData }) {
         <Panel title="Bookings Overview" icon={CalendarCheck}>
           <div className="grid gap-3">
             {[
-              ["Total Bookings", housingBookings.length],
+              ["Total Bookings", totalBookings],
               ["Current Guests", currentGuests],
               [
                 "This Range",
@@ -4166,7 +4355,7 @@ function CommandCenter({ data }: { data: ConsoleData }) {
                   event.module.includes("Housing"),
                 ).length,
               ],
-              ["Service Requests", requests.length],
+              ["Service Requests", totalRequests],
             ].map(([label, value]) => (
               <div
                 key={label}
@@ -4198,7 +4387,7 @@ function CommandCenter({ data }: { data: ConsoleData }) {
             <div className="grid content-center gap-3">
               <div>
                 <p className="text-3xl font-black text-slate-950">
-                  {assets.length}
+                  {totalAssets}
                 </p>
                 <p className="text-sm font-bold text-slate-500">Total Assets</p>
               </div>

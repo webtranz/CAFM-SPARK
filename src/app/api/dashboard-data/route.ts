@@ -5,7 +5,7 @@ import { emptyOperatingData } from "@/lib/empty-operating-data";
 import { convertExpiredUncheckedHousingBookingsToNoShow } from "@/lib/housing-no-show";
 import { prisma } from "@/lib/prisma";
 import { ensureDefaultRbacOnce } from "@/lib/rbac-runtime";
-import { getTotalEntryCounts } from "@/lib/data";
+import { getDashboardStats, getTotalEntryCounts } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +88,7 @@ export async function GET() {
       housingHistory,
       rolePermissions,
       totalEntries,
+      dashboardStats,
     ] = await Promise.all([
       prisma.serviceRequest.findMany({ where: { OR: [{ createdAt: { gte: since } }, { updatedAt: { gte: since } }, { dueAt: { gte: since, lte: now } }] }, orderBy: { updatedAt: "desc" }, take: DASHBOARD_LIMIT }),
       prisma.workOrder.findMany({ where: { AND: [workScope, { OR: [{ createdAt: { gte: since } }, { updatedAt: { gte: since } }, { dueAt: { gte: since, lte: now } }, { plannedStart: { gte: since, lte: now } }] }] }, orderBy: { updatedAt: "desc" }, take: DASHBOARD_LIMIT }),
@@ -113,6 +114,7 @@ export async function GET() {
       prisma.housingHistory.findMany({ where: { createdAt: { gte: since } }, orderBy: { createdAt: "desc" }, take: DASHBOARD_LIMIT }),
       prisma.rolePermission.findMany({ include: { permission: true }, orderBy: { role: "asc" } }),
       getTotalEntryCounts(),
+      getDashboardStats(workScope),
     ]);
 
     return NextResponse.json({
@@ -135,6 +137,7 @@ export async function GET() {
       auditLogs,
       rolePermissions,
       totalEntries,
+      dashboardStats,
       housing: {
         ...emptyOperatingData.housing,
         bookings: housingBookings,
