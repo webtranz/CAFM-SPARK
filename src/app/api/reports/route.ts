@@ -528,9 +528,7 @@ function applyDateRangeToReportRows(
 ) {
   if (!filters.dateFrom && !filters.dateTo) return rows;
   if (type === "work-order-generated-summary") return rows;
-  return rows.filter((row) =>
-    rowMatchesDateOrHasNoDate(row, filters.dateFrom, filters.dateTo),
-  );
+  return rows.filter((row) => rowMatchesDate(row, filters.dateFrom, filters.dateTo));
 }
 
 function generatedWorkOrderType(row: { type: string; title: string; jobPlan: string; ppmId?: string | null }) {
@@ -1096,6 +1094,10 @@ const REPORT_DATE_KEYS = [
   "uploadedAt",
   "checkIn",
   "checkOut",
+  "checkInDate",
+  "checkOutDate",
+  "arrivalDate",
+  "departureDate",
   "Start Date",
   "End Date",
   "startDate",
@@ -1118,6 +1120,7 @@ const REPORT_DATE_KEYS = [
   "queuedAt",
   "detectedAt",
   "foundDateTime",
+  "foundAt",
   "lostDate",
   "returnDate",
   "reportedAt",
@@ -1146,16 +1149,6 @@ function rowMatchesDate(row: ReportRow, dateFrom: string, dateTo: string) {
     if (dateTo && time > new Date(`${dateTo}T23:59:59`).getTime()) return false;
     return true;
   });
-}
-
-function rowMatchesDateOrHasNoDate(row: ReportRow, dateFrom: string, dateTo: string) {
-  const hasDateValue = REPORT_DATE_KEYS.some((key) => {
-    const value = row[key];
-    if (!value) return false;
-    return !Number.isNaN(reportDateTime(String(value)));
-  });
-  if (!hasDateValue) return true;
-  return rowMatchesDate(row, dateFrom, dateTo);
 }
 
 function reportDateTime(value: string) {

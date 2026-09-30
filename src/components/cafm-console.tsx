@@ -4631,27 +4631,37 @@ function ReportButtons({
   label?: string;
   query?: Record<string, string | number | boolean | null | undefined>;
 }) {
-  const [dateFrom, setDateFrom] = useState(String(query?.dateFrom ?? ""));
-  const [dateTo, setDateTo] = useState(String(query?.dateTo ?? ""));
+  const [previewDateFrom, setPreviewDateFrom] = useState(
+    String(query?.dateFrom ?? ""),
+  );
+  const [previewDateTo, setPreviewDateTo] = useState(
+    String(query?.dateTo ?? ""),
+  );
+  const [downloadDateFrom, setDownloadDateFrom] = useState(
+    String(query?.dateFrom ?? ""),
+  );
+  const [downloadDateTo, setDownloadDateTo] = useState(
+    String(query?.dateTo ?? ""),
+  );
 
   useEffect(() => {
-    setDateFrom(String(query?.dateFrom ?? ""));
-    setDateTo(String(query?.dateTo ?? ""));
+    const queryDateFrom = String(query?.dateFrom ?? "");
+    const queryDateTo = String(query?.dateTo ?? "");
+    setPreviewDateFrom(queryDateFrom);
+    setPreviewDateTo(queryDateTo);
+    setDownloadDateFrom(queryDateFrom);
+    setDownloadDateTo(queryDateTo);
   }, [query?.dateFrom, query?.dateTo]);
 
-  const href = (format: string, includeDates = true) => {
+  const href = (format: string, dateFrom: string, dateTo: string) => {
     const params = new URLSearchParams({ type, format });
     Object.entries(query ?? {}).forEach(([key, value]) => {
       if (value === undefined || value === null || String(value) === "") return;
-      if (!includeDates && (key === "dateFrom" || key === "dateTo")) return;
+      if (key === "dateFrom" || key === "dateTo") return;
       params.set(key, String(value));
     });
-    if (includeDates) {
-      if (dateFrom) params.set("dateFrom", dateFrom);
-      else params.delete("dateFrom");
-      if (dateTo) params.set("dateTo", dateTo);
-      else params.delete("dateTo");
-    }
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
     return `/api/reports?${params.toString()}`;
   };
 
@@ -4661,60 +4671,93 @@ function ReportButtons({
         {label}
       </span>
       <label className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-[11px] font-black uppercase text-slate-500 shadow-sm">
-        From
+        Preview From
         <input
           type="date"
-          value={dateFrom}
-          onChange={(event) => setDateFrom(event.target.value)}
-          max={dateTo || undefined}
+          value={previewDateFrom}
+          onChange={(event) => setPreviewDateFrom(event.target.value)}
+          max={previewDateTo || undefined}
           className="h-8 rounded-md border border-slate-200 px-2 text-xs font-bold text-ink outline-none focus:border-lagoon"
         />
       </label>
       <label className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-[11px] font-black uppercase text-slate-500 shadow-sm">
-        To
+        Preview To
         <input
           type="date"
-          value={dateTo}
-          onChange={(event) => setDateTo(event.target.value)}
-          min={dateFrom || undefined}
+          value={previewDateTo}
+          onChange={(event) => setPreviewDateTo(event.target.value)}
+          min={previewDateFrom || undefined}
           className="h-8 rounded-md border border-slate-200 px-2 text-xs font-bold text-ink outline-none focus:border-lagoon"
         />
       </label>
-      {(dateFrom || dateTo) && (
+      {(previewDateFrom || previewDateTo) && (
         <button
           type="button"
           onClick={() => {
-            setDateFrom("");
-            setDateTo("");
+            setPreviewDateFrom("");
+            setPreviewDateTo("");
           }}
           className="rounded-lg bg-white px-3 py-2 text-xs font-black text-slate-500 shadow-sm hover:text-coral"
         >
-          Clear Dates
+          Clear Preview
         </button>
       )}
       <a
         className="rounded-lg bg-white px-3 py-2 text-xs font-black text-ink shadow-sm hover:text-lagoon"
-        href={href("html", false)}
+        href={href("html", previewDateFrom, previewDateTo)}
         target="_blank"
         rel="noreferrer"
       >
         Preview
       </a>
+      <span className="hidden h-7 border-l border-slate-300 sm:inline-block" />
+      <label className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-[11px] font-black uppercase text-slate-500 shadow-sm">
+        Download From
+        <input
+          type="date"
+          value={downloadDateFrom}
+          onChange={(event) => setDownloadDateFrom(event.target.value)}
+          max={downloadDateTo || undefined}
+          className="h-8 rounded-md border border-slate-200 px-2 text-xs font-bold text-ink outline-none focus:border-lagoon"
+        />
+      </label>
+      <label className="flex items-center gap-1 rounded-lg bg-white px-2 py-1 text-[11px] font-black uppercase text-slate-500 shadow-sm">
+        Download To
+        <input
+          type="date"
+          value={downloadDateTo}
+          onChange={(event) => setDownloadDateTo(event.target.value)}
+          min={downloadDateFrom || undefined}
+          className="h-8 rounded-md border border-slate-200 px-2 text-xs font-bold text-ink outline-none focus:border-lagoon"
+        />
+      </label>
+      {(downloadDateFrom || downloadDateTo) && (
+        <button
+          type="button"
+          onClick={() => {
+            setDownloadDateFrom("");
+            setDownloadDateTo("");
+          }}
+          className="rounded-lg bg-white px-3 py-2 text-xs font-black text-slate-500 shadow-sm hover:text-coral"
+        >
+          Clear Download
+        </button>
+      )}
       <a
         className="rounded-lg bg-lagoon px-3 py-2 text-xs font-black text-white shadow-sm"
-        href={href("csv")}
+        href={href("csv", downloadDateFrom, downloadDateTo)}
       >
         CSV
       </a>
       <a
         className="rounded-lg bg-leaf px-3 py-2 text-xs font-black text-white shadow-sm"
-        href={href("excel")}
+        href={href("excel", downloadDateFrom, downloadDateTo)}
       >
         Excel
       </a>
       <a
         className="rounded-lg bg-coral px-3 py-2 text-xs font-black text-white shadow-sm"
-        href={href("pdf")}
+        href={href("pdf", downloadDateFrom, downloadDateTo)}
       >
         PDF
       </a>
