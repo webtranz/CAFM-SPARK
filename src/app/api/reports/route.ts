@@ -528,7 +528,9 @@ function applyDateRangeToReportRows(
 ) {
   if (!filters.dateFrom && !filters.dateTo) return rows;
   if (type === "work-order-generated-summary") return rows;
-  return rows.filter((row) => rowMatchesDate(row, filters.dateFrom, filters.dateTo));
+  return rows.filter((row) =>
+    rowMatchesReportDate(type, row, filters.dateFrom, filters.dateTo),
+  );
 }
 
 function generatedWorkOrderType(row: { type: string; title: string; jobPlan: string; ppmId?: string | null }) {
@@ -1076,7 +1078,6 @@ function applyHousingFilters(rows: ReportRow[], filters: ReturnType<typeof repor
     if (filters.floor && !includesValue(row, ["floor", "floorNumber"], filters.floor)) return false;
     if (filters.room && !includesValue(row, ["room", "roomNumber", "roomLocation", "LCF_ROOM"], filters.room)) return false;
     if (filters.status && !includesValue(row, ["status", "readiness", "Guest Stay status"], filters.status)) return false;
-    if ((filters.dateFrom || filters.dateTo) && !rowMatchesDate(row, filters.dateFrom, filters.dateTo)) return false;
     return true;
   });
 }
@@ -1084,6 +1085,78 @@ function applyHousingFilters(rows: ReportRow[], filters: ReturnType<typeof repor
 function includesValue(row: ReportRow, keys: string[], expected: string) {
   const target = expected.toLowerCase();
   return keys.some((key) => String(row[key] ?? "").toLowerCase().includes(target));
+}
+
+const REPORT_PRIMARY_DATE_KEYS: Record<string, string[]> = {
+  requests: ["createdAt"],
+  "incident-cases": ["createdAt"],
+  "work-orders": ["created_time"],
+  ppm: ["nextDue"],
+  inspections: ["dueAt"],
+  compliance: ["expiryDate"],
+  "iot-alerts": ["detectedAt"],
+  "audit-logs": ["time"],
+  "document-uploads": ["uploadedAt"],
+  "lost-found": ["returnDate", "foundDateTime", "foundAt", "lostDate", "createdAt"],
+  "hse-incidents": ["reportedAt"],
+  "ppm-checklist-history": ["createdAt"],
+  "work-order-comments": ["commentedAt", "createdAt"],
+  "ppm-due-date-history": ["generatedAt", "newDueDate"],
+  "bulk-upload-jobs": ["startedAt", "completedAt", "createdAt"],
+  "inventory-issues": ["issuedAt"],
+  contracts: ["startDate", "endDate"],
+  meters: ["readAt"],
+  "shift-roster": ["date"],
+  "security-gate-passes": ["validFrom", "validTo", "createdAt"],
+  "security-daily-reports": ["reportDate"],
+  "security-fire-drills": ["drillDate"],
+  "security-checklists": ["checklistDate"],
+  "asset-list": ["COMMISSIONDATE", "ENDOFUSEFULLIFE"],
+  "work-order-generated-summary": ["generatedAt"],
+  "housing-room-holds": ["holdStartDate", "holdEndDate", "createdDate"],
+  "housing-expected-arrivals": ["checkIn", "arrivalDate"],
+  "housing-expected-departures": ["checkOut", "departureDate"],
+  "housing-checked-out-list": ["checkOut", "departureDate"],
+  "housing-guests": ["createdAt"],
+  "housing-bookings": ["Start date", "checkIn"],
+  "housing-occupancy-daily": ["checkIn"],
+  "housing-occupancy-weekly": ["checkIn"],
+  "housing-occupancy-monthly": ["checkIn"],
+  "housing-company-occupancy": ["checkIn"],
+  "housing-building-occupancy": ["checkIn"],
+  "housing-bed-occupancy": ["checkIn"],
+  "housing-inspections": ["dueAt", "completedAt"],
+  "housing-cleaning-daily": ["dueAt", "completedAt"],
+  "housing-deep-cleaning": ["dueAt", "completedAt"],
+  "housing-inspection-report": ["dueAt", "completedAt"],
+  "housing-assets": ["purchaseDate", "issuedAt", "transferredAt", "replacedAt", "nextPmDue", "lastInspectionAt"],
+  "housing-missing-assets": ["purchaseDate", "issuedAt", "transferredAt", "replacedAt", "nextPmDue", "lastInspectionAt"],
+  "housing-damaged-assets": ["purchaseDate", "issuedAt", "transferredAt", "replacedAt", "nextPmDue", "lastInspectionAt"],
+  "housing-asset-transfers": ["transferredAt"],
+  "housing-asset-depreciation": ["purchaseDate"],
+  "housing-asset-audit": ["lastInspectionAt", "nextPmDue"],
+  "housing-inventory": ["lastMovementAt", "expiryDate"],
+  "housing-approvals": ["actedAt", "createdAt", "updatedAt"],
+  "housing-notifications": ["sentAt", "queuedAt", "createdAt"],
+  "housing-notification-settings": ["updatedAt", "createdAt"],
+  "housing-history": ["createdAt"],
+  "housing-maintenance-open": ["createdAt"],
+  "housing-maintenance-closed": ["closedAt", "createdAt"],
+  "housing-maintenance-delayed": ["dueAt", "createdAt"],
+  "housing-preventive-maintenance": ["nextPmDue"],
+};
+
+function reportDateKeys(type: string, row: ReportRow) {
+  if (type === "housing-check-movements") {
+    return String(row.movement || "").toLowerCase().includes("out")
+      ? ["checkOutDate", "checkOut"]
+      : ["checkInDate", "checkIn"];
+  }
+  return REPORT_PRIMARY_DATE_KEYS[type] ?? REPORT_DATE_KEYS;
+}
+
+function rowMatchesReportDate(type: string, row: ReportRow, dateFrom: string, dateTo: string) {
+  return rowMatchesDateForKeys(row, reportDateKeys(type, row), dateFrom, dateTo);
 }
 
 const REPORT_DATE_KEYS = [
@@ -1100,6 +1173,8 @@ const REPORT_DATE_KEYS = [
   "departureDate",
   "Start Date",
   "End Date",
+  "Start date",
+  "End date",
   "startDate",
   "endDate",
   "validFrom",
@@ -1140,7 +1215,11 @@ const REPORT_DATE_KEYS = [
 ];
 
 function rowMatchesDate(row: ReportRow, dateFrom: string, dateTo: string) {
-  return REPORT_DATE_KEYS.some((key) => {
+  return rowMatchesDateForKeys(row, REPORT_DATE_KEYS, dateFrom, dateTo);
+}
+
+function rowMatchesDateForKeys(row: ReportRow, keys: string[], dateFrom: string, dateTo: string) {
+  return keys.some((key) => {
     const value = row[key];
     if (!value) return false;
     const time = reportDateTime(String(value));
