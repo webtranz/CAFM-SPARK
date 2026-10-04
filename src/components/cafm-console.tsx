@@ -32233,6 +32233,8 @@ function Reports() {
   const [resolutionGreaterThan, setResolutionGreaterThan] = useState("");
   const [slaBreach, setSlaBreach] = useState("");
   const [delayedOnly, setDelayedOnly] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   async function preview(nextType = type) {
     const response = await fetch(reportUrl(nextType, "preview"), {
@@ -32253,6 +32255,8 @@ function Reports() {
   const exportUrl = (format: string) => reportUrl(type, format);
   function reportUrl(nextType: string, format: string) {
     const params = new URLSearchParams({ type: nextType, format });
+    if (dateFrom) params.set("dateFrom", dateFrom);
+    if (dateTo) params.set("dateTo", dateTo);
     if (nextType === "work-orders") {
       if (responseGreaterThan)
         params.set("responseGreaterThan", responseGreaterThan);
@@ -32359,6 +32363,38 @@ function Reports() {
           >
             PDF
           </a>
+          <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+            From Date
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(event) => setDateFrom(event.target.value)}
+              max={dateTo || undefined}
+              className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold normal-case text-ink outline-none focus:border-lagoon"
+            />
+          </label>
+          <label className="grid gap-1 text-xs font-black uppercase text-slate-500">
+            To Date
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(event) => setDateTo(event.target.value)}
+              min={dateFrom || undefined}
+              className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold normal-case text-ink outline-none focus:border-lagoon"
+            />
+          </label>
+          {(dateFrom || dateTo) && (
+            <button
+              type="button"
+              onClick={() => {
+                setDateFrom("");
+                setDateTo("");
+              }}
+              className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-600 hover:text-coral"
+            >
+              Clear Dates
+            </button>
+          )}
           <button
             onClick={() => preview(type)}
             className="rounded-lg bg-ink px-4 py-3 text-sm font-black text-white"
