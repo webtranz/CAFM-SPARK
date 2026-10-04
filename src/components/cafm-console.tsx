@@ -32236,10 +32236,17 @@ function Reports() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
-  async function preview(nextType = type) {
-    const response = await fetch(reportUrl(nextType, "preview"), {
+  async function preview(
+    nextType = type,
+    nextDateFrom = dateFrom,
+    nextDateTo = dateTo,
+  ) {
+    const response = await fetch(
+      reportUrl(nextType, "preview", nextDateFrom, nextDateTo),
+      {
       cache: "no-store",
-    });
+      },
+    );
     const result = await response.json();
     setRows(result.rows ?? []);
     setKpis(result.kpis ?? null);
@@ -32253,10 +32260,15 @@ function Reports() {
     ? Object.keys(rows[0]).map((key) => [key, key] as [string, string])
     : [];
   const exportUrl = (format: string) => reportUrl(type, format);
-  function reportUrl(nextType: string, format: string) {
+  function reportUrl(
+    nextType: string,
+    format: string,
+    nextDateFrom = dateFrom,
+    nextDateTo = dateTo,
+  ) {
     const params = new URLSearchParams({ type: nextType, format });
-    if (dateFrom) params.set("dateFrom", dateFrom);
-    if (dateTo) params.set("dateTo", dateTo);
+    if (nextDateFrom) params.set("dateFrom", nextDateFrom);
+    if (nextDateTo) params.set("dateTo", nextDateTo);
     if (nextType === "work-orders") {
       if (responseGreaterThan)
         params.set("responseGreaterThan", responseGreaterThan);
@@ -32368,7 +32380,11 @@ function Reports() {
             <input
               type="date"
               value={dateFrom}
-              onChange={(event) => setDateFrom(event.target.value)}
+              onChange={(event) => {
+                const nextDateFrom = event.target.value;
+                setDateFrom(nextDateFrom);
+                preview(type, nextDateFrom, dateTo);
+              }}
               max={dateTo || undefined}
               className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold normal-case text-ink outline-none focus:border-lagoon"
             />
@@ -32378,7 +32394,11 @@ function Reports() {
             <input
               type="date"
               value={dateTo}
-              onChange={(event) => setDateTo(event.target.value)}
+              onChange={(event) => {
+                const nextDateTo = event.target.value;
+                setDateTo(nextDateTo);
+                preview(type, dateFrom, nextDateTo);
+              }}
               min={dateFrom || undefined}
               className="h-11 rounded-lg border border-slate-200 px-3 text-sm font-bold normal-case text-ink outline-none focus:border-lagoon"
             />
@@ -32389,6 +32409,7 @@ function Reports() {
               onClick={() => {
                 setDateFrom("");
                 setDateTo("");
+                preview(type, "", "");
               }}
               className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-600 hover:text-coral"
             >
