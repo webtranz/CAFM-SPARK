@@ -32228,6 +32228,7 @@ function HousingPreviewModal({
 function Reports() {
   const [type, setType] = useState("assets");
   const [rows, setRows] = useState<any[]>([]);
+  const [reportColumns, setReportColumns] = useState<[string, string][]>([]);
   const [kpis, setKpis] = useState<Record<string, unknown> | null>(null);
   const [responseGreaterThan, setResponseGreaterThan] = useState("");
   const [resolutionGreaterThan, setResolutionGreaterThan] = useState("");
@@ -32235,30 +32236,63 @@ function Reports() {
   const [delayedOnly, setDelayedOnly] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [reportError, setReportError] = useState("");
+  const reportRequestRef = useRef(0);
 
   async function preview(
     nextType = type,
     nextDateFrom = dateFrom,
     nextDateTo = dateTo,
   ) {
-    const response = await fetch(
-      reportUrl(nextType, "preview", nextDateFrom, nextDateTo),
-      {
-      cache: "no-store",
-      },
-    );
-    const result = await response.json();
-    setRows(result.rows ?? []);
-    setKpis(result.kpis ?? null);
+    const requestId = reportRequestRef.current + 1;
+    reportRequestRef.current = requestId;
+    setLoading(true);
+    setReportError("");
+    setRows([]);
+    setReportColumns([]);
+    setKpis(null);
+    try {
+      const response = await fetch(
+        reportUrl(nextType, "preview", nextDateFrom, nextDateTo),
+        {
+          cache: "no-store",
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Unable to load ${nextType} report`);
+      }
+      const result = await response.json();
+      if (requestId !== reportRequestRef.current) return;
+      const nextRows = Array.isArray(result.rows) ? result.rows : [];
+      const apiColumns = Array.isArray(result.columns) ? result.columns : [];
+      const nextColumns = apiColumns.length
+        ? apiColumns.map((key: string) => [key, key] as [string, string])
+        : nextRows[0]
+          ? Object.keys(nextRows[0]).map((key) => [key, key] as [string, string])
+          : [];
+      setRows(nextRows);
+      setReportColumns(nextColumns);
+      setKpis(result.kpis ?? null);
+    } catch (error) {
+      if (requestId !== reportRequestRef.current) return;
+      setReportError(
+        error instanceof Error ? error.message : "Unable to load report",
+      );
+    } finally {
+      if (requestId === reportRequestRef.current) setLoading(false);
+    }
   }
 
   useEffect(() => {
     preview(type);
   }, []);
 
-  const columns = rows[0]
-    ? Object.keys(rows[0]).map((key) => [key, key] as [string, string])
-    : [];
+  const columns = reportColumns.length
+    ? reportColumns
+    : rows[0]
+      ? Object.keys(rows[0]).map((key) => [key, key] as [string, string])
+      : [];
   const exportUrl = (format: string) => reportUrl(type, format);
   function reportUrl(
     nextType: string,
@@ -32471,7 +32505,17 @@ function Reports() {
           </div>
         )}
         <div className="mt-4">
-          <DataTable rows={rows} columns={columns} />
+          {reportError ? (
+            <div className="rounded-lg border border-coral/40 bg-coral/10 p-4 text-sm font-black text-coral">
+              {reportError}
+            </div>
+          ) : loading ? (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-5 text-sm font-black text-slate-600">
+              Loading selected report...
+            </div>
+          ) : (
+            <DataTable rows={rows} columns={columns} />
+          )}
         </div>
       </Panel>
     </section>
