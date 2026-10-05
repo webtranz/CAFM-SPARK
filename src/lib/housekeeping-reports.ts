@@ -51,7 +51,7 @@ export type HousekeepingMovementRow = {
 };
 
 const reservedArrivalStatuses = new Set(["APPROVED", "RESERVED"]);
-const departureReportStatuses = new Set(["CHECKED_IN", "CHECKED_OUT"]);
+const departureReportStatuses = new Set(["CHECKED_IN"]);
 const checkedOutStatuses = new Set([
   "CHECKED_OUT",
 ]);

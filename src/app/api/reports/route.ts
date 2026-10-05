@@ -102,6 +102,7 @@ function reportColumns(type: string) {
       "guestId",
       "guestName",
       "department",
+      "roomNumber",
       "contactNumber",
       "checkIn",
       "checkOut",

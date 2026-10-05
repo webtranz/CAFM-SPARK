@@ -47,6 +47,7 @@ const bookings = [
     checkIn: new Date("2026-09-14T08:00:00.000Z"),
     checkOut: new Date("2026-09-15T18:00:00.000Z"),
     roomId: "room-4",
+    roomNumber: "A-104",
   },
   {
     bookingNo: "HBK-OVERDUE-DEPARTURE",
@@ -55,6 +56,7 @@ const bookings = [
     checkIn: new Date("2026-09-10T08:00:00.000Z"),
     checkOut: new Date("2026-09-14T18:00:00.000Z"),
     roomId: "room-5",
+    room: { roomNumber: "A-105" },
   },
   {
     bookingNo: "HBK-YESTERDAY-CHECKOUT",
@@ -96,14 +98,22 @@ assert.deepEqual(
   ]),
   [
     ["HBK-OVERDUE-DEPARTURE", "OVERDUE_DEPARTURE"],
-    ["HBK-YESTERDAY-CHECKOUT", "OVERDUE_DEPARTURE"],
     ["HBK-IN-HOUSE", "DEPARTING_TODAY"],
-    ["HBK-TODAY-CHECKOUT", "DEPARTING_TODAY"],
   ],
 );
 assert.deepEqual(
   expectedDepartureReportRows(bookings, now).map((row) => row.checkOut),
-  ["Sep 14, 2026", "Sep 14, 2026", "Sep 15, 2026", "Sep 15, 2026"],
+  ["Sep 14, 2026", "Sep 15, 2026"],
+);
+assert.deepEqual(
+  expectedDepartureReportRows(bookings, now).map((row) => [
+    row.bookingNo,
+    row.roomNumber,
+  ]),
+  [
+    ["HBK-OVERDUE-DEPARTURE", "A-105"],
+    ["HBK-IN-HOUSE", "A-104"],
+  ],
 );
 
 assert.deepEqual(
