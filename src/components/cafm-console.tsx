@@ -189,6 +189,14 @@ type ModuleGroup = {
   flat?: boolean;
 };
 
+const hiddenSidebarGroups = new Set([
+  "Safety",
+  "Compliance & Certification",
+  "Document Management",
+  "Incident & Case Management",
+  "Security",
+]);
+
 function BrandLogoMark({ size = "md" }: { size?: "sm" | "md" }) {
   const boxClass =
     size === "sm" ? "h-9 w-9 rounded-lg" : "h-12 w-12 rounded-xl";
@@ -2361,7 +2369,9 @@ export function CafmConsole({
           </div>
 
           <nav className="grid flex-1 content-start gap-1 px-4 pb-4">
-            {moduleGroups.map((group) => {
+            {moduleGroups
+              .filter((group) => !hiddenSidebarGroups.has(group.label))
+              .map((group) => {
               const visibleItems = group.items.filter((item) =>
                 canOpenModule(item.id),
               );
@@ -2457,7 +2467,7 @@ export function CafmConsole({
                   </div>
                 </details>
               );
-            })}
+              })}
           </nav>
 
           <div className="border-t border-slate-100 p-4">
