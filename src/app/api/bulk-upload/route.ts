@@ -1,4 +1,5 @@
 import { cleanHousingDepartment, preservedHousingDepartment } from "@/lib/housing-departments";
+import bcrypt from "bcryptjs";
 import { createHash } from "crypto";
 import { copyFile, mkdir, readFile, stat, writeFile } from "fs/promises";
 import path from "path";
@@ -344,11 +345,12 @@ function detectBulkUploadModule(requestedModule: string, rows: Row[]) {
   return requestedModule;
 }
 function bulkUploadPermissions(module: string) {
-  if (module === "omManuals") return ["documents.upload"];
+  if (["omManuals", "documentLinks"].includes(module)) return ["documents.upload"];
+  if (["users", "roles", "permissions", "auditHistory"].includes(module)) return ["users.manage", "roles.manage"];
   if (module === "ppm") return ["ppm.manage", "assets.manage"];
   if (module === "ppmChecklistHistory") return ["ppm.manage", "work.manage", "assets.manage"];
   if (["housingAssets", "housingRooms", "housingGuests", "housingOccupancy"].includes(module)) return ["housing.manage", "assets.manage"];
-  if (["workOrders", "workOrderComments", "commentHistory"].includes(module)) return ["work.manage", "assets.manage"];
+  if (["workOrders", "cpmWorkOrders", "spmWorkOrders", "workOrderComments", "commentHistory"].includes(module)) return ["work.manage", "assets.manage"];
   if (module === "requests") return ["requests.manage"];
   if (["teams", "services", "departments", "employees"].includes(module)) return ["users.manage", "requests.manage"];
   return ["assets.manage"];
@@ -372,6 +374,7 @@ async function importRow(module: string, row: Row, context: ImportContext = {}) 
   if (module === "buildings") return importBuilding(row, context);
   if (module === "spaces") return importSpace(row, context);
   if (module === "assets") return importAsset(row, context);
+  if (module === "assetAllocations") return importAssetAllocation(row);
   if (module === "housingAssets") return importHousingAsset(row, context);
   if (module === "housingRooms") return importHousingRoom(row, context);
   if (module === "housingGuests") return importHousingGuest(row, context);
@@ -379,6 +382,8 @@ async function importRow(module: string, row: Row, context: ImportContext = {}) 
   if (module === "inventory") return importInventory(row, context);
   if (module === "requests") return importRequest(row);
   if (module === "workOrders") return importWorkOrder(row, context);
+  if (module === "cpmWorkOrders") return importWorkOrder(row, context, "Corrective Maintenance");
+  if (module === "spmWorkOrders") return importWorkOrder(row, context, "Scheduled Preventive Maintenance");
   if (module === "workOrderComments") return importWorkOrderComment(row);
   if (module === "commentHistory") return importCommentHistory(row, context);
   if (module === "teams") return importTeam(row, context);
@@ -392,6 +397,11 @@ async function importRow(module: string, row: Row, context: ImportContext = {}) 
   if (module === "ppm") return importPpm(row, context);
   if (module === "ppmChecklistHistory") return importPpmChecklistHistory(row, context);
   if (module === "omManuals") return importDocumentIndex(row, context);
+  if (module === "users") return importUser(row, context);
+  if (module === "roles") return importRole(row, context);
+  if (module === "permissions") return importPermission(row, context);
+  if (module === "documentLinks") return importDocumentLink(row, context);
+  if (module === "auditHistory") return importAuditHistory(row);
   throw new Error(`Unsupported module: ${module}`);
 }
 
@@ -456,6 +466,11 @@ async function clearExistingBulkUploadData(module: string) {
     add(await prisma.workOrder.deleteMany({}));
     return deleted;
   }
+  if (module === "cpmWorkOrders" || module === "spmWorkOrders") {
+    const type = module === "cpmWorkOrders" ? "Corrective Maintenance" : "Scheduled Preventive Maintenance";
+    add(await prisma.workOrder.deleteMany({ where: { type } }));
+    return deleted;
+  }
   if (module === "requests") {
     await prisma.workOrder.updateMany({ where: { requestId: { not: null } }, data: { requestId: null } });
     add(await prisma.serviceRequest.deleteMany({}));
@@ -465,6 +480,16 @@ async function clearExistingBulkUploadData(module: string) {
     await prisma.workOrder.updateMany({ where: { assetId: { not: null } }, data: { assetId: null } });
     await prisma.meter.updateMany({ where: { assetId: { not: null } }, data: { assetId: null } });
     add(await prisma.asset.deleteMany({}));
+    return deleted;
+  }
+  if (module === "assetAllocations") {
+    add(await prisma.asset.updateMany({
+      data: {
+        departmentCode: null,
+        assignedTeamCode: null,
+        assignedSupervisorEmail: null,
+      },
+    }));
     return deleted;
   }
   if (module === "locations") {
@@ -529,8 +554,24 @@ async function clearExistingBulkUploadData(module: string) {
     add(await prisma.inventoryItem.deleteMany({}));
     return deleted;
   }
-  if (module === "omManuals") {
+  if (module === "omManuals" || module === "documentLinks") {
     add(await prisma.documentUpload.deleteMany({}));
+    return deleted;
+  }
+  if (module === "users") {
+    add(await prisma.user.deleteMany({ where: { email: { not: "admin@cafm.local" } } }));
+    return deleted;
+  }
+  if (module === "roles") {
+    add(await prisma.role.deleteMany({ where: { standard: false, name: { not: "Admin" } } }));
+    return deleted;
+  }
+  if (module === "permissions") {
+    add(await prisma.rolePermission.deleteMany({}));
+    return deleted;
+  }
+  if (module === "auditHistory") {
+    add(await prisma.auditLog.deleteMany({}));
     return deleted;
   }
   if (module === "jobPlans") {
@@ -813,6 +854,37 @@ async function importAsset(row: Row, context: ImportContext = {}) {
     },
   });
   return importResult("asset", existing ? "UPDATE" : "CREATE", asset, tag, name);
+}
+
+async function importAssetAllocation(row: Row) {
+  const assetTag = required(row, "assetTag", "tag", "EQUIPMENTNO");
+  const asset = await prisma.asset.findUnique({ where: { tag: assetTag } });
+  if (!asset) throw new Error(`Asset not found for allocation: ${assetTag}`);
+
+  const updated = await prisma.asset.update({
+    where: { id: asset.id },
+    data: {
+      departmentCode: value(row, "departmentCode", "Department") || null,
+      assignedTeamCode: value(row, "assignedTeamCode", "Team Code") || null,
+      assignedSupervisorEmail: value(row, "assignedSupervisorEmail", "Supervisor Email") || null,
+      locationCode: value(row, "locationCode", "Location") || asset.locationCode,
+      buildingCode: value(row, "buildingCode", "Building") || asset.buildingCode,
+      floor: value(row, "floor", "Floor") || asset.floor,
+      room: value(row, "room", "Room") || asset.room,
+      status: value(row, "status") ? assetStatusFromImport(value(row, "status")) : asset.status,
+      remarks: value(row, "remarks", "Notes") || asset.remarks,
+    },
+  });
+  await prisma.assetHistory.create({
+    data: {
+      assetId: asset.id,
+      eventType: "ALLOCATION_IMPORT",
+      title: "Asset allocation updated",
+      details: `${updated.assignedTeamCode || "No team"} / ${updated.assignedSupervisorEmail || "No supervisor"}`,
+      actor: "Bulk Upload",
+    },
+  });
+  return importResult("asset_allocation", "UPDATE", updated, assetTag, updated.name);
 }
 
 async function ensureHousingProperty(row: Row) {
@@ -1255,7 +1327,7 @@ async function importRequest(row: Row) {
   return importResult("service_request", "CREATE", request, request.ticketNo, request.title);
 }
 
-async function importWorkOrder(row: Row, context: ImportContext = {}) {
+async function importWorkOrder(row: Row, context: ImportContext = {}, defaultType = "Corrective Maintenance") {
   const count = await prisma.workOrder.count();
   const asset = row.assetTag ? await prisma.asset.findUnique({ where: { tag: row.assetTag } }) : null;
   const woNo = row.woNo || `WO-${String(count + 81001).padStart(5, "0")}`;
@@ -1269,7 +1341,7 @@ async function importWorkOrder(row: Row, context: ImportContext = {}) {
   const actualHours = numberOrNull(value(row, "actualHours"));
   const payload = {
     title: required(row, "title"),
-    type: row.type || "Corrective Maintenance",
+    type: row.type || defaultType,
     assetType: row.assetType || asset?.assetGroup || asset?.category || "",
     departmentCode: row.departmentCode || "",
     serviceCode: row.serviceCode || "",
@@ -1453,6 +1525,136 @@ async function importCategory(row: Row, context: ImportContext = {}) {
     create: { code, ...categoryPayload(row) },
   });
   return importResult("asset_category", existing ? "UPDATE" : "CREATE", category, code, category.name);
+}
+
+async function importUser(row: Row, context: ImportContext = {}) {
+  const email = required(row, "email").toLowerCase();
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing && !shouldReplace(context)) return existingResult("user", existing, email, existing.name);
+  const temporaryPassword = value(row, "temporaryPassword", "password");
+  if (!existing && !temporaryPassword) throw new Error(`temporaryPassword is required for new user: ${email}`);
+  const teamCode = value(row, "teamCode", "team");
+  const team = teamCode ? await prisma.team.findUnique({ where: { code: teamCode } }) : null;
+  if (teamCode && !team) throw new Error(`Team not found for user ${email}: ${teamCode}`);
+  const passwordHash = temporaryPassword ? await bcrypt.hash(temporaryPassword, 10) : existing?.passwordHash;
+  if (!passwordHash) throw new Error(`temporaryPassword is required for new user: ${email}`);
+  const payload = {
+    name: required(row, "name"),
+    phone: value(row, "phone") || null,
+    role: value(row, "role") || "Requester",
+    department: value(row, "departmentCodes", "department") || "General",
+    supervisorEmail: value(row, "supervisorEmail") || null,
+    notifyWorkOrder: yesNo(value(row, "notifyWorkOrder"), false),
+    notifyFacilityBooking: yesNo(value(row, "notifyFacilityBooking"), false),
+    active: yesNo(value(row, "active"), true),
+    teamId: team?.id || null,
+    passwordHash,
+  };
+  const user = await prisma.user.upsert({
+    where: { email },
+    update: payload,
+    create: { email, ...payload },
+  });
+  return importResult("user", existing ? "UPDATE" : "CREATE", user, email, user.name);
+}
+
+async function importRole(row: Row, context: ImportContext = {}) {
+  const name = required(row, "name");
+  const existing = await prisma.role.findUnique({ where: { name } });
+  if (existing && !shouldReplace(context)) return existingResult("role", existing, name, existing.name);
+  const role = await prisma.role.upsert({
+    where: { name },
+    update: {
+      description: value(row, "description"),
+      standard: existing?.standard || yesNo(value(row, "standard"), false),
+    },
+    create: {
+      name,
+      description: value(row, "description"),
+      standard: yesNo(value(row, "standard"), false),
+    },
+  });
+  return importResult("role", existing ? "UPDATE" : "CREATE", role, name, role.name);
+}
+
+async function importPermission(row: Row, context: ImportContext = {}) {
+  const roleName = required(row, "role");
+  const code = required(row, "permissionCode", "code");
+  await prisma.role.upsert({
+    where: { name: roleName },
+    update: {},
+    create: { name: roleName, description: "Imported role", standard: false },
+  });
+  const existing = await prisma.permission.findUnique({ where: { code } });
+  const permission = await prisma.permission.upsert({
+    where: { code },
+    update: {
+      name: value(row, "permissionName", "name") || existing?.name || code,
+      module: value(row, "module") || existing?.module || code.split(".")[0] || "general",
+      description: value(row, "description") || existing?.description || "Imported permission",
+    },
+    create: {
+      code,
+      name: value(row, "permissionName", "name") || code,
+      module: value(row, "module") || code.split(".")[0] || "general",
+      description: value(row, "description") || "Imported permission",
+    },
+  });
+  const rolePermission = await prisma.rolePermission.upsert({
+    where: { role_permissionId: { role: roleName, permissionId: permission.id } },
+    update: { scope: value(row, "scope") || "Company" },
+    create: { role: roleName, permissionId: permission.id, scope: value(row, "scope") || "Company" },
+  });
+  return importResult("role_permission", existing && !shouldReplace(context) ? "UPDATE" : "CREATE", rolePermission, `${roleName}:${code}`, code);
+}
+
+async function importDocumentLink(row: Row, context: ImportContext = {}) {
+  const category = value(row, "category") || "OM_MANUAL";
+  const assetTag = required(row, "assetTag");
+  const fileUrl = required(row, "fileUrl", "url", "documentUrl");
+  const fileName = value(row, "fileName", "name") || fileUrl.split("/").pop() || "Document link";
+  const checksum = value(row, "checksum") || createHash("sha256").update(`${category}|${assetTag}|${fileUrl}`).digest("hex");
+  const existing = await prisma.documentUpload.findUnique({
+    where: { category_assetTag_checksum: { category, assetTag, checksum } },
+  });
+  if (existing && !shouldReplace(context)) return existingResult("document_link", existing, assetTag, existing.fileName);
+  const payload = {
+    fileName,
+    fileUrl,
+    fileSize: integer(value(row, "fileSize"), 0),
+    mimeType: value(row, "mimeType") || "application/octet-stream",
+    uploadedBy: value(row, "uploadedBy") || "Bulk Upload",
+    createdAt: optionalDate(value(row, "createdAt")) || undefined,
+  };
+  const document = await prisma.documentUpload.upsert({
+    where: { category_assetTag_checksum: { category, assetTag, checksum } },
+    update: payload,
+    create: { category, assetTag, checksum, ...payload },
+  });
+  return importResult("document_link", existing ? "UPDATE" : "CREATE", document, assetTag, fileName);
+}
+
+async function importAuditHistory(row: Row) {
+  const actorName = required(row, "actorName");
+  const action = required(row, "action");
+  const entity = required(row, "entity");
+  const entityId = required(row, "entityId");
+  const createdAt = optionalDate(value(row, "createdAt")) || new Date();
+  const existing = await prisma.auditLog.findFirst({ where: { actorName, action, entity, entityId, createdAt } });
+  if (existing) return existingResult("audit_log", existing, entityId, action);
+  const log = await prisma.auditLog.create({
+    data: {
+      actorId: value(row, "actorId") || null,
+      actorName,
+      role: value(row, "role") || "Imported",
+      action,
+      entity,
+      entityId,
+      details: value(row, "details") || null,
+      createdAt,
+    },
+  });
+  return importResult("audit_log", "CREATE", log, entityId, action);
 }
 
 async function importInspection(row: Row, context: ImportContext = {}) {
@@ -1924,7 +2126,9 @@ function locationPayload(row: Row) {
     locationClass,
     outOfService,
     residential: yesNo(value(row, "residential", "Residential"), false),
-    active: !outOfService,
+    active: value(row, "active", "Active")
+      ? yesNo(value(row, "active", "Active"), !outOfService)
+      : !outOfService,
     description: value(row, "description", "Description") || "",
   };
 }

@@ -23181,24 +23181,27 @@ function BulkUpload({
               <option value="sites">Sites</option>
               <option value="buildings">Buildings</option>
               <option value="spaces">Spaces</option>
+              <option value="locations">Locations, Floors & Rooms</option>
+              <option value="categories">Asset Categories</option>
               <option value="assets">Assets</option>
+              <option value="assetAllocations">Asset Inventory Allocations</option>
               <option value="housingAssets">Housing Assets</option>
               <option value="housingRooms">Housing Rooms</option>
               <option value="housingGuests">Housing Guests</option>
               <option value="housingOccupancy">
                 Housing Occupancy / Bookings
               </option>
-              <option value="categories">Asset Categories</option>
               <option value="inventory">Inventory</option>
               <option value="requests">Service Requests</option>
               <option value="workOrders">Work Orders</option>
+              <option value="cpmWorkOrders">CPM Work Orders</option>
+              <option value="spmWorkOrders">SPM Work Orders</option>
               <option value="workOrderComments">Work Order Comments</option>
               <option value="commentHistory">Comment History</option>
               <option value="ppm">PPM Schedule</option>
               <option value="ppmChecklistHistory">PPM Checklist History</option>
               <option value="omManuals">O&M Manual Index</option>
               <option value="jobPlans">Job Plans</option>
-              <option value="locations">Locations</option>
               <option value="inspections">
                 Incident & Cases / Inspections
               </option>
@@ -23206,6 +23209,11 @@ function BulkUpload({
               <option value="services">Service Codes</option>
               <option value="departments">Departments</option>
               <option value="employees">Employees</option>
+              <option value="users">Users</option>
+              <option value="roles">Roles</option>
+              <option value="permissions">Role Permissions</option>
+              <option value="documentLinks">Attachments & Document Links</option>
+              <option value="auditHistory">Audit / Activity History</option>
             </select>
           </label>
           <label className="grid gap-1 text-sm font-bold text-slate-600">
@@ -23295,10 +23303,25 @@ function Templates() {
     ["buildings", "Buildings", "code,name,site,city,country,floors,areaSqm"],
     [
       "spaces",
-      "Spaces",
+      "Floors, Rooms & Facilities",
       "code,name,site,city,country,buildingCode,floor,type,capacity,areaSqm,occupancy",
     ],
+    [
+      "locations",
+      "Locations Hierarchy",
+      "code,site,zone,building,floor,room,type,parentLocation,locationClass,outOfService,residential,description,active",
+    ],
+    [
+      "categories",
+      "Asset Categories",
+      "code,name,type,defaultLifeYrs,statutory,description",
+    ],
     ["assets", "Assets", assetTemplateHeader],
+    [
+      "assetAllocations",
+      "Asset Inventory Allocations",
+      "assetTag,departmentCode,assignedTeamCode,assignedSupervisorEmail,locationCode,buildingCode,floor,room,status,remarks",
+    ],
     ["housingAssets", "Housing Assets", housingAssetTemplateHeader],
     [
       "housingRooms",
@@ -23343,6 +23366,16 @@ function Templates() {
       "woNo,title,type,assetType,departmentCode,serviceCode,assignedTeamCode,jobPlanCode,priority,status,assetTag,plannedStart,dueAt,finishedAt,resolutionAt,dateTimeCreated,estimatedHours,actualHours,cost,jobPlan,safetyNotes,workNotes,materialRequest,photoUrls,assetsUsed,inventoryUsed,supervisorDecision,sourceYear,sourceWorkOrder,sourceServiceRequest,sourceEquipmentLocation,sourceLocation,matchSource",
     ],
     [
+      "cpmWorkOrders",
+      "CPM Work Orders",
+      "woNo,title,type,assetType,departmentCode,serviceCode,assignedTeamCode,jobPlanCode,priority,status,assetTag,plannedStart,dueAt,finishedAt,resolutionAt,dateTimeCreated,estimatedHours,actualHours,cost,jobPlan,safetyNotes,workNotes,materialRequest,photoUrls,assetsUsed,inventoryUsed,supervisorDecision",
+    ],
+    [
+      "spmWorkOrders",
+      "SPM Work Orders",
+      "woNo,title,type,assetType,departmentCode,serviceCode,assignedTeamCode,jobPlanCode,priority,status,assetTag,plannedStart,dueAt,finishedAt,resolutionAt,dateTimeCreated,estimatedHours,actualHours,cost,jobPlan,safetyNotes,workNotes,materialRequest,photoUrls,assetsUsed,inventoryUsed,supervisorDecision",
+    ],
+    [
       "workOrderComments",
       "Work Order Comments",
       "woNo,commentText,commentedAt,commentedBy,sourceYear,sourceLine,sourceUserCode",
@@ -23373,14 +23406,30 @@ function Templates() {
       "code,name,assetType,departmentCode,serviceCode,estimatedHours,priority,steps,safetyNotes",
     ],
     [
-      "locations",
-      "Locations",
-      "Location,Description,Class,Parent Location,Out of Service,Residential",
-    ],
-    [
       "inspections",
       "Incident & Cases / Inspections",
       "code,title,area,inspector,risk,score,status,dueAt,findings",
+    ],
+    [
+      "users",
+      "Users",
+      "name,email,phone,temporaryPassword,role,departmentCodes,supervisorEmail,teamCode,notifyWorkOrder,notifyFacilityBooking,active",
+    ],
+    ["roles", "Roles", "name,description,standard"],
+    [
+      "permissions",
+      "Roles & Permissions",
+      "role,permissionCode,permissionName,module,description,scope",
+    ],
+    [
+      "documentLinks",
+      "Attachments & Document Links",
+      "category,assetTag,fileName,fileUrl,fileSize,mimeType,checksum,uploadedBy,createdAt",
+    ],
+    [
+      "auditHistory",
+      "Audit / Activity History",
+      "actorId,actorName,role,action,entity,entityId,details,createdAt",
     ],
   ];
 
