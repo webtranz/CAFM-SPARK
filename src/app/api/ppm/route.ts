@@ -5,6 +5,7 @@ import { apiError } from "@/lib/api-response";
 import { requireAdmin, requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
+import { cleanImportedNarrative } from "@/lib/friendly-display";
 import { allowsCustomPpmLocation } from "@/lib/scoped-ppm-custom-locations";
 
 const boolValue = z.preprocess((value) => {
@@ -281,7 +282,9 @@ export async function POST(request: Request) {
       frequency: input.frequency || "Monthly",
       periodUom: input.periodUom || "",
       durationHrs: input.durationHrs ?? 1,
-      checklist: input.checklist || "Checklist to be defined.",
+      checklist:
+        cleanImportedNarrative(input.checklist, "checklist") ||
+        "Checklist to be defined.",
       nextDue: input.nextDue ? new Date(input.nextDue) : addDays(new Date(), 7),
       active: input.active ?? true,
       workflowStatus: input.workflowStatus || "DRAFT",
@@ -326,6 +329,10 @@ export async function PATCH(request: Request) {
     const id = input.id || undefined;
     const code = input.code || undefined;
     const groupCode = input.ppmCode || code;
+    const cleanedChecklist =
+      input.checklist === undefined
+        ? undefined
+        : cleanImportedNarrative(input.checklist, "checklist");
     if (!id && !code && !groupCode) throw new Error("PPM id, code or PPM code is required");
     const current = id || code ? await prisma.preventiveMaintenance.findUnique({ where: id ? { id } : { code: code! } }) : null;
     if ((id || code) && !current) throw new Error("PPM not found");
@@ -344,7 +351,7 @@ export async function PATCH(request: Request) {
       frequency: input.frequency,
       periodUom: input.periodUom,
       durationHrs: input.durationHrs,
-      checklist: input.checklist,
+      checklist: cleanedChecklist,
       active: input.active,
       workflowStatus: input.workflowStatus,
       assignedTeamCode: input.assignedTeamCode,
@@ -355,7 +362,7 @@ export async function PATCH(request: Request) {
       nextDue: input.nextDue ? new Date(input.nextDue) : undefined,
     };
     const cleanData = Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
-    if (input.applyToGroup && groupCode && input.checklist !== undefined) {
+    if (input.applyToGroup && groupCode && cleanedChecklist !== undefined) {
       const result = await prisma.preventiveMaintenance.updateMany({
         where: {
           OR: [
@@ -364,10 +371,15 @@ export async function PATCH(request: Request) {
             { code: { startsWith: `${groupCode}-`, mode: "insensitive" } },
           ],
         },
-        data: { checklist: input.checklist },
+        data: { checklist: cleanedChecklist },
       });
       await auditAction({ user, action: "PPM_GROUP_CHECKLIST_UPDATE", entity: "preventive_maintenance", entityId: groupCode, details: { input, updatedCount: result.count } });
-      return NextResponse.json({ ok: true, ppmCode: groupCode, updatedCount: result.count, checklist: input.checklist });
+      return NextResponse.json({
+        ok: true,
+        ppmCode: groupCode,
+        updatedCount: result.count,
+        checklist: cleanedChecklist,
+      });
     }
     const updated = await prisma.preventiveMaintenance.update({
       where: id ? { id } : { code: code! },

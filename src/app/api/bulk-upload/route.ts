@@ -11,7 +11,11 @@ import { auditAction } from "@/lib/audit";
 import { csvResponse, parseCsv } from "@/lib/csv";
 import { privateFileUrl, privateUploadRoot } from "@/lib/private-files";
 import { prisma } from "@/lib/prisma";
-import { cleanDisplayText, meaningfulDisplayText } from "@/lib/friendly-display";
+import {
+  cleanDisplayText,
+  cleanImportedNarrative,
+  meaningfulDisplayText,
+} from "@/lib/friendly-display";
 import { allowsCustomPpmLocation } from "@/lib/scoped-ppm-custom-locations";
 
 type Row = Record<string, string>;
@@ -1359,9 +1363,11 @@ async function importWorkOrder(row: Row, context: ImportContext = {}, defaultTyp
     estimatedHours: number(row.estimatedHours, actualHours ?? 2),
     actualHours,
     cost: number(row.cost, 0),
-    jobPlan: row.jobPlan || "Review, execute, document and close.",
+    jobPlan:
+      cleanImportedNarrative(row.jobPlan, "checklist") ||
+      "Review, execute, document and close.",
     safetyNotes: row.safetyNotes || "Verify PPE and permits before work starts.",
-    workNotes: row.workNotes || "",
+    workNotes: cleanImportedNarrative(row.workNotes, "notes"),
     materialRequest: row.materialRequest || "",
     photoUrls: row.photoUrls || "",
     assetsUsed: row.assetsUsed || row.assetTag || "",
@@ -1763,7 +1769,7 @@ async function importPpm(row: Row, context: ImportContext = {}) {
     periodUom,
     nextDue,
     durationHrs: number(value(row, "durationHrs", "duration", "PPA_DURATION"), 2),
-    checklist: ppmChecklistValue(row),
+    checklist: cleanImportedNarrative(ppmChecklistValue(row), "checklist"),
     active: activeValue ? yesNo(activeValue, true) : true,
     workflowStatus: (workflowStatusValue || "DRAFT") as any,
     assignedTeamCode,

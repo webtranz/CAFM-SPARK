@@ -6,6 +6,7 @@ import { auditAction } from "@/lib/audit";
 import { requireUser } from "@/lib/api-auth";
 import { getCurrentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { cleanImportedNarrative } from "@/lib/friendly-display";
 
 const booleanInput = z.preprocess((value) => {
   if (value === "true" || value === true) return true;
@@ -294,7 +295,9 @@ export async function POST(request: Request) {
         dueAt: addHours(new Date(), dueHours[priority]),
         estimatedHours: priority === "CRITICAL" ? 2 : 4,
         cost: 0,
-        jobPlan: input.jobPlan || input.title || "Work to be defined by supervisor.",
+        jobPlan:
+          cleanImportedNarrative(input.jobPlan || input.title, "checklist") ||
+          "Work to be defined by supervisor.",
         safetyNotes: "Supervisor must verify permits, isolation and access requirements before work starts.",
         photoUrls: input.photoUrls || null,
         isIncidentCase: input.isIncidentCase ?? false,

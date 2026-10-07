@@ -6,6 +6,7 @@ import { requireAdmin, requirePermission, requireUser } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { defaultPermissionScopeForRole, expandPermissionCode } from "@/lib/default-role-permissions";
 import { prisma } from "@/lib/prisma";
+import { cleanImportedNarrative } from "@/lib/friendly-display";
 
 const booleanInput = z.preprocess((value) => {
   if (value === "true" || value === true) return true;
@@ -200,7 +201,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           assetsUsed: input.assetsUsed,
           inventoryUsed: input.inventoryUsed,
           supervisorRequest: input.supervisorRequest,
-          workNotes: input.workNotes,
+          workNotes:
+            input.workNotes === undefined
+              ? undefined
+              : cleanImportedNarrative(input.workNotes, "notes"),
           materialRequest: input.materialRequest,
           isIncidentCase: input.isIncidentCase,
           actualHours: status === "COMPLETED" ? 4 : undefined,
@@ -217,7 +221,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           status: nextStatus,
           assetId: asset?.id,
           assignedToId: input.assignedTeamCode ? null : undefined,
-          jobPlan: input.jobPlan,
+          jobPlan:
+            input.jobPlan === undefined
+              ? undefined
+              : cleanImportedNarrative(input.jobPlan, "checklist"),
           safetyNotes: input.safetyNotes,
           estimatedHours: input.estimatedHours,
           cost: input.cost,
@@ -228,7 +235,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           assetsUsed: input.assetsUsed,
           inventoryUsed: input.inventoryUsed,
           supervisorRequest: input.supervisorRequest,
-          workNotes: input.workNotes,
+          workNotes:
+            input.workNotes === undefined
+              ? undefined
+              : cleanImportedNarrative(input.workNotes, "notes"),
           materialRequest: input.materialRequest,
           rejectionReason: input.rejectionReason,
           supervisorDecision: status === "CLOSED"

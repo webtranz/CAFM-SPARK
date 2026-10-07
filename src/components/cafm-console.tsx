@@ -45,6 +45,7 @@ import type { LucideIcon } from "lucide-react";
 import { allowsCustomPpmLocation } from "@/lib/scoped-ppm-custom-locations";
 import {
   cleanDisplayText,
+  cleanImportedNarrative,
   cleanLocationRecord,
   meaningfulDisplayText,
 } from "@/lib/friendly-display";
@@ -1015,7 +1016,7 @@ function displayValue(value: unknown) {
   if (value === null || value === undefined || value === "") return "-";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "object") return JSON.stringify(value);
-  return cleanDisplayText(value) || "-";
+  return cleanImportedNarrative(value, "description") || "-";
 }
 
 function normalizeConsoleDisplayData(data: ConsoleData): ConsoleData {
@@ -1034,6 +1035,15 @@ function normalizeConsoleDisplayData(data: ConsoleData): ConsoleData {
     requests: (data.requests || []).map((request) => ({
       ...request,
       location: cleanDisplayText(request.location),
+    })),
+    workOrders: (data.workOrders || []).map((work) => ({
+      ...work,
+      jobPlan: cleanImportedNarrative(work.jobPlan, "checklist"),
+      workNotes: cleanImportedNarrative(work.workNotes, "notes"),
+    })),
+    ppms: (data.ppms || []).map((ppm) => ({
+      ...ppm,
+      checklist: cleanImportedNarrative(ppm.checklist, "checklist"),
     })),
   };
 }
@@ -9019,7 +9029,10 @@ function PpmTodayWorkOrders({
       try {
         const updated = await updateWorkStatus(work.id, "CLOSED", {
           supervisorDecision: remarkText,
-          workNotes: compactPpmPrintText(work.workNotes || work.jobPlan || work.title, 500),
+          workNotes: compactPpmPrintText(
+            cleanImportedNarrative(work.workNotes || work.jobPlan || work.title, "notes"),
+            500,
+          ),
         });
         if (updated?.id) {
           mergeUpdatedRow(updated);
@@ -9762,7 +9775,8 @@ function AssetPreviewModal({
                     </span>
                   </div>
                   <p className="mt-1 text-slate-600">
-                    {work.workNotes || "No technician notes recorded."}
+                    {cleanImportedNarrative(work.workNotes, "notes") ||
+                      "No technician notes recorded."}
                   </p>
                   <p className="mt-1 text-xs font-bold text-slate-400">
                     Updated {formatDateCell(work.updatedAt)}
@@ -14043,7 +14057,8 @@ function WorkOrderPreviewModal({
             {tab === "comments" ? (
               <>
                 <p className="rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-600">
-                  {work.workNotes || "No additional comments yet."}
+                  {cleanImportedNarrative(work.workNotes, "notes") ||
+                    "No additional comments yet."}
                 </p>
                 <p className="rounded-lg bg-slate-50 p-3 text-sm font-bold text-slate-600">
                   {work.supervisorRequest ||
@@ -14219,6 +14234,9 @@ function WorkOrderSupervisorReviewModal({
 }
 
 function PreviewField({ label, value }: { label: string; value: unknown }) {
+  const displayText = /work notes?|comments?|remarks?/i.test(label)
+    ? cleanImportedNarrative(value, "notes")
+    : cleanImportedNarrative(value, "description");
   return (
     <div className="rounded-lg bg-slate-50 p-3">
       <p className="text-xs font-black uppercase text-slate-500">{label}</p>
@@ -14226,7 +14244,7 @@ function PreviewField({ label, value }: { label: string; value: unknown }) {
         {isCurrencyField(label) ? (
           <CurrencyAmount value={value} />
         ) : (
-          String(value || "-")
+          displayText || "-"
         )}
       </p>
     </div>
@@ -14269,7 +14287,7 @@ function isInvalidChecklistValue(value: unknown) {
 }
 
 function cleanChecklistItem(value: unknown) {
-  return String(value || "")
+  return cleanImportedNarrative(value, "checklist")
     .replace(/^[-*]\s*/, "")
     .replace(/^\s*(?:\d+[.)]\s*)+/, "")
     .replace(/^\s*[A-Z]{2,}[A-Z0-9]*\d[A-Z0-9-]*\s*[-:\u2013]\s*/i, "")
@@ -14284,8 +14302,9 @@ function cleanChecklistItem(value: unknown) {
 }
 
 function checklistItems(value: unknown, limit = 12) {
-  if (isInvalidChecklistValue(value)) return ["No match"];
-  const items = String(value || "")
+  const narrative = cleanImportedNarrative(value, "checklist");
+  if (isInvalidChecklistValue(narrative)) return ["No match"];
+  const items = narrative
     .split(
       /\r?\n|(?=\s*(?:\d+[.)]\s*)+[A-Z]{2,}[A-Z0-9]*\d[A-Z0-9-]*\s*[-:\u2013]\s*)/,
     )
@@ -14898,7 +14917,7 @@ function WorkOrderForm({
             />
             <textarea
               name="workNotes"
-              defaultValue={work.workNotes ?? ""}
+              defaultValue={cleanImportedNarrative(work.workNotes, "notes")}
               placeholder="Work notes / execution log"
               className="min-h-20 rounded-lg border border-slate-200 p-3 outline-none focus:border-lagoon"
             />
@@ -15109,7 +15128,7 @@ function WorkExecutionForm({
         </select>
         <textarea
           name="workNotes"
-          defaultValue={work.workNotes ?? ""}
+          defaultValue={cleanImportedNarrative(work.workNotes, "notes")}
           placeholder="Work description / notes"
           className="min-h-24 rounded-lg border border-slate-200 p-3 outline-none focus:border-lagoon"
         />
