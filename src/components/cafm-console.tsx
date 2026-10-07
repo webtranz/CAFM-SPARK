@@ -44,6 +44,11 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { allowsCustomPpmLocation } from "@/lib/scoped-ppm-custom-locations";
 import {
+  cleanDisplayText,
+  cleanLocationRecord,
+  meaningfulDisplayText,
+} from "@/lib/friendly-display";
+import {
   Area,
   AreaChart,
   Bar,
@@ -1010,7 +1015,27 @@ function displayValue(value: unknown) {
   if (value === null || value === undefined || value === "") return "-";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+  return cleanDisplayText(value) || "-";
+}
+
+function normalizeConsoleDisplayData(data: ConsoleData): ConsoleData {
+  return {
+    ...data,
+    locations: (data.locations || []).map(cleanLocationRecord),
+    assets: (data.assets || []).map((asset) => ({
+      ...asset,
+      locationCode: cleanDisplayText(asset.locationCode),
+      locationDesc: cleanDisplayText(asset.locationDesc),
+      siteCode: meaningfulDisplayText(asset.siteCode),
+      buildingCode: meaningfulDisplayText(asset.buildingCode),
+      floor: meaningfulDisplayText(asset.floor),
+      room: meaningfulDisplayText(asset.room),
+    })),
+    requests: (data.requests || []).map((request) => ({
+      ...request,
+      location: cleanDisplayText(request.location),
+    })),
+  };
 }
 
 function isDateLikeString(value: string) {
@@ -1449,7 +1474,7 @@ export function CafmConsole({
   };
   deferInitialData?: boolean;
 }) {
-  const [records, setRecords] = useState(data);
+  const [records, setRecords] = useState(() => normalizeConsoleDisplayData(data));
   const [fullDataLoaded, setFullDataLoaded] = useState(!deferInitialData);
   const [active, setActive] = useState("command");
   const [activeView, setActiveView] = useState("dashboard");
@@ -1649,7 +1674,7 @@ export function CafmConsole({
       return;
     }
     if (response.ok) {
-      setRecords(result);
+      setRecords(normalizeConsoleDisplayData(result));
       setFullDataLoaded(true);
       setHousingFullLoaded(false);
     }
@@ -1680,7 +1705,7 @@ export function CafmConsole({
       return;
     }
     if (response.ok) {
-      setRecords(result);
+      setRecords(normalizeConsoleDisplayData(result));
       setFullDataLoaded(false);
     }
   }
@@ -4854,18 +4879,21 @@ function Assets({
     [locations],
   );
   const assetRows = assetRowsSource.map((asset) => {
-    const lookupCode = String(asset.locationCode || asset.room || "");
+    const cleanLocationCode = cleanDisplayText(asset.locationCode);
+    const cleanAssetRoom = meaningfulDisplayText(asset.room);
+    const lookupCode = cleanLocationCode || cleanAssetRoom;
     const location = locationsByCode.get(lookupCode);
-    const siteHierarchy = asset.siteCode || location?.site || "";
-    const buildingHierarchy = asset.buildingCode || location?.building || "";
-    const floorHierarchy = asset.floor || location?.floor || "";
+    const siteHierarchy = meaningfulDisplayText(asset.siteCode) || location?.site || "";
+    const buildingHierarchy = meaningfulDisplayText(asset.buildingCode) || location?.building || "";
+    const floorHierarchy = meaningfulDisplayText(asset.floor) || location?.floor || "";
     const roomHierarchy =
-      asset.room && asset.room !== asset.locationCode
-        ? asset.room
-        : location?.room || asset.room || "";
+      cleanAssetRoom && cleanAssetRoom !== cleanLocationCode
+        ? cleanAssetRoom
+        : location?.room || cleanAssetRoom || "";
     const locationCode =
-      asset.locationCode || location?.code || asset.room || "Unassigned";
-    const locationDesc = asset.locationDesc ?? location?.description ?? "";
+      cleanLocationCode || location?.code || cleanAssetRoom || "Unassigned";
+    const locationDesc =
+      cleanDisplayText(asset.locationDesc) || location?.description || "";
     const locationHierarchy = [
       siteHierarchy,
       buildingHierarchy,
@@ -11232,11 +11260,13 @@ function serviceRequestLocationTokens(location: any) {
 }
 
 function serviceRequestLocationSiteValue(location: any) {
+  location = cleanLocationRecord(location);
   const parsed = selectedParsedHierarchy("", location);
   return location?.site || parsed.site || "";
 }
 
 function serviceRequestLocationParentValue(location: any) {
+  location = cleanLocationRecord(location);
   return (
     location?.parentLocation ||
     location?.zone ||
@@ -11246,16 +11276,23 @@ function serviceRequestLocationParentValue(location: any) {
 }
 
 function serviceRequestLocationBuildingValue(location: any) {
+  location = cleanLocationRecord(location);
   const parsed = selectedParsedHierarchy("", location);
-  return location?.building || parsed.building || "";
+  const locationClass = String(location?.locationClass || location?.type || "").toLowerCase();
+  return location?.building || parsed.building ||
+    (locationClass.includes("building") ? location?.description || location?.code : "") || "";
 }
 
 function serviceRequestLocationFloorValue(location: any) {
+  location = cleanLocationRecord(location);
   const parsed = selectedParsedHierarchy("", location);
-  return location?.floor || parsed.floor || "";
+  const locationClass = String(location?.locationClass || location?.type || "").toLowerCase();
+  return location?.floor || parsed.floor ||
+    (locationClass.includes("floor") ? location?.description || location?.code : "") || "";
 }
 
 function serviceRequestLocationRoomValue(location: any) {
+  location = cleanLocationRecord(location);
   const parsed = selectedParsedHierarchy("", location);
   return location?.room || parsed.room || parsed.roomCode || location?.code || "";
 }
@@ -11614,35 +11651,38 @@ function scopedAssetOptions(
 }
 
 function serviceRequestLocationLabel(location: any) {
-  const path = [location.site, location.building, location.floor, location.room]
-    .map((part) => String(part || "").trim())
-    .filter((part) => part && part.toLowerCase() !== "unassigned");
+  const cleanLocation = cleanLocationRecord(location);
+  const path = [cleanLocation.site, cleanLocation.building, cleanLocation.floor, cleanLocation.room]
+    .filter(Boolean);
   const detail =
-    location.description &&
+    cleanLocation.description &&
     !path.some(
       (part) =>
-        part.toLowerCase() ===
-        String(location.description).trim().toLowerCase(),
+        String(part).toLowerCase() === cleanLocation.description.toLowerCase(),
     )
-      ? ` - ${location.description}`
+      ? ` - ${cleanLocation.description}`
       : "";
-  return [location.code, ...path].filter(Boolean).join(" / ") + detail;
+  return [cleanLocation.code, ...path].filter(Boolean).join(" / ") + detail;
 }
 
 function locationSelectLabel(location: any) {
-  return [
-    location.code,
-    location.description || location.room || location.building,
-    location.locationClass || location.type,
-  ]
-    .filter(Boolean)
-    .join(" - ");
+  const cleanLocation = cleanLocationRecord(location);
+  const detail = cleanLocation.description || cleanLocation.room || cleanLocation.floor ||
+    cleanLocation.building || cleanLocation.zone || cleanLocation.parentLocation;
+  return Array.from(new Set([
+    cleanLocation.code,
+    detail,
+    cleanLocation.locationClass || cleanLocation.type,
+  ].filter(Boolean))).join(" - ");
 }
 
 function locationOptionDetail(location: any) {
-  return [location.description, location.locationClass, location.type]
-    .filter(Boolean)
-    .join(" / ");
+  const cleanLocation = cleanLocationRecord(location);
+  return Array.from(new Set([
+    cleanLocation.description,
+    cleanLocation.locationClass,
+    cleanLocation.type,
+  ].filter(Boolean))).join(" / ");
 }
 
 type SearchableOption = { value: string; label: string };
@@ -11969,7 +12009,7 @@ function ServiceRequestForm({
       .then((response) => (response.ok ? response.json() : null))
       .then((result) => {
         if (cancelled || !result?.locations) return;
-        setFullLocations(result.locations);
+        setFullLocations(result.locations.map(cleanLocationRecord));
         setFullLocationsLoaded(true);
       })
       .catch(() => undefined)
@@ -12175,7 +12215,17 @@ function ServiceRequestForm({
       .then((response) => (response.ok ? response.json() : null))
       .then((result) => {
         if (!result?.assets) return;
-        setLocationAssetRows(result.assets);
+        setLocationAssetRows(
+          result.assets.map((asset: any) => ({
+            ...asset,
+            locationCode: cleanDisplayText(asset.locationCode),
+            locationDesc: cleanDisplayText(asset.locationDesc),
+            siteCode: meaningfulDisplayText(asset.siteCode),
+            buildingCode: meaningfulDisplayText(asset.buildingCode),
+            floor: meaningfulDisplayText(asset.floor),
+            room: meaningfulDisplayText(asset.room),
+          })),
+        );
       })
       .catch((error) => {
         if (error?.name !== "AbortError") setLocationAssetRows([]);

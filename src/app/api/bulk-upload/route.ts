@@ -11,6 +11,7 @@ import { auditAction } from "@/lib/audit";
 import { csvResponse, parseCsv } from "@/lib/csv";
 import { privateFileUrl, privateUploadRoot } from "@/lib/private-files";
 import { prisma } from "@/lib/prisma";
+import { cleanDisplayText, meaningfulDisplayText } from "@/lib/friendly-display";
 import { allowsCustomPpmLocation } from "@/lib/scoped-ppm-custom-locations";
 
 type Row = Record<string, string>;
@@ -2112,15 +2113,15 @@ function employeePayload(row: Row) {
 }
 
 function locationPayload(row: Row) {
-  const parentLocation = value(row, "parentLocation", "Parent Location", "ParentLocation", "zone");
-  const locationClass = value(row, "locationClass", "Class", "class", "type") || "Facility Location";
+  const parentLocation = meaningfulDisplayText(value(row, "parentLocation", "Parent Location", "ParentLocation", "zone"));
+  const locationClass = cleanDisplayText(value(row, "locationClass", "Class", "class", "type")) || "Facility Location";
   const outOfService = yesNo(value(row, "outOfService", "Out of Service"), false);
   return {
-    site: value(row, "site", "Site") || "Fadhili Bachelor Camp",
+    site: meaningfulDisplayText(value(row, "site", "Site")) || "Fadhili Bachelor Camp",
     zone: parentLocation,
-    building: row.building || row.BLDG || "Unassigned",
-    floor: row.floor || row.FLOOR || "Unassigned",
-    room: row.room || row.ROOM || "Unassigned",
+    building: meaningfulDisplayText(row.building || row.BLDG),
+    floor: meaningfulDisplayText(row.floor || row.FLOOR),
+    room: meaningfulDisplayText(row.room || row.ROOM),
     type: locationClass,
     parentLocation,
     locationClass,
@@ -2129,7 +2130,7 @@ function locationPayload(row: Row) {
     active: value(row, "active", "Active")
       ? yesNo(value(row, "active", "Active"), !outOfService)
       : !outOfService,
-    description: value(row, "description", "Description") || "",
+    description: cleanDisplayText(value(row, "description", "Description")),
   };
 }
 

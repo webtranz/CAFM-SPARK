@@ -4,6 +4,11 @@ import { apiError } from "@/lib/api-response";
 import { requirePermission } from "@/lib/api-auth";
 import { auditAction } from "@/lib/audit";
 import { prisma } from "@/lib/prisma";
+import {
+  cleanDisplayText,
+  cleanLocationRecord,
+  meaningfulDisplayText,
+} from "@/lib/friendly-display";
 
 const boolInput = z.preprocess((value) => {
   if (typeof value === "string") {
@@ -72,7 +77,14 @@ export async function GET(request: Request) {
       orderBy: [{ code: "asc" }],
     }),
   ]);
-  return NextResponse.json({ locations, allTotal, total, page, pageSize, totalPages: Math.max(1, Math.ceil(total / pageSize)) });
+  return NextResponse.json({
+    locations: locations.map(cleanLocationRecord),
+    allTotal,
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  });
 }
 
 export async function POST(request: Request) {
@@ -81,23 +93,23 @@ export async function POST(request: Request) {
     if (error) return error;
     const input = schema.parse(await request.json());
     const count = await prisma.location.count();
-    const code = input.code || input.location || `LOC-${String(count + 1).padStart(4, "0")}`;
-    const locationClass = input.locationClass || input.class || input.type || "Facility Location";
+    const code = cleanDisplayText(input.code || input.location) || `LOC-${String(count + 1).padStart(4, "0")}`;
+    const locationClass = cleanDisplayText(input.locationClass || input.class || input.type) || "Facility Location";
     const outOfService = input.outOfService ?? false;
     const data = {
       code,
-      site: input.site || "Main Site",
-      zone: input.parentLocation || input.zone || "",
-      building: input.building || "Building",
-      floor: input.floor || "Floor",
-      room: input.room || "Room",
+      site: meaningfulDisplayText(input.site) || "Main Site",
+      zone: meaningfulDisplayText(input.parentLocation || input.zone),
+      building: meaningfulDisplayText(input.building),
+      floor: meaningfulDisplayText(input.floor),
+      room: meaningfulDisplayText(input.room),
       type: locationClass,
-      parentLocation: input.parentLocation || input.zone || "",
+      parentLocation: meaningfulDisplayText(input.parentLocation || input.zone),
       locationClass,
       outOfService,
       residential: input.residential ?? false,
       active: !outOfService,
-      description: input.description || "",
+      description: cleanDisplayText(input.description),
     };
     const location = await prisma.location.upsert({
       where: { code },
@@ -105,7 +117,7 @@ export async function POST(request: Request) {
       create: data,
     });
     await auditAction({ user, action: "LOCATION_SAVE", entity: "location", entityId: location.id, details: { input, savedRecord: location } });
-    return NextResponse.json(location, { status: 201 });
+    return NextResponse.json(cleanLocationRecord(location), { status: 201 });
   } catch (error) {
     return apiError(error, "Unable to save location");
   }
