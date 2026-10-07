@@ -882,12 +882,15 @@ const assetRegisterColumns: [string, string][] = [
   ["primarySystem", "PRIMARYSYSTEM"],
   ["additionalNote", "ADDITIONAL_NOTE"],
 ];
-const assetHierarchyColumns: [string, string][] = [
-  ["siteHierarchy", "SITE"],
-  ["buildingHierarchy", "BUILDING"],
-  ["floorHierarchy", "FLOOR"],
-  ["roomHierarchy", "ROOM"],
-  ["locationHierarchy", "ROOM HIERARCHY"],
+const assetSummaryColumns: [string, string][] = [
+  ["assetName", "Asset name"],
+  ["buildingHierarchy", "Building"],
+  ["roomAreaNumber", "Room/Area #"],
+  ["areaName", "Area"],
+  ["buildingUnit", "Building/Unit"],
+  ["floorHierarchy", "Floor"],
+  ["assetMainCategory", "Asset Main Category"],
+  ["assetSubCategory", "Asset Sub-Category"],
 ];
 const assetTemplateHeader = assetRegisterColumns
   .map(([, label]) => label)
@@ -4893,14 +4896,18 @@ function Assets({
       equipmentValue: asset.equipmentValue ?? asset.purchaseCost,
       primarySystem: asset.primarySystem ?? asset.system,
       additionalNote: asset.additionalNote ?? asset.remarks,
+      assetName: asset.assetDescription || asset.name || asset.tag,
+      roomAreaNumber: locationCode,
+      areaName: locationDesc || roomHierarchy || location?.zone || "",
+      buildingUnit: asset.organization || siteHierarchy || "",
+      assetMainCategory:
+        asset.classDesc || asset.classCode || asset.category || "",
+      assetSubCategory: asset.categoryDesc || asset.category || "",
     };
   });
   const hasMoreAssets = assetRowsSource.length < assetTotal;
   const filterOptions = assetRegisterColumns;
-  const assetDisplayColumns = [
-    ...assetHierarchyColumns,
-    ...assetRegisterColumns,
-  ];
+  const assetDisplayColumns = assetSummaryColumns;
   const [assetExcelFilters, setAssetExcelFilters] = useState<ExcelFilterConfig>(
     {},
   );
@@ -5633,7 +5640,7 @@ function Assets({
           onScroll={handleAssetScroll}
           className="cafm-scroll-x max-h-[70vh] overflow-auto rounded-lg border border-slate-200 scrollbar-thin"
         >
-          <table className="cafm-data-table cafm-asset-table min-w-[4300px] border-collapse bg-white text-sm">
+          <table className="cafm-data-table cafm-asset-table min-w-[1500px] border-collapse bg-white text-sm">
             <thead className="sticky top-0 z-20 bg-slate-50 text-left text-xs uppercase text-slate-500 shadow-sm">
               <tr>
                 <th className="px-3 py-3">
@@ -5693,7 +5700,7 @@ function Assets({
                   {assetDisplayColumns.map(([key, label]) => (
                     <td
                       key={`${asset.id}-${key}`}
-                      className={`px-3 py-3 ${label === "LOCATION" || label === "ROOM HIERARCHY" ? "font-black text-lagoon" : ""}`}
+                      className={`px-3 py-3 ${label === "Room/Area #" ? "font-black text-lagoon" : ""}`}
                     >
                       {label === "EQUIPMENTVALUE" ? (
                         <CurrencyAmount value={asset[key]} />
