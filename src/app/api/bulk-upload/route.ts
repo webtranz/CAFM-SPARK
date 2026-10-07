@@ -44,10 +44,9 @@ const documentCategories: Record<string, string> = {
   SUPPORT_CONTRACT_SLA: "support-contracts-and-slas",
 };
 const allowedDocumentExtensions = new Set([".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".txt", ".csv", ".xlsx", ".docx", ".pptx"]);
-const allowedManualRoots = [
-  path.resolve("C:\\Users\\HP\\Documents\\FADHILI DATA FINAL\\EAM\\SYSTEM O&M MANUALS"),
-  path.resolve("C:\\Users\\HP\\Documents\\FADHILI_CAFM_UPLOAD_PACK"),
-];
+const allowedManualRoots = [process.env.CAFM_MANUAL_LIBRARY_ROOT]
+  .filter((value): value is string => Boolean(value))
+  .map((value) => path.resolve(value));
 const documentSourceCache = new Map<string, { checksum: string; ext: string; size: number }>();
 const copiedDocumentCache = new Set<string>();
 let manualLibraryManifestCache: Record<string, ManualLibraryRecord> | null = null;
@@ -416,15 +415,15 @@ async function firstSite() {
 
   return prisma.site.create({
     data: {
-      name: "Fadhili Bachelor Camp",
-      city: "Fadhili",
+      name: "SPARK",
+      city: "Not specified",
       country: "Saudi Arabia",
-      type: "Accommodation Camp",
+      type: "Facility",
       areaSqm: 0,
       buildings: {
         create: {
-          name: "Fadhili Bachelor Camp",
-          code: "FBC",
+          name: "SPARK",
+          code: "SPARK",
           floors: 1,
           areaSqm: 0,
         },
@@ -672,10 +671,10 @@ async function syncHierarchyModuleBeforeImport(module: string, rows: Row[], cont
 }
 
 async function ensureSite(row: Row = {}, context: ImportContext = {}) {
-  const name = value(row, "site", "siteName", "name", "Site") || "Fadhili Bachelor Camp";
-  const city = value(row, "city", "City") || "Fadhili";
+  const name = value(row, "site", "siteName", "name", "Site") || "SPARK";
+  const city = value(row, "city", "City") || "Not specified";
   const country = value(row, "country", "Country") || "Saudi Arabia";
-  const type = value(row, "type", "siteType", "Type") || "Accommodation Camp";
+  const type = value(row, "type", "siteType", "Type") || "Facility";
   const areaSqm = integer(value(row, "areaSqm", "area", "AreaSqm"), 0);
   const existing = await prisma.site.findUnique({ where: { name_city_country: { name, city, country } } });
   if (existing && !shouldReplace(context)) return existing;
@@ -688,7 +687,7 @@ async function ensureSite(row: Row = {}, context: ImportContext = {}) {
 
 async function ensureBuilding(row: Row = {}, siteInput?: { id: string }, context: ImportContext = {}) {
   const site = siteInput || await ensureSite(row, context);
-  const code = value(row, "buildingCode", "code", "building", "Building", "BLDG") || "FBC";
+  const code = value(row, "buildingCode", "code", "building", "Building", "BLDG") || "SPARK";
   const name = value(row, "buildingName", "name", "description", "Description") || code;
   const floors = integer(value(row, "floors", "floorCount"), 1);
   const areaSqm = integer(value(row, "areaSqm", "area", "AreaSqm"), 0);
@@ -703,12 +702,12 @@ async function ensureBuilding(row: Row = {}, siteInput?: { id: string }, context
 
 async function siteAndBuildingForAsset(location: { site?: string | null; building?: string | null; description?: string | null } | null, row: Row, context: ImportContext = {}) {
   const site = await ensureSite({
-    site: value(row, "siteCode", "SITE") || location?.site || "Fadhili Bachelor Camp",
-    city: value(row, "siteCity") || "Fadhili",
+    site: value(row, "siteCode", "SITE") || location?.site || "SPARK",
+    city: value(row, "siteCity") || "Not specified",
     country: value(row, "siteCountry") || "Saudi Arabia",
-    type: value(row, "siteType") || "Accommodation Camp",
+    type: value(row, "siteType") || "Facility",
   }, context);
-  const buildingCode = value(row, "buildingCode", "BLDG") || location?.building || "FBC";
+  const buildingCode = value(row, "buildingCode", "BLDG") || location?.building || "SPARK";
   const building = await ensureBuilding({
     code: buildingCode,
     name: location?.description || buildingCode,
@@ -719,8 +718,8 @@ async function siteAndBuildingForAsset(location: { site?: string | null; buildin
 }
 
 async function importSite(row: Row, context: ImportContext = {}) {
-  const name = value(row, "site", "siteName", "name", "Site") || "Fadhili Bachelor Camp";
-  const city = value(row, "city", "City") || "Fadhili";
+  const name = value(row, "site", "siteName", "name", "Site") || "SPARK";
+  const city = value(row, "city", "City") || "Not specified";
   const country = value(row, "country", "Country") || "Saudi Arabia";
   const existing = await prisma.site.findUnique({ where: { name_city_country: { name, city, country } } });
   if (existing && !shouldReplace(context)) return existingResult("site", existing, existing.name, existing.name);
@@ -729,7 +728,7 @@ async function importSite(row: Row, context: ImportContext = {}) {
 }
 
 async function importBuilding(row: Row, context: ImportContext = {}) {
-  const code = value(row, "buildingCode", "code", "building", "Building", "BLDG") || "FBC";
+  const code = value(row, "buildingCode", "code", "building", "Building", "BLDG") || "SPARK";
   const existing = await prisma.building.findUnique({ where: { code } });
   if (existing && !shouldReplace(context)) return existingResult("building", existing, code, existing.name);
   const site = await ensureSite(row, context);
@@ -893,14 +892,14 @@ async function importAssetAllocation(row: Row) {
 }
 
 async function ensureHousingProperty(row: Row) {
-  const code = value(row, "propertyCode", "Property Code", "property", "Property", "site", "Site") || "FBC";
-  const name = value(row, "propertyName", "Property Name", "siteName", "Site Name") || (code === "FBC" ? "Fadhili Base Camp" : code);
+  const code = value(row, "propertyCode", "Property Code", "property", "Property", "site", "Site") || "SPARK";
+  const name = value(row, "propertyName", "Property Name", "siteName", "Site Name") || code;
   return prisma.housingProperty.upsert({
     where: { code },
     update: {
       name,
       site: value(row, "site", "Site") || name,
-      city: value(row, "city", "City") || "Fadhili",
+      city: value(row, "city", "City") || "Not specified",
       manager: value(row, "manager", "Manager") || "Housing Operations",
       active: true,
     },
@@ -908,7 +907,7 @@ async function ensureHousingProperty(row: Row) {
       code,
       name,
       site: value(row, "site", "Site") || name,
-      city: value(row, "city", "City") || "Fadhili",
+      city: value(row, "city", "City") || "Not specified",
       manager: value(row, "manager", "Manager") || "Housing Operations",
       active: true,
     },
@@ -2123,7 +2122,7 @@ function locationPayload(row: Row) {
   const locationClass = cleanDisplayText(value(row, "locationClass", "Class", "class", "type")) || "Facility Location";
   const outOfService = yesNo(value(row, "outOfService", "Out of Service"), false);
   return {
-    site: meaningfulDisplayText(value(row, "site", "Site")) || "Fadhili Bachelor Camp",
+    site: meaningfulDisplayText(value(row, "site", "Site")) || "SPARK",
     zone: parentLocation,
     building: meaningfulDisplayText(row.building || row.BLDG),
     floor: meaningfulDisplayText(row.floor || row.FLOOR),

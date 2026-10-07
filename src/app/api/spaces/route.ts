@@ -24,11 +24,11 @@ async function resolveBuilding(input: z.infer<typeof schema>) {
     const building = await prisma.building.findUnique({ where: { id: input.buildingId } });
     if (building) return building;
   }
-  const code = input.buildingCode || "FBC";
+  const code = input.buildingCode || "SPARK";
   const existing = await prisma.building.findUnique({ where: { code } });
   if (existing) return existing;
-  const siteName = input.site || "Fadhili Bachelor Camp";
-  const city = input.city || "Fadhili";
+  const siteName = input.site || "SPARK";
+  const city = input.city || "Not specified";
   const country = input.country || "Saudi Arabia";
   const site = await prisma.site.upsert({
     where: { name_city_country: { name: siteName, city, country } },

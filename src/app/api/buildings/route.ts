@@ -21,8 +21,8 @@ async function resolveSite(input: z.infer<typeof schema>) {
     const site = await prisma.site.findUnique({ where: { id: input.siteId } });
     if (site) return site;
   }
-  const name = input.site || "Fadhili Bachelor Camp";
-  const city = input.city || "Fadhili";
+  const name = input.site || "SPARK";
+  const city = input.city || "Not specified";
   const country = input.country || "Saudi Arabia";
   return prisma.site.upsert({
     where: { name_city_country: { name, city, country } },
